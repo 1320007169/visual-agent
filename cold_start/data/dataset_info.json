@@ -74,5 +74,34 @@
       "system_tag": "system"
     }
   },
-
+  "visual_tool_sft_v0": {
+    "file_name": "../../data/visual_tool_sft_v0.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  },
+  "visual_tool_sft_v0_smoke": {
+    "file_name": "../../data/visual_tool_sft_v0.smoke.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  }
 }

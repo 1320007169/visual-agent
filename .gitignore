@@ -8,6 +8,8 @@
 
 tmp/
 *.log
+.venv-llamafactory/
+data/visual_tool_sft_v0*.jsonl
 
 __pycache__/
 *.py[cod]
