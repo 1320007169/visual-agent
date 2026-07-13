@@ -44,6 +44,13 @@ def _normalize_images(item: dict[str, Any]) -> list[str]:
     return [str(image)] if image else []
 
 
+def _normalize_image_meta(item: dict[str, Any]) -> list[Any]:
+    image_meta = item.get("image_meta")
+    if image_meta is None:
+        return []
+    return image_meta if isinstance(image_meta, list) else [image_meta]
+
+
 def _ensure_image_placeholders(messages: list[dict[str, str]], image_count: int) -> list[dict[str, str]]:
     if image_count == 0:
         return messages
@@ -105,8 +112,7 @@ def convert_item(item: dict[str, Any], task_type: str, uid: str | None = None) -
         "messages_raw": raw_messages,
         "tools": get_visual_tool_schemas(),
     }
-    if "image_meta" in item:
-        converted["image_meta"] = item["image_meta"]
+    converted["image_meta"] = json.dumps(_normalize_image_meta(item), ensure_ascii=False)
     if "data_type" in item:
         converted["source_data_type"] = item["data_type"]
     return converted
