@@ -88,7 +88,7 @@ else
   command -v "$LLAMAFACTORY_CLI" >/dev/null 2>&1 || die "LLaMA-Factory CLI was not found: $LLAMAFACTORY_CLI"
 fi
 
-RUNTIME_CONFIG="$(mktemp "${TMPDIR:-/tmp}/visual_tool_sft_full.XXXXXX")"
+RUNTIME_CONFIG="$(mktemp "${TMPDIR:-/tmp}/visual_tool_sft_full.XXXXXX.yaml")"
 cleanup() {
   rm -f "$RUNTIME_CONFIG"
 }

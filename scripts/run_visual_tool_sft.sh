@@ -1,24 +1,25 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/bin/bash
+
+set -o pipefail
 
 # Huawei platform paths. Override any value from the job environment if needed.
 PLATFORM_SETUP="${PLATFORM_SETUP:-1}"
 BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 ROOT_DIR="${ROOT_DIR:-$BASE/visual-agent}"
-ENV_DIR="${ENV_DIR-$BASE/envs/llamafactory}"
-MODEL_DIR="${MODEL_DIR-$BASE/models/Qwen3-VL-8B-Instruct}"
+ENV_DIR="${ENV_DIR-$BASE/conda_envs/deepeyes-sft-conda}"
+MODEL_DIR="${MODEL_DIR-$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct}"
 REPO_ROOT="$ROOT_DIR"
 PLATFORM_WORK_ROOT="$BASE"
 PLATFORM_DATASET_ROOT="${PLATFORM_DATASET_ROOT:-/opt/huawei/dataset}"
 PLATFORM_ALGORITHM_ROOT="${PLATFORM_ALGORITHM_ROOT:-/opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl}"
 PLATFORM_MODEL_ROOT="${PLATFORM_MODEL_ROOT:-/opt/huawei/quoteModel/xiaoyi_tmpstorage}"
-CUDA_HOME="${CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
+CUDA_HOME="${VISUAL_TOOL_CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
 MINICONDA_ROOT="${MINICONDA_ROOT:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3}"
 CONDA_ENV_PATH="${CONDA_ENV_PATH-$ENV_DIR}"
 CONDA_SH="${CONDA_SH:-}"
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$MODEL_DIR}"
 
-# Current target: one node with eight A100 GPUs.
+# Current target: one node with eight GPUs.
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 NNODES="${NNODES:-1}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
@@ -31,16 +32,12 @@ PRINT_HARDWARE_INFO="${PRINT_HARDWARE_INFO:-1}"
 HF_HOME="${HF_HOME:-$PLATFORM_WORK_ROOT/cache/huggingface}"
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PLATFORM_WORK_ROOT/cache/xdg}"
 TORCH_HOME="${TORCH_HOME:-$PLATFORM_WORK_ROOT/cache/torch}"
+RUN_ID="${RUN_ID:-visual_sft_$(date +%Y%m%d_%H%M%S)}"
+VISUAL_TOOL_OUTPUT_DIR="${VISUAL_TOOL_OUTPUT_DIR:-$ROOT_DIR/saves/visual_tool_sft_v0/full/sft_$RUN_ID}"
 
 die() {
   echo "error: $*" >&2
   exit 2
-}
-
-[[ -d "$REPO_ROOT" ]] || die "repository root does not exist: $REPO_ROOT"
-REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
-[[ -f "$REPO_ROOT/scripts/train_visual_tool_sft_full.sh" ]] || {
-  die "REPO_ROOT does not contain the training launcher: $REPO_ROOT"
 }
 
 ensure_symlink() {
@@ -64,27 +61,46 @@ if [[ "$PLATFORM_SETUP" == 1 ]]; then
   [[ -d "$CUDA_HOME" ]] || die "CUDA_HOME does not exist: $CUDA_HOME"
   export CUDA_HOME
   export PATH="$CUDA_HOME/bin:$PATH"
-  export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+  export LD_LIBRARY_PATH="$CONDA_ENV_PATH/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+fi
+
+[[ -d "$REPO_ROOT" ]] || die "repository root does not exist: $REPO_ROOT"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+[[ -f "$REPO_ROOT/scripts/train_visual_tool_sft_full.sh" ]] || {
+  die "REPO_ROOT does not contain the training launcher: $REPO_ROOT"
+}
+
+if [[ -n "$CONDA_ENV_PATH" ]]; then
+  if [[ -f "$CONDA_ENV_PATH/bin/activate" && ! -d "$CONDA_ENV_PATH/conda-meta" ]]; then
+    # The prepared SFT environment is a venv that reuses the platform CUDA stack.
+    set +u
+    source "$CONDA_ENV_PATH/bin/activate"
+    set -u
+  else
+    if [[ -z "$CONDA_SH" ]]; then
+      for candidate in \
+        "$MINICONDA_ROOT/etc/profile.d/conda.sh" \
+        "$HOME/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/anaconda3/etc/profile.d/conda.sh"; do
+        if [[ -f "$candidate" ]]; then
+          CONDA_SH="$candidate"
+          break
+        fi
+      done
+    fi
+    [[ -f "$CONDA_SH" ]] || die "conda.sh was not found; set CONDA_SH"
+    # Conda activation can reference unset shell variables.
+    set +u
+    source "$CONDA_SH"
+    conda activate "$CONDA_ENV_PATH"
+    set -u
+  fi
 fi
 
 if [[ -n "$CONDA_ENV_PATH" ]]; then
-  if [[ -z "$CONDA_SH" ]]; then
-    for candidate in \
-      "$MINICONDA_ROOT/etc/profile.d/conda.sh" \
-      "$HOME/miniconda3/etc/profile.d/conda.sh" \
-      "$HOME/anaconda3/etc/profile.d/conda.sh"; do
-      if [[ -f "$candidate" ]]; then
-        CONDA_SH="$candidate"
-        break
-      fi
-    done
-  fi
-  [[ -f "$CONDA_SH" ]] || die "conda.sh was not found; set CONDA_SH"
-  # Conda activation can reference unset shell variables.
-  set +u
-  source "$CONDA_SH"
-  conda activate "$CONDA_ENV_PATH"
-  set -u
+  export PATH="$CONDA_ENV_PATH/bin:$CUDA_HOME/bin:$PATH"
+  export LLAMAFACTORY_CLI="${LLAMAFACTORY_CLI:-$CONDA_ENV_PATH/bin/llamafactory-cli}"
+  export PYTHON_BIN="${PYTHON_BIN:-$CONDA_ENV_PATH/bin/python}"
 fi
 
 if [[ "$OFFLINE_MODE" == 1 ]]; then
@@ -119,7 +135,9 @@ LOG_FILE="$LOG_DIR/train-node${NODE_LOG_RANK}-$(date +%Y%m%d_%H%M%S).log"
   echo "HF_HOME: $HF_HOME"
   echo "XDG_CACHE_HOME: $XDG_CACHE_HOME"
   echo "TORCH_HOME: $TORCH_HOME"
+  echo "Visual-tool output override: ${VISUAL_TOOL_OUTPUT_DIR:-<config default>}"
   echo "Python: $(command -v python || true)"
+  echo "Torchrun: $(command -v torchrun || true)"
   echo "LLaMA-Factory: ${LLAMAFACTORY_CLI:-$(command -v llamafactory-cli || true)}"
   echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
   echo "NNODES: $NNODES"
@@ -136,5 +154,12 @@ LOG_FILE="$LOG_DIR/train-node${NODE_LOG_RANK}-$(date +%Y%m%d_%H%M%S).log"
     nvidia-smi || true
   fi
 } 2>&1 | tee -a "$LOG_FILE"
+
+if [[ -n "$VISUAL_TOOL_OUTPUT_DIR" ]]; then
+  export OUTPUT_DIR="$VISUAL_TOOL_OUTPUT_DIR"
+else
+  # ModelArts may define OUTPUT_DIR broadly; keep LLaMA-Factory on the repo config default unless explicitly overridden.
+  unset OUTPUT_DIR
+fi
 
 bash "$REPO_ROOT/scripts/train_visual_tool_sft_full.sh" 2>&1 | tee -a "$LOG_FILE"
