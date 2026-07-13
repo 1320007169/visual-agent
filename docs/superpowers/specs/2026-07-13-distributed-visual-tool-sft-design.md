@@ -53,6 +53,20 @@ The existing smoke configuration remains a short local validation path. Its trai
 
 ## Launcher Components
 
+### Huawei-platform operator run script
+
+A single-node operator shell will provide the editable, one-command entry point for the current 8-GPU Huawei environment. The default persistent work root is `/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx`, while the repository root is resolved from the script location so the checkout can be either that directory or a child directory. The shell will follow the useful operational structure of the supplied `temp.sh` reference: strict shell behavior, platform storage symlinks, CUDA 11.8 initialization, platform Miniconda activation, CUDA visibility, offline/cache switches, NCCL defaults, log capture, hardware summaries, path checks, and a complete resolved-configuration summary.
+
+The default platform mappings are:
+
+- `/opt/huawei/dataset` to `/opt/huawei/explorer-env/dataset`;
+- `/opt/huawei/dataset` to `/home/ma-user/work/dataset`;
+- `/opt/huawei/quoteModel/xiaoyi_tmpstorage` to `/home/ma-user/work/model/xiaoyi_tmpstorage`;
+- CUDA at `/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118`;
+- Miniconda at `/opt/huawei/explorer-env/dataset/Common_wl/miniconda3`.
+
+Each path can be overridden, and platform initialization can be disabled for non-Huawei environments. The script will not copy the unrelated algorithm symlink, destructive output deletion, LoRA merging, or evaluation commands from the reference. The operator script will delegate training to the generic launcher so topology and batch validation have one implementation.
+
 ### Generic training launcher
 
 `scripts/train_visual_tool_sft_full.sh` remains the user-facing training entry point. It will:
@@ -149,6 +163,7 @@ Because the local development PC does not provide the target cluster, repository
 `docs/visual_tool_sft.md` will document:
 
 - the full-SFT strategy and frozen components;
+- the single-node operator shell and its environment settings;
 - direct execution inside an existing eight-GPU allocation;
 - Slurm submission for 8, 16, and 32 GPUs;
 - required shared-storage paths;
