@@ -174,7 +174,9 @@ def test_operator_shell_contains_huawei_platform_setup_without_destructive_clean
     assert 'PLATFORM_SETUP="${PLATFORM_SETUP:-1}"' in script
     assert "/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118" in script
     assert "/opt/huawei/explorer-env/dataset/Common_wl/miniconda3" in script
+    assert "/opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl" in script
     assert "/opt/huawei/quoteModel/xiaoyi_tmpstorage" in script
+    assert "/home/ma-user/work/algorithm/synaflow_wl" in script
     assert 'MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$PLATFORM_WORK_ROOT/models/Qwen3-VL-8B-Instruct}"' in script
     assert 'HF_HOME="${HF_HOME:-$PLATFORM_WORK_ROOT/cache/huggingface}"' in script
     assert 'OFFLINE_MODE="${OFFLINE_MODE:-0}"' in script
@@ -182,7 +184,6 @@ def test_operator_shell_contains_huawei_platform_setup_without_destructive_clean
     assert "nvidia-smi" in script
     assert "train_visual_tool_sft_full.sh" in script
     assert "rm -rf" not in script
-    assert "synaflow_wl" not in script
 
 
 def test_operator_shell_can_dry_run_outside_huawei_platform(tmp_path: Path):

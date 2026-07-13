@@ -86,7 +86,7 @@ Place the checkout anywhere under that directory; the shell resolves the reposit
 - Conda environment: `$PLATFORM_WORK_ROOT/envs/llamafactory`
 - logs: `$PLATFORM_WORK_ROOT/logs/visual-tool-sft`
 
-The shell creates the same missing Huawei dataset/model-storage symlinks used by the supplied platform reference, initializes the platform CUDA 11.8 installation, activates the Conda environment, prints hardware and topology information, and starts eight processes:
+The shell creates the same missing Huawei dataset, `synaflow_wl` algorithm, and model-storage symlinks used by the supplied platform reference, initializes the platform CUDA 11.8 installation, activates the Conda environment, prints hardware and topology information, and starts eight processes:
 
 ```bash
 bash scripts/run_visual_tool_sft.sh

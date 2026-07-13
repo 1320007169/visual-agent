@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLATFORM_SETUP="${PLATFORM_SETUP:-1}"
 PLATFORM_WORK_ROOT="${PLATFORM_WORK_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 PLATFORM_DATASET_ROOT="${PLATFORM_DATASET_ROOT:-/opt/huawei/dataset}"
+PLATFORM_ALGORITHM_ROOT="${PLATFORM_ALGORITHM_ROOT:-/opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl}"
 PLATFORM_MODEL_ROOT="${PLATFORM_MODEL_ROOT:-/opt/huawei/quoteModel/xiaoyi_tmpstorage}"
 CUDA_HOME="${CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
 MINICONDA_ROOT="${MINICONDA_ROOT:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3}"
@@ -49,6 +50,7 @@ ensure_symlink() {
 if [[ "$PLATFORM_SETUP" == 1 ]]; then
   ensure_symlink "$PLATFORM_DATASET_ROOT" /opt/huawei/explorer-env/dataset
   ensure_symlink "$PLATFORM_DATASET_ROOT" /home/ma-user/work/dataset
+  ensure_symlink "$PLATFORM_ALGORITHM_ROOT" /home/ma-user/work/algorithm/synaflow_wl
   ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
   [[ -d "$CUDA_HOME" ]] || die "CUDA_HOME does not exist: $CUDA_HOME"
   export CUDA_HOME
