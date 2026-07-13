@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-
 # Huawei platform paths. Override any value from the job environment if needed.
 PLATFORM_SETUP="${PLATFORM_SETUP:-1}"
-PLATFORM_WORK_ROOT="${PLATFORM_WORK_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
+BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
+ROOT_DIR="${ROOT_DIR:-$BASE/visual-agent}"
+ENV_DIR="${ENV_DIR-$BASE/envs/llamafactory}"
+MODEL_DIR="${MODEL_DIR-$BASE/models/Qwen3-VL-8B-Instruct}"
+REPO_ROOT="$ROOT_DIR"
+PLATFORM_WORK_ROOT="$BASE"
 PLATFORM_DATASET_ROOT="${PLATFORM_DATASET_ROOT:-/opt/huawei/dataset}"
 PLATFORM_ALGORITHM_ROOT="${PLATFORM_ALGORITHM_ROOT:-/opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl}"
 PLATFORM_MODEL_ROOT="${PLATFORM_MODEL_ROOT:-/opt/huawei/quoteModel/xiaoyi_tmpstorage}"
 CUDA_HOME="${CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
 MINICONDA_ROOT="${MINICONDA_ROOT:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3}"
-CONDA_ENV_PATH="${CONDA_ENV_PATH-$PLATFORM_WORK_ROOT/envs/llamafactory}"
+CONDA_ENV_PATH="${CONDA_ENV_PATH-$ENV_DIR}"
 CONDA_SH="${CONDA_SH:-}"
-MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$PLATFORM_WORK_ROOT/models/Qwen3-VL-8B-Instruct}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$MODEL_DIR}"
 
 # Current target: one node with eight A100 GPUs.
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
@@ -32,6 +35,12 @@ TORCH_HOME="${TORCH_HOME:-$PLATFORM_WORK_ROOT/cache/torch}"
 die() {
   echo "error: $*" >&2
   exit 2
+}
+
+[[ -d "$REPO_ROOT" ]] || die "repository root does not exist: $REPO_ROOT"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+[[ -f "$REPO_ROOT/scripts/train_visual_tool_sft_full.sh" ]] || {
+  die "REPO_ROOT does not contain the training launcher: $REPO_ROOT"
 }
 
 ensure_symlink() {
@@ -100,7 +109,10 @@ LOG_FILE="$LOG_DIR/train-node${NODE_LOG_RANK}-$(date +%Y%m%d_%H%M%S).log"
   echo "Visual-tool full SFT"
   echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
   echo "Repository: $REPO_ROOT"
-  echo "Platform work root: $PLATFORM_WORK_ROOT"
+  echo "BASE: $BASE"
+  echo "ROOT_DIR: $ROOT_DIR"
+  echo "ENV_DIR: $ENV_DIR"
+  echo "MODEL_DIR: $MODEL_DIR"
   echo "CUDA_HOME: $CUDA_HOME"
   echo "Conda environment: ${CONDA_ENV_PATH:-current shell environment}"
   echo "Model: $MODEL_NAME_OR_PATH"

@@ -170,14 +170,17 @@ def test_operator_shell_contains_huawei_platform_setup_without_destructive_clean
     assert 'CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"' in script
     assert 'NPROC_PER_NODE="${NPROC_PER_NODE:-8}"' in script
     assert 'TARGET_GLOBAL_BATCH_SIZE="${TARGET_GLOBAL_BATCH_SIZE:-32}"' in script
-    assert 'PLATFORM_WORK_ROOT="${PLATFORM_WORK_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"' in script
+    assert 'BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"' in script
+    assert 'ROOT_DIR="${ROOT_DIR:-$BASE/visual-agent}"' in script
+    assert 'ENV_DIR="${ENV_DIR-$BASE/envs/llamafactory}"' in script
+    assert 'MODEL_DIR="${MODEL_DIR-$BASE/models/Qwen3-VL-8B-Instruct}"' in script
     assert 'PLATFORM_SETUP="${PLATFORM_SETUP:-1}"' in script
     assert "/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118" in script
     assert "/opt/huawei/explorer-env/dataset/Common_wl/miniconda3" in script
     assert "/opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl" in script
     assert "/opt/huawei/quoteModel/xiaoyi_tmpstorage" in script
     assert "/home/ma-user/work/algorithm/synaflow_wl" in script
-    assert 'MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$PLATFORM_WORK_ROOT/models/Qwen3-VL-8B-Instruct}"' in script
+    assert 'MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH-$MODEL_DIR}"' in script
     assert 'HF_HOME="${HF_HOME:-$PLATFORM_WORK_ROOT/cache/huggingface}"' in script
     assert 'OFFLINE_MODE="${OFFLINE_MODE:-0}"' in script
     assert "NCCL_DEBUG" in script
@@ -190,6 +193,7 @@ def test_operator_shell_can_dry_run_outside_huawei_platform(tmp_path: Path):
     env, _, _ = _launcher_env(tmp_path, nnodes=1)
     env.update(
         {
+            "ROOT_DIR": str(ROOT),
             "PLATFORM_SETUP": "0",
             "CONDA_ENV_PATH": "",
             "LOG_DIR": str(tmp_path / "logs"),
@@ -214,6 +218,41 @@ def test_operator_shell_can_dry_run_outside_huawei_platform(tmp_path: Path):
     assert "Visual-tool full SFT" in result.stdout
     assert "world_size=8" in result.stdout
     assert list((tmp_path / "logs").glob("train-node0-*.log"))
+
+
+def test_operator_shell_can_run_when_copied_outside_repository(tmp_path: Path):
+    env, _, _ = _launcher_env(tmp_path, nnodes=1)
+    copied_launcher = tmp_path / "run_visual_tool_sft.sh"
+    copied_launcher.write_bytes(
+        (ROOT / "scripts" / "run_visual_tool_sft.sh").read_bytes()
+    )
+    copied_launcher.chmod(0o755)
+    env.update(
+        {
+            "BASE": str(ROOT.parent),
+            "PLATFORM_SETUP": "0",
+            "CONDA_ENV_PATH": "",
+            "LOG_DIR": str(tmp_path / "logs"),
+            "HF_HOME": str(tmp_path / "cache" / "huggingface"),
+            "XDG_CACHE_HOME": str(tmp_path / "cache" / "xdg"),
+            "TORCH_HOME": str(tmp_path / "cache" / "torch"),
+            "PRINT_HARDWARE_INFO": "0",
+            "DRY_RUN": "1",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(copied_launcher)],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"ROOT_DIR: {ROOT}" in result.stdout
+    assert "world_size=8" in result.stdout
 
 
 def test_slurm_wrapper_requests_one_task_and_eight_gpus_per_node():

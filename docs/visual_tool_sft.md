@@ -80,8 +80,9 @@ The default persistent work root is:
 /home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx
 ```
 
-Place the checkout anywhere under that directory; the shell resolves the repository from its own location. By default it expects:
+Like the supplied Huawei platform script, the entry point derives absolute paths from that base directory. By default it expects:
 
+- checkout: `$PLATFORM_WORK_ROOT/visual-agent`
 - model: `$PLATFORM_WORK_ROOT/models/Qwen3-VL-8B-Instruct`
 - Conda environment: `$PLATFORM_WORK_ROOT/envs/llamafactory`
 - logs: `$PLATFORM_WORK_ROOT/logs/visual-tool-sft`
@@ -91,6 +92,14 @@ The shell creates the same missing Huawei dataset, `synaflow_wl` algorithm, and 
 ```bash
 bash scripts/run_visual_tool_sft.sh
 ```
+
+The entry script can be copied to any directory and run directly because it does not derive the checkout from its own location:
+
+```bash
+bash /other/directory/run_visual_tool_sft.sh
+```
+
+If the checkout is not at the default location, set `ROOT_DIR` to its absolute path.
 
 Paths can be overridden without editing the script:
 
