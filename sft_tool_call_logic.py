@@ -29,12 +29,13 @@ Visual Agent SFT data for:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PIL import Image
 
 
 Json = dict[str, Any]
+CropWriter = Callable[[Image.Image, str, int], str]
 
 
 def grounding_detect(
@@ -76,7 +77,7 @@ def sam3_segment_multi(
     groups = []
     for item in normalized_queries:
         segmented = sam3_backend.segment(image, item["query"])
-        groups.append(_segment_group(item, segmented))
+        groups.append(_segment_group(item, segmented, include_selection=False))
     return {"queries": groups, "source": "sam3"}
 
 
@@ -91,13 +92,14 @@ def sam3_crop_zoom(
     slack_ratio: float = 0.35,
     min_crop_side: int = 96,
     output_side: int = 336,
+    crop_writer: CropWriter | None = None,
 ) -> Json:
     """Localize one target with SAM3 and write one crop image."""
 
     image = _get_image(images, target_image)
     query = _require_text(query, "query")
     segmented = sam3_backend.segment(image, query)
-    target = _segment_group({"role": "target", "query": query}, segmented)
+    target = _segment_group({"role": "target", "query": query}, segmented, include_selection=True)
     crop_obs = _make_crop_zoom(
         image=image,
         selected_box=target.get("selected_box"),
@@ -108,8 +110,9 @@ def sam3_crop_zoom(
         slack_ratio=slack_ratio,
         min_crop_side=min_crop_side,
         output_side=output_side,
+        crop_writer=crop_writer,
+        text_summary="Localized the target and cropped the region for closer visual inspection.",
     )
-    target["crop_zoom"] = crop_obs
     return {
         "query": query,
         "target_image": target_image,
@@ -131,6 +134,7 @@ def sam3_crop_zoom_multi(
     slack_ratio: float = 0.35,
     min_crop_side: int = 96,
     output_side: int = 336,
+    crop_writer: CropWriter | None = None,
 ) -> Json:
     """Localize multiple targets with SAM3 and write one crop per query."""
 
@@ -141,7 +145,7 @@ def sam3_crop_zoom_multi(
     image_outputs = []
     for index, item in enumerate(normalized_queries, start=1):
         segmented = sam3_backend.segment(image, item["query"])
-        group = _segment_group(item, segmented)
+        group = _segment_group(item, segmented, include_selection=True)
         crop_obs = _make_crop_zoom(
             image=image,
             selected_box=group.get("selected_box"),
@@ -152,6 +156,8 @@ def sam3_crop_zoom_multi(
             slack_ratio=slack_ratio,
             min_crop_side=min_crop_side,
             output_side=output_side,
+            crop_writer=crop_writer,
+            text_summary=f"Cropped the localized {item['query']} region for closer visual inspection.",
         )
         group["crop_zoom"] = crop_obs
         groups.append(group)
@@ -167,6 +173,9 @@ def execute_tool_call(
     grounding_backend: Any | None = None,
     crop_dir: str | Path = "tool_crops",
     uid: str = "sample",
+    crop_writer: CropWriter | None = None,
+    min_crop_side: int = 96,
+    output_side: int = 336,
 ) -> Json:
     """Dispatch one parsed SFT tool call by name."""
 
@@ -183,29 +192,53 @@ def execute_tool_call(
     if name == "sam3_crop_zoom":
         if sam3_backend is None:
             raise ValueError("sam3_backend is required for sam3_crop_zoom")
-        return sam3_crop_zoom(images, sam3_backend=sam3_backend, crop_dir=crop_dir, uid=uid, **arguments)
+        return sam3_crop_zoom(
+            images,
+            sam3_backend=sam3_backend,
+            crop_dir=crop_dir,
+            uid=uid,
+            crop_writer=crop_writer,
+            min_crop_side=min_crop_side,
+            output_side=output_side,
+            **arguments,
+        )
     if name == "sam3_crop_zoom_multi":
         if sam3_backend is None:
             raise ValueError("sam3_backend is required for sam3_crop_zoom_multi")
-        return sam3_crop_zoom_multi(images, sam3_backend=sam3_backend, crop_dir=crop_dir, uid=uid, **arguments)
+        return sam3_crop_zoom_multi(
+            images,
+            sam3_backend=sam3_backend,
+            crop_dir=crop_dir,
+            uid=uid,
+            crop_writer=crop_writer,
+            min_crop_side=min_crop_side,
+            output_side=output_side,
+            **arguments,
+        )
     raise ValueError(f"unsupported tool call: {name!r}")
 
 
-def _segment_group(query_item: Json, segmented: Json) -> Json:
+def _segment_group(query_item: Json, segmented: Json, *, include_selection: bool) -> Json:
     boxes = _round_boxes(segmented.get("boxes") or [])
     confidence = _round_floats(segmented.get("confidence") or [])
     mask_area_px = [int(v) for v in segmented.get("mask_area_px") or []]
-    return {
+    group = {
         "role": query_item.get("role", "target"),
         "query": query_item["query"],
         "boxes": boxes,
         "confidence": confidence,
         "mask_area_px": mask_area_px,
         "count": len(boxes),
-        "selected_box": boxes[0] if boxes else None,
-        "selected_confidence": confidence[0] if confidence else None,
-        "selected_mask_area_px": mask_area_px[0] if mask_area_px else None,
     }
+    if include_selection:
+        group.update(
+            {
+                "selected_box": boxes[0] if boxes else None,
+                "selected_confidence": confidence[0] if confidence else None,
+                "selected_mask_area_px": mask_area_px[0] if mask_area_px else None,
+            }
+        )
+    return group
 
 
 def _make_crop_zoom(
@@ -219,15 +252,20 @@ def _make_crop_zoom(
     slack_ratio: float,
     min_crop_side: int,
     output_side: int,
+    crop_writer: CropWriter | None,
+    text_summary: str,
 ) -> Json:
     if selected_box is None:
         raise ValueError(f"SAM3 returned no selected box for query {query!r}")
     crop_bbox = _expanded_square_bbox(selected_box, image.size, slack_ratio, min_crop_side)
     rect = _integer_crop_rect(crop_bbox, image.size)
     crop = image.crop(rect).resize((output_side, output_side), Image.Resampling.LANCZOS)
-    crop_dir.mkdir(parents=True, exist_ok=True)
-    crop_path = crop_dir / filename
-    crop.save(crop_path, quality=95)
+    if crop_writer is None:
+        crop_dir.mkdir(parents=True, exist_ok=True)
+        crop_path = str(crop_dir / filename)
+        crop.save(crop_path, quality=95)
+    else:
+        crop_path = crop_writer(crop, filename, crop_target_image)
     image_output = {
         "target_image": crop_target_image,
         "path": str(crop_path),
@@ -242,7 +280,7 @@ def _make_crop_zoom(
         "bbox_2d": crop_bbox,
         "slack_ratio": float(slack_ratio),
         "image_outputs": [image_output],
-        "text_summary": f"Cropped the localized {query} region for closer visual inspection.",
+        "text_summary": text_summary,
     }
 
 

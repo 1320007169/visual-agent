@@ -16,6 +16,11 @@ from .base_tool import BaseTool
 from .schemas import OpenAIFunctionToolSchema
 
 
+# One rollout may call different visual tools in sequence. All tool objects
+# therefore share the image list for the same rollout/request instance ID.
+_ONLINE_VISUAL_TOOL_INSTANCES: dict[str, dict[str, Any]] = {}
+
+
 class OfflineVisualTool(BaseTool):
     """Schema-only visual tool for offline SFT and parser compatibility.
 
@@ -88,15 +93,14 @@ class OnlineVisualTool(BaseTool):
         self.api_key = config.get("api_key") or None
         self.timeout = float(config.get("timeout", 300.0))
         self.max_retries = int(config.get("max_retries", 2))
-        self._instance_dict: dict[str, dict[str, Any]] = {}
+        self._instance_dict = _ONLINE_VISUAL_TOOL_INSTANCES
 
     async def create(self, instance_id: Optional[str] = None, **kwargs) -> str:
         instance_id = instance_id or str(uuid4())
         images = kwargs.get("images") or []
-        self._instance_dict[instance_id] = {
-            "images": [_image_to_data_url(image) for image in images],
-            "calls": [],
-        }
+        state = self._instance_dict.setdefault(instance_id, {"images": [], "calls": []})
+        if images and not state["images"]:
+            state["images"].extend(_image_to_data_url(image) for image in images)
         return instance_id
 
     async def execute(self, instance_id: str, parameters: dict[str, Any], **kwargs) -> Tuple[str, float, dict]:

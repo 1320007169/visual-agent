@@ -10,12 +10,20 @@ import importlib
 import inspect
 import io
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from sft_tool_call_logic import execute_tool_call
 
 
 SUPPORTED_TOOLS = {
@@ -96,6 +104,22 @@ def _load_object(path: str):
     return getattr(importlib.import_module(module_name), object_name)
 
 
+def _resolve_sam3_image_checkpoint(model_path: str | None) -> str | None:
+    if not model_path:
+        return None
+    checkpoint = Path(model_path).expanduser()
+    if checkpoint.is_dir():
+        checkpoint = checkpoint / "sam3.pt"
+    if "multiplex" in checkpoint.name:
+        raise ToolServerError(
+            "SAM3.1 multiplex checkpoints are for video tracking and cannot back the current image tools; "
+            "set SAM3_MODEL_PATH to the SAM3 image checkpoint sam3.pt"
+        )
+    if not checkpoint.is_file():
+        raise ToolServerError(f"SAM3 image checkpoint does not exist: {checkpoint}")
+    return str(checkpoint)
+
+
 class Sam3Backend:
     """Official SAM3 image processor adapter with optional custom factory."""
 
@@ -105,9 +129,10 @@ class Sam3Backend:
         self.torch = torch
         self.device = device
         self.threshold = threshold
+        checkpoint_path = _resolve_sam3_image_checkpoint(model_path)
         factory_path = os.getenv("SAM3_FACTORY")
         if factory_path:
-            built = _load_object(factory_path)(model_path=model_path, device=device)
+            built = _load_object(factory_path)(model_path=checkpoint_path, device=device)
             if isinstance(built, tuple):
                 self.model, self.processor = built
             else:
@@ -120,11 +145,13 @@ class Sam3Backend:
             kwargs: dict[str, Any] = {}
             if "device" in signature.parameters:
                 kwargs["device"] = device
-            if model_path:
+            if checkpoint_path:
                 for name in ("checkpoint_path", "ckpt_path", "model_path"):
                     if name in signature.parameters:
-                        kwargs[name] = model_path
+                        kwargs[name] = checkpoint_path
                         break
+                if "load_from_HF" in signature.parameters:
+                    kwargs["load_from_HF"] = False
             elif "load_from_HF" in signature.parameters:
                 kwargs["load_from_HF"] = True
             self.model = build_sam3_image_model(**kwargs)
@@ -203,117 +230,36 @@ class ToolService:
     crop_size: int = 336
     minimum_crop_size: int = 96
 
-    def execute(self, name: str, arguments: dict[str, Any], images: list[Image.Image]) -> tuple[dict, list[str]]:
+    def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        images: list[Image.Image],
+        *,
+        instance_id: str = "request",
+    ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
-        target_image = arguments.get("target_image", 0)
-        if not isinstance(target_image, int) or target_image < 0 or target_image >= len(images):
-            raise ToolServerError(f"target_image {target_image!r} is outside images[0:{len(images)}]")
-        image = images[target_image]
+        output_images: list[str] = []
 
-        if name == "grounding_detect":
-            if self.grounding_dino is None:
-                raise ToolServerError("GroundingDINO backend is not loaded")
-            query = self._required_query(arguments.get("query"))
-            detected = self.grounding_dino.detect(image, query)
-            result = {"query": query, **detected, "count": len(detected["boxes"]), "source": "groundingdino"}
-            return result, []
+        def collect_crop(crop: Image.Image, filename: str, target_image: int) -> str:
+            output_images.append(encode_image(crop))
+            return f"tool://images/{target_image}/{filename}"
 
-        if self.sam3 is None:
-            raise ToolServerError("SAM3 backend is not loaded")
-        if name == "sam3_segment_multi":
-            queries = self._required_queries(arguments.get("queries"))
-            results = []
-            for item in queries:
-                segmented = self.sam3.segment(image, item["query"])
-                results.append({**item, **segmented, "count": len(segmented["boxes"])})
-            return {"queries": results}, []
-
-        if name == "sam3_crop_zoom":
-            query = self._required_query(arguments.get("query"))
-            result, crop = self._crop_one(image, query, target_image, arguments.get("slack_ratio", 0.35), len(images))
-            return result, [encode_image(crop)]
-
-        queries = self._required_queries(arguments.get("queries"))
-        results, crops = [], []
-        for offset, item in enumerate(queries):
-            result, crop = self._crop_one(
-                image, item["query"], target_image, arguments.get("slack_ratio", 0.35), len(images) + offset
+        try:
+            result = execute_tool_call(
+                {"name": name, "arguments": arguments},
+                images=images,
+                sam3_backend=self.sam3,
+                grounding_backend=self.grounding_dino,
+                uid=instance_id,
+                crop_writer=collect_crop,
+                min_crop_side=self.minimum_crop_size,
+                output_side=self.crop_size,
             )
-            result["role"] = item.get("role", "target")
-            results.append(result)
-            crops.append(encode_image(crop))
-        return {"queries": results, "source": "sam3_crop_zoom_multi"}, crops
-
-    @staticmethod
-    def _required_query(value: Any) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ToolServerError("query must be a non-empty string")
-        return value.strip()
-
-    def _required_queries(self, value: Any) -> list[dict[str, str]]:
-        if not isinstance(value, list) or not value:
-            raise ToolServerError("queries must be a non-empty list")
-        output = []
-        for item in value:
-            if not isinstance(item, dict):
-                raise ToolServerError("Each queries item must be an object")
-            output.append({"role": str(item.get("role", "target")), "query": self._required_query(item.get("query"))})
-        return output
-
-    def _crop_one(
-        self, image: Image.Image, query: str, source_index: int, slack_ratio: Any, output_index: int
-    ) -> tuple[dict[str, Any], Image.Image]:
-        segmented = self.sam3.segment(image, query)
-        if not segmented["boxes"]:
-            raise ToolServerError(f"SAM3 found no region for query {query!r}")
-        scores = segmented["confidence"] or [0.0] * len(segmented["boxes"])
-        selected = max(range(len(segmented["boxes"])), key=lambda i: scores[i])
-        box = segmented["boxes"][selected]
-        crop_box = self._expanded_square(box, image.size, float(slack_ratio))
-        crop = image.crop(tuple(crop_box)).resize((self.crop_size, self.crop_size), Image.Resampling.LANCZOS)
-        target = {
-            "role": "target",
-            "query": query,
-            **segmented,
-            "count": len(segmented["boxes"]),
-            "selected_box": box,
-            "selected_confidence": scores[selected],
-        }
-        if segmented["mask_area_px"]:
-            target["selected_mask_area_px"] = segmented["mask_area_px"][selected]
-        image_output = {
-            "target_image": output_index,
-            "width": self.crop_size,
-            "height": self.crop_size,
-            "source": "crop_zoom",
-        }
-        result = {
-            "query": query,
-            "target_image": source_index,
-            "target": target,
-            "crop_zoom": {
-                "target_image": output_index,
-                "requested_bbox_2d": box,
-                "bbox_2d": crop_box,
-                "slack_ratio": float(slack_ratio),
-                "image_outputs": [image_output],
-                "text_summary": "Localized the target and cropped the region for closer visual inspection.",
-            },
-            "image_outputs": [image_output],
-            "source": "sam3_crop_zoom",
-        }
-        return result, crop
-
-    def _expanded_square(self, box: list[float], image_size: tuple[int, int], slack_ratio: float) -> list[float]:
-        width, height = image_size
-        x1, y1, x2, y2 = box
-        side = max(x2 - x1, y2 - y1) * (1.0 + 2.0 * max(slack_ratio, 0.0))
-        side = min(max(side, self.minimum_crop_size), width, height)
-        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-        left = min(max(cx - side / 2.0, 0.0), width - side)
-        top = min(max(cy - side / 2.0, 0.0), height - side)
-        return [round(left, 4), round(top, 4), round(left + side, 4), round(top + side, 4)]
+        except (TypeError, ValueError) as exc:
+            raise ToolServerError(str(exc)) from exc
+        return result, output_images
 
 
 def load_service(backend: str) -> ToolService:
@@ -366,6 +312,7 @@ def create_app(service: ToolService):
                 payload.get("name"),
                 payload.get("arguments") or {},
                 images,
+                instance_id=str(payload.get("instance_id") or "request"),
             )
             return {
                 "status": "success",

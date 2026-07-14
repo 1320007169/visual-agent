@@ -79,6 +79,13 @@ the factory receives `model_path` and `device` and returns `(model, processor)`.
 Set the same `VISUAL_TOOL_API_KEY` on the service, inference process, and RL
 workers if the endpoint is reachable outside a trusted private network.
 
+The four tools in this repository operate on still images, so
+`SAM3_MODEL_PATH` must point to `sam3.pt` (or its containing directory).
+`sam3.1_multiplex.pt` is an official SAM3.1 video/object-multiplex checkpoint;
+it is downloaded for future video support but is intentionally rejected by
+the current image-tool server instead of being loaded into an incompatible
+image architecture.
+
 ```http
 POST /execute
 Content-Type: application/json
