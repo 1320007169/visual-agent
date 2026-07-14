@@ -17,6 +17,7 @@ data/Visual_Agent/
 Visual_Agent/
 images/
 images
+model/
 
 __pycache__/
 *.py[cod]
