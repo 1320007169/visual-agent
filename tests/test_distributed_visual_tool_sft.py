@@ -172,8 +172,11 @@ def test_operator_shell_contains_huawei_platform_setup_without_destructive_clean
     assert 'TARGET_GLOBAL_BATCH_SIZE="${TARGET_GLOBAL_BATCH_SIZE:-32}"' in script
     assert 'BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"' in script
     assert 'ROOT_DIR="${ROOT_DIR:-$BASE/visual-agent}"' in script
-    assert 'ENV_DIR="${ENV_DIR-$BASE/envs/llamafactory}"' in script
-    assert 'MODEL_DIR="${MODEL_DIR-$BASE/models/Qwen3-VL-8B-Instruct}"' in script
+    assert 'ENV_DIR="${ENV_DIR-$BASE/conda_envs/deepeyes-sft-conda}"' in script
+    assert 'MODEL_DIR="${MODEL_DIR-$BASE/DeepEyesV2/models/Qwen2.5-VL-7B-Instruct}"' in script
+    qwen3_script = (ROOT / "scripts" / "run_visual_tool_sft_qwen3.sh").read_text(encoding="utf-8")
+    assert 'MODEL_DIR="${MODEL_DIR-$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct}"' in qwen3_script
+    assert "Visual-agent Qwen3-VL SFT launcher" in qwen3_script
     assert 'PLATFORM_SETUP="${PLATFORM_SETUP:-1}"' in script
     assert "/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118" in script
     assert "/opt/huawei/explorer-env/dataset/Common_wl/miniconda3" in script
@@ -215,7 +218,7 @@ def test_operator_shell_can_dry_run_outside_huawei_platform(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Visual-tool full SFT" in result.stdout
+    assert "Visual-agent Qwen2.5-VL SFT launcher" in result.stdout
     assert "world_size=8" in result.stdout
     assert list((tmp_path / "logs").glob("train-node0-*.log"))
 

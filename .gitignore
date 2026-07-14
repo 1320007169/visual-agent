@@ -9,8 +9,14 @@
 tmp/
 *.log
 .venv-llamafactory/
+saves/
+**/checkpoint-*/
+**/.ipynb_checkpoints/
 data/visual_tool_sft_v0*.jsonl
 data/Visual_Agent/
+Visual_Agent/
+images/
+images
 
 __pycache__/
 *.py[cod]
