@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import asyncio
+import base64
 import heapq
 import importlib
+import io
 import itertools
 import json
 import logging
 import time
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -37,6 +40,41 @@ from verl.utils import hf_tokenizer
 from verl.utils.fs import copy_to_local
 
 logger = logging.getLogger(__file__)
+TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+
+
+def _image_to_data_url(image: Any) -> str:
+    if isinstance(image, str) and image.startswith(("data:image/", "http://", "https://")):
+        return image
+    if isinstance(image, bytes):
+        data, mime = image, "image/jpeg"
+    elif hasattr(image, "save"):
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        data, mime = buffer.getvalue(), "image/png"
+    else:
+        raise TypeError(f"Unsupported rollout image type: {type(image).__name__}")
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _attach_images_to_messages(messages: List[Dict[str, Any]], images: List[Any]) -> None:
+    """Replace Qwen chat-template image placeholders for OpenAI HTTP serving."""
+    image_iter = iter(images)
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        normalized = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image":
+                try:
+                    image = next(image_iter)
+                except StopIteration as exc:
+                    raise ValueError("Prompt contains more image placeholders than sample images") from exc
+                normalized.append({"type": "image_url", "image_url": {"url": _image_to_data_url(image)}})
+            else:
+                normalized.append(part)
+        message["content"] = normalized
 
 
 class CompletionCallback(ABC):
@@ -112,16 +150,27 @@ class ToolCompletionCallback(CompletionCallback):
             return
 
         # STEP 1: check if the model called tools
-        if finish_reason != "tool_calls":
+        native_tool_calls = completions.choices[0].message.tool_calls or []
+        xml_tool_calls = []
+        if not native_tool_calls and message.get("content"):
+            for raw_call in TOOL_CALL_RE.findall(message["content"]):
+                try:
+                    call = json.loads(raw_call)
+                    if isinstance(call.get("name"), str) and isinstance(call.get("arguments", {}), dict):
+                        xml_tool_calls.append(call)
+                except json.JSONDecodeError:
+                    logger.warning("Ignoring malformed XML tool call: %s", raw_call[:500])
+
+        if finish_reason != "tool_calls" and not xml_tool_calls:
             print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] No tool called, done!")
             return
 
         # STEP 2: call tools
-        tool_calls = completions.choices[0].message.tool_calls
+        tool_calls = native_tool_calls or xml_tool_calls
         print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Call {len(tool_calls)} tools")
         tasks = []
         for tool_call in tool_calls:
-            tasks.append(self._call_tool(tool_call))
+            tasks.append(self._call_tool(tool_call, info, xml_mode=not bool(native_tool_calls)))
         tool_responses = await asyncio.gather(*tasks)
         if any(isinstance(item, Exception) for item in tool_responses):
             print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Error when calling tools, done!")
@@ -131,13 +180,21 @@ class ToolCompletionCallback(CompletionCallback):
         # STEP 3: resubmit completion request with tool responses
         self.scheduler.submit_chat_completions(messages=messages, request_id=completions.id, info=info)
 
-    async def _call_tool(self, tool_call) -> Dict[str, str]:
+    async def _call_tool(self, tool_call, info: Dict[str, Any], *, xml_mode: bool = False) -> Dict[str, Any]:
         """Call tool and return tool response."""
-        tool_name = tool_call.function.name
-        tool_args = json.loads(tool_call.function.arguments)
+        if xml_mode:
+            tool_name = tool_call["name"]
+            tool_args = tool_call.get("arguments", {})
+            tool_call_id = None
+        else:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+            tool_call_id = tool_call.id
+        if tool_name not in self.tools:
+            raise KeyError(f"Model requested unknown tool: {tool_name}")
         tool = self.tools[tool_name]
 
-        instance_id = await tool.create()
+        instance_id = await tool.create(images=info.get("images", []))
         try:
             tool_response, tool_reward_score, tool_metrics = await tool.execute(instance_id, tool_args)
         except Exception as e:
@@ -146,11 +203,20 @@ class ToolCompletionCallback(CompletionCallback):
         finally:
             await tool.release(instance_id)
 
-        return {
-            "role": "tool",
-            "content": tool_response,
-            "tool_call_id": tool_call.id,
-        }
+        if xml_mode:
+            text = f"<tool_response>\n{tool_response}\n</tool_response>"
+            returned_images = tool_metrics.get("returned_images", [])
+            if returned_images:
+                info.setdefault("images", []).extend(returned_images)
+                return {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text},
+                        *[{"type": "image_url", "image_url": {"url": image}} for image in returned_images],
+                    ],
+                }
+            return {"role": "user", "content": text}
+        return {"role": "tool", "content": tool_response, "tool_call_id": tool_call_id}
 
     def postprocess(self, batch: DataProto, batch_conversations: List[List[Dict[str, str]]], n: int) -> DataProto:
         # NOTE: consistent with batch version of generate_sequences in vllm_rollout_spmd.py
@@ -232,12 +298,24 @@ class ToolCompletionCallback(CompletionCallback):
                     result.extend(group)
             return result
 
+        def response_role(response):
+            content = response.get("content", "")
+            if isinstance(content, list):
+                content = "\n".join(
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                )
+            if response.get("role") == "tool" or "<tool_response>" in str(content):
+                return "tool"
+            return response.get("role")
+
         loss_mask = attention_mask.clone()
         for i in range(batch_size):
             responses = batch_conversations[i][len(raw_prompts[i]) :]
             assert len(responses) > 0, f"responses is empty: {responses}"
 
-            roles = deduplicate_adjacent_tool_calls([response["role"] for response in responses])
+            roles = deduplicate_adjacent_tool_calls([response_role(response) for response in responses])
             # Each turn should be: [BOS]...[EOS]
             eos_indices = input_ids[i].eq(self.tokenizer.eos_token_id).nonzero().squeeze(1)[: len(roles)]
             for j in range(len(roles)):
@@ -389,6 +467,13 @@ class ChatCompletionScheduler:
         for batch_index, conversation in enumerate(batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0)):
             # raw_prompt: [{"role": "user", "content": ""}, ["role": "assistant", "content"], ...]
             batch_conversations[batch_index] = conversation.tolist()
+            source_index = batch_index // n
+            images = []
+            if "origin_multi_modal_data" in batch.non_tensor_batch:
+                mm_data = batch.non_tensor_batch["origin_multi_modal_data"][source_index]
+                if isinstance(mm_data, dict):
+                    images = list(mm_data.get("image") or [])
+            _attach_images_to_messages(batch_conversations[batch_index], images)
 
             tasks.append(
                 asyncio.create_task(
@@ -396,6 +481,7 @@ class ChatCompletionScheduler:
                         messages=batch_conversations[batch_index],
                         request_id=None,
                         sampling_params=kwargs,
+                        images=images,
                     )
                 )
             )
@@ -406,13 +492,20 @@ class ChatCompletionScheduler:
         print("[ChatCompletionScheduler] generate_sequences done")
         return output_batch
 
-    async def _submit_chat_completions_semaphore(self, messages: List[Dict[str, str]], request_id: str, sampling_params: Dict[str, Any]):
+    async def _submit_chat_completions_semaphore(
+        self,
+        messages: List[Dict[str, str]],
+        request_id: str,
+        sampling_params: Dict[str, Any],
+        images: List[Any] | None = None,
+    ):
         done = asyncio.Event()
 
         info = {
             "__done__": done,
             "__depth__": 0,  # indicate how many ongoing completion requests
             "__sampling_params__": sampling_params,
+            "images": images or [],
         }
 
         self.submit_chat_completions(messages=messages, request_id=request_id, info=info)

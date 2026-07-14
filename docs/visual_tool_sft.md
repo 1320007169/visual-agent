@@ -26,7 +26,109 @@ The training rows use LLaMA-Factory ShareGPT formatting with `messages` and `ima
 - `sam3_crop_zoom`
 - `sam3_crop_zoom_multi`
 
-The first stage is offline SFT only. The visual tools are registered as schema-only tools in `reinforcement_learning/verl/tools/visual_tool.py` and `reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_config.yaml`; they intentionally do not call SAM3 or GroundingDINO.
+The first stage is offline SFT only. Its tool calls and tool responses are read
+entirely from the JSONL trajectories; SFT does not start or contact SAM3 or
+GroundingDINO. The online executor in
+`reinforcement_learning/verl/tools/visual_tool.py` and the RL tool config are
+used only by RL rollout and inference.
+
+## Online inference and RL tools
+
+Inference and RL use the same HTTP contract. Deploy SAM3/GroundingDINO behind
+one gateway and set `VISUAL_TOOL_API_BASE` (default
+`http://127.0.0.1:9000`):
+
+Install the service dependencies in a dedicated environment. The official
+SAM3 repository/package must provide `sam3.model_builder` and
+`sam3.model.sam3_image_processor`:
+
+```bash
+pip install -r requirements-visual-tools.txt
+pip install -e /path/to/official-sam3
+```
+
+Start both models in one service. The example assigns one GPU to each model:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 \
+SAM3_DEVICE=cuda:0 \
+GROUNDING_DINO_DEVICE=cuda:1 \
+SAM3_MODEL_PATH=/path/to/sam3/checkpoint.pt \
+GROUNDING_DINO_MODEL_PATH=/path/to/grounding-dino-base \
+bash scripts/serve_visual_tools.sh
+
+curl http://127.0.0.1:9000/health
+```
+
+On a single A100 80GB, both can be assigned to `cuda:0` if they fit:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+SAM3_DEVICE=cuda:0 \
+GROUNDING_DINO_DEVICE=cuda:0 \
+SAM3_MODEL_PATH=/path/to/sam3/checkpoint.pt \
+GROUNDING_DINO_MODEL_PATH=/path/to/grounding-dino-base \
+bash scripts/serve_visual_tools.sh
+```
+
+The service is implemented in `scripts/visual_tool_server.py`. SAM3 calls are
+serialized with a model lock, as are GroundingDINO calls, while the two models
+can execute concurrently on separate GPUs. For an installation whose SAM3 API
+differs from the official processor interface, set `SAM3_FACTORY=module:function`;
+the factory receives `model_path` and `device` and returns `(model, processor)`.
+Set the same `VISUAL_TOOL_API_KEY` on the service, inference process, and RL
+workers if the endpoint is reachable outside a trusted private network.
+
+```http
+POST /execute
+Content-Type: application/json
+
+{
+  "instance_id": "rollout-or-request-id",
+  "name": "sam3_crop_zoom",
+  "arguments": {"query": "red car", "target_image": 0, "slack_ratio": 0.15},
+  "images": ["data:image/png;base64,..."]
+}
+```
+
+The response is:
+
+```json
+{
+  "status": "success",
+  "result": {"boxes": []},
+  "images": ["data:image/png;base64,..."],
+  "metrics": {"latency_ms": 120}
+}
+```
+
+RL loads
+`reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_config.yaml`.
+It accepts both OpenAI-native tool calls and the XML `<tool_call>` format used
+by this SFT dataset. Original sample images are attached to every online tool
+request. Set `actor_rollout_ref.rollout.multi_turn.tool_config_path` to that
+file and enable multi-turn rollout in the RL command.
+
+For standalone inference, first serve the fine-tuned checkpoint with vLLM or
+SGLang, then run:
+
+```bash
+MODEL_PATH=/path/to/checkpoint \
+CUDA_VISIBLE_DEVICES=0 \
+bash scripts/serve_visual_agent_model.sh
+
+VISUAL_AGENT_API_BASE=http://127.0.0.1:8000/v1 \
+VISUAL_TOOL_API_BASE=http://127.0.0.1:9000 \
+python scripts/visual_agent_inference.py \
+  --image /path/to/image.jpg \
+  --question "How many red cars are visible?"
+```
+
+For Qwen2.5-VL-7B on an A100 80GB, model serving can normally start with
+`TENSOR_PARALLEL_SIZE=1`. Increase it only for a larger checkpoint or when
+latency/memory measurements justify tensor parallelism. RL GPUs, model-serving
+GPUs, and SAM3/GroundingDINO GPUs should be assigned disjoint
+`CUDA_VISIBLE_DEVICES` sets.
 
 ## Commands
 

@@ -10,6 +10,7 @@ tmp/
 *.log
 .venv-llamafactory/
 data/visual_tool_sft_v0*.jsonl
+data/Visual_Agent/
 
 __pycache__/
 *.py[cod]

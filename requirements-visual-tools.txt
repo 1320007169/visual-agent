@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+numpy>=1.26
+pillow>=10.4
+torch>=2.5
+transformers>=4.49
+uvicorn[standard]>=0.32
+
+# Install Meta SAM3 separately from its official repository/package so that
+# `sam3.model_builder` and `sam3.model.sam3_image_processor` are importable.

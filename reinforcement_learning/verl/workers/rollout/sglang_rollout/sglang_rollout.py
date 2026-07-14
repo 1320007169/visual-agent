@@ -1032,7 +1032,15 @@ class SGLangRollout(BaseRollout):
         for data_idx, raw_prompt in enumerate(prompts.non_tensor_batch["raw_prompt"]):
             for rollout_offset in range(n):
                 if self._tool_schemas:
-                    _tools_kwargs = prompts.non_tensor_batch["tools_kwargs"][data_idx]
+                    configured_kwargs = prompts.non_tensor_batch.get("tools_kwargs", [{}] * len(prompts))[data_idx]
+                    _tools_kwargs = deepcopy(configured_kwargs) if configured_kwargs else {
+                        name: {} for name in self._tool_map
+                    }
+                    origin_mm_data = prompts.non_tensor_batch.get("origin_multi_modal_data", [{}] * len(prompts))[data_idx]
+                    origin_images = origin_mm_data.get("image", []) if isinstance(origin_mm_data, dict) else []
+                    for tool_name in _tools_kwargs:
+                        create_kwargs = _tools_kwargs[tool_name].setdefault("create_kwargs", {})
+                        create_kwargs.setdefault("images", origin_images)
                     _tool_schemas = [self._tool_map[k].get_openai_tool_schema() for k in _tools_kwargs.keys()]
                     _input_ids = None
                     _attention_mask = None
