@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
+import binascii
+import os
 from io import BytesIO
 from typing import Optional, Union
 
@@ -20,12 +23,59 @@ from PIL import Image
 from qwen_vl_utils import fetch_image, fetch_video
 
 
+def merge_multi_modal_inputs(base: dict, extra: dict) -> dict:
+    """Merge per-sample multimodal processor outputs in image order."""
+    merged = dict(base or {})
+    for key, value in (extra or {}).items():
+        if key not in merged:
+            merged[key] = value
+        elif torch.is_tensor(merged[key]) and torch.is_tensor(value):
+            merged[key] = torch.cat((merged[key], value), dim=0)
+        elif isinstance(merged[key], list) and isinstance(value, list):
+            merged[key] = [*merged[key], *value]
+        else:
+            raise TypeError(
+                f"cannot merge multimodal field {key!r}: "
+                f"{type(merged[key]).__name__} and {type(value).__name__}"
+            )
+    return merged
+
+
+def _decode_inline_image(image):
+    """Decode the base64 image strings used by the Thyme RL parquet files."""
+    if not isinstance(image, str):
+        return image
+
+    payload = image
+    if image.startswith("data:image/"):
+        _, separator, payload = image.partition(",")
+        if not separator:
+            return image
+    elif image.startswith(("http://", "https://", "file://")) or os.path.exists(os.path.expanduser(image)):
+        return image
+    elif len(image) < 128:
+        return image
+
+    try:
+        raw = base64.b64decode(payload, validate=True)
+        decoded = Image.open(BytesIO(raw))
+        decoded.load()
+        return decoded
+    except (binascii.Error, ValueError, OSError):
+        return image
+
+
 def process_raw_image(image: dict):
-    from PIL import Image
-    from io import BytesIO
+    image = _decode_inline_image(image)
 
     if isinstance(image, dict):
-        image = Image.open(BytesIO(image['bytes']))
+        if "bytes" in image:
+            image = Image.open(BytesIO(image["bytes"]))
+        elif "image" in image:
+            image = image["image"]
+
+    if isinstance(image, str) and os.path.isfile(os.path.expanduser(image)):
+        image = Image.open(os.path.expanduser(image))
 
     if isinstance(image, Image.Image):
         return image.convert("RGB")
@@ -36,8 +86,21 @@ def process_image(image: Union[dict, Image.Image]) -> Image.Image:
     # if isinstance(image, dict) and 'bytes' in image.keys():
     #     image_object = Image.open(BytesIO(image['bytes']))
 
+    image = _decode_inline_image(image)
+
     if isinstance(image, Image.Image):
         return image.convert("RGB")
+
+    if isinstance(image, str):
+        image_spec = {"image": os.path.expanduser(image)}
+        max_pixels = os.environ.get("VISUAL_AGENT_IMAGE_MAX_PIXELS")
+        min_pixels = os.environ.get("VISUAL_AGENT_IMAGE_MIN_PIXELS")
+        if max_pixels:
+            image_spec["max_pixels"] = int(max_pixels)
+        if min_pixels:
+            image_spec["min_pixels"] = int(min_pixels)
+        patch_size = int(os.environ.get("VISUAL_AGENT_IMAGE_PATCH_SIZE", "14"))
+        return fetch_image(image_spec, image_patch_size=patch_size)
 
     if "bytes" in image:
         assert "image" not in image, "Cannot have both `bytes` and `image`"

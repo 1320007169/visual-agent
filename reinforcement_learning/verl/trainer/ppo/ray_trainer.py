@@ -20,6 +20,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import time
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -624,6 +625,9 @@ class RayPPOTrainer:
             if 'raw_prompt' in test_batch.non_tensor_batch.keys():
                 test_gen_batch.non_tensor_batch['raw_prompt'] = test_batch.non_tensor_batch.pop('raw_prompt')
 
+            if self.config.actor_rollout_ref.rollout.multi_turn.enable and "origin_multi_modal_data" in test_batch.non_tensor_batch:
+                test_gen_batch.non_tensor_batch["origin_multi_modal_data"] = test_batch.non_tensor_batch["origin_multi_modal_data"]
+
             if self.config.actor_rollout_ref.rollout.agent.activate_agent:
                 tool_name_key = self.config.actor_rollout_ref.rollout.agent.tool_name_key
                 if tool_name_key and tool_name_key in test_batch.non_tensor_batch.keys():
@@ -936,6 +940,8 @@ class RayPPOTrainer:
 
         # add tqdm
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
+        run_start_step = self.global_steps
+        run_start_time = time.time()
 
         # we start from step 1
         self.global_steps += 1
@@ -976,6 +982,9 @@ class RayPPOTrainer:
                     print(' [DEBUG raw prompt] raw_prompt pop into gen_batch')
 
                 print(f' [DEBUG config] config={self.config.actor_rollout_ref.rollout.agent}')
+                if self.config.actor_rollout_ref.rollout.multi_turn.enable and "origin_multi_modal_data" in batch.non_tensor_batch:
+                    gen_batch.non_tensor_batch["origin_multi_modal_data"] = batch.non_tensor_batch["origin_multi_modal_data"]
+
                 if self.config.actor_rollout_ref.rollout.agent.activate_agent:
                     tool_name_key = self.config.actor_rollout_ref.rollout.agent.tool_name_key
                     if tool_name_key and tool_name_key in batch.non_tensor_batch.keys():
@@ -1025,6 +1034,29 @@ class RayPPOTrainer:
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
+
+                    # Multi-turn visual tools may append crop images to the
+                    # response. Merge their processor outputs with each
+                    # sample's original image inputs before actor log-prob.
+                    if "rollout_multi_modal_inputs" in batch.non_tensor_batch:
+                        from verl.utils.dataset.vision_utils import merge_multi_modal_inputs
+
+                        rollout_mm_inputs = batch.non_tensor_batch.pop("rollout_multi_modal_inputs")
+                        original_mm_inputs = batch.non_tensor_batch.get("multi_modal_inputs")
+                        if original_mm_inputs is None:
+                            original_mm_inputs = np.array([{} for _ in range(len(batch))], dtype=object)
+                        if len(original_mm_inputs) != len(rollout_mm_inputs):
+                            raise ValueError(
+                                "multimodal batch size mismatch after rollout: "
+                                f"original={len(original_mm_inputs)}, returned={len(rollout_mm_inputs)}"
+                            )
+                        batch.non_tensor_batch["multi_modal_inputs"] = np.array(
+                            [
+                                merge_multi_modal_inputs(original, returned)
+                                for original, returned in zip(original_mm_inputs, rollout_mm_inputs)
+                            ],
+                            dtype=object,
+                        )
 
                     batch.batch["response_mask"] = compute_response_mask(batch)
                     # Balance the number of valid tokens across DP ranks.
@@ -1190,6 +1222,22 @@ class RayPPOTrainer:
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+
+                # Persist ETA as ordinary numeric metrics. tqdm also displays an
+                # ETA, but carriage-return progress bars are often collapsed or
+                # fragmented by ModelArts log collection.
+                elapsed_seconds = time.time() - run_start_time
+                completed_steps = max(1, self.global_steps - run_start_step)
+                remaining_steps = max(0, self.total_training_steps - self.global_steps)
+                eta_seconds = elapsed_seconds / completed_steps * remaining_steps
+                metrics.update(
+                    {
+                        "training/elapsed_seconds": elapsed_seconds,
+                        "training/remaining_steps": remaining_steps,
+                        "training/eta_seconds": eta_seconds,
+                        "training/eta_minutes": eta_seconds / 60.0,
+                    }
+                )
 
                 if self.config.actor_rollout_ref.rollout.agent.activate_agent:
                     metrics.update(compute_agent_metrics(batch=batch))

@@ -608,7 +608,16 @@ api_models = {
         max_tokens=2048, 
         temperature=0., 
         verbose=True,
-    )
+    ),
+    'VisualAgent-vllm': partial(
+        VisualAgentAPI,
+        api_base='http://127.0.0.1:8000/v1',
+        tool_api_base='http://127.0.0.1:9000',
+        max_turns=8,
+        max_tokens=4096,
+        temperature=0.,
+        verbose=False,
+    ),
 }
 
 import copy as cp

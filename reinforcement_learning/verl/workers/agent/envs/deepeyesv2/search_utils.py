@@ -1,17 +1,30 @@
 import json
 import os
-from PIL import Image
 import random
 import time
+import warnings
+from pathlib import Path
 
-mmsearch_r1_cache_json_path_list = [
-    '../../../../../../data/search_cache/fvqa_train_image_search_results_cache.json',
-]
+from PIL import Image
+
+_repo_root = Path(__file__).resolve().parents[6]
+_default_cache_path = _repo_root / 'data/search_cache/fvqa_train_image_search_results_cache.json'
+_configured_cache_paths = os.getenv('DEEPEYES_SEARCH_CACHE_PATHS')
+mmsearch_r1_cache_json_path_list = (
+    [Path(path).expanduser() for path in _configured_cache_paths.split(os.pathsep) if path]
+    if _configured_cache_paths
+    else [_default_cache_path]
+)
 
 mmsearch_r1_cache_json = {}
 for cache_json_path in mmsearch_r1_cache_json_path_list:
-    with open(cache_json_path, 'r') as f:
-        mmsearch_r1_cache_json.update(json.load(f))
+    if not cache_json_path.is_file():
+        continue
+    try:
+        with cache_json_path.open('r', encoding='utf-8') as f:
+            mmsearch_r1_cache_json.update(json.load(f))
+    except (OSError, json.JSONDecodeError) as exc:
+        warnings.warn(f'Failed to load DeepEyes search cache {cache_json_path}: {exc}', stacklevel=1)
 
 # We just show the search function here, which is a placeholder.
 # You can replace it with your actual search implementation.
@@ -46,7 +59,7 @@ def search(query, size=5):
     return result
 
 def image_search(query, data_idx=None):
-    if 'fvqa' in data_idx:
+    if data_idx and 'fvqa' in str(data_idx):
         cached_data = mmsearch_r1_cache_json.get(data_idx, {})
         if not cached_data:
             return 'Error'

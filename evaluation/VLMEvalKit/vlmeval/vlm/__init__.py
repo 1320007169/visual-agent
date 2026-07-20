@@ -2,6 +2,19 @@ import torch
 
 torch.set_grad_enabled(False)
 torch.manual_seed(1234)
+
+
+def _unavailable_model(name, module):
+    class UnavailableModel:
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                f"{name} is unavailable because this VLMEvalKit snapshot is missing {module}"
+            )
+
+    UnavailableModel.__name__ = name
+    return UnavailableModel
+
+
 from .aria import Aria
 from .base import BaseModel
 from .hawk_vl import HawkVL
@@ -33,8 +46,18 @@ from .mplug_owl2 import mPLUG_Owl2
 from .omnilmm import OmniLMM12B
 from .open_flamingo import OpenFlamingo
 from .pandagpt import PandaGPT
-from .qwen_vl import QwenVL, QwenVLChat
-from .qwen2_vl import Qwen2VLChat, Qwen2VLChatAguvis
+try:
+    from .qwen_vl import QwenVL, QwenVLChat
+except ModuleNotFoundError:
+    QwenVL = _unavailable_model("QwenVL", "vlmeval.vlm.qwen_vl")
+    QwenVLChat = _unavailable_model("QwenVLChat", "vlmeval.vlm.qwen_vl")
+try:
+    from .qwen2_vl import Qwen2VLChat, Qwen2VLChatAguvis
+except ModuleNotFoundError:
+    Qwen2VLChat = _unavailable_model("Qwen2VLChat", "vlmeval.vlm.qwen2_vl")
+    Qwen2VLChatAguvis = _unavailable_model(
+        "Qwen2VLChatAguvis", "vlmeval.vlm.qwen2_vl"
+    )
 from .transcore_m import TransCoreM
 from .visualglm import VisualGLM
 from .xcomposer import (
@@ -45,7 +68,10 @@ from .xcomposer import (
     XComposer2d5,
 )
 from .yi_vl import Yi_VL
-from .internvl import InternVLChat
+try:
+    from .internvl import InternVLChat
+except ModuleNotFoundError:
+    InternVLChat = _unavailable_model("InternVLChat", "vlmeval.vlm.internvl")
 from .deepseek_vl import DeepSeekVL
 from .deepseek_vl2 import DeepSeekVL2
 from .janus import Janus
@@ -94,15 +120,27 @@ from .ross import Ross
 from .ola import Ola
 from .x_vl import X_VL_HF
 from .ursa import UrsaChat
-from .vlm_r1 import VLMR1Chat
+try:
+    from .vlm_r1 import VLMR1Chat
+except ModuleNotFoundError:
+    VLMR1Chat = _unavailable_model("VLMR1Chat", "vlmeval.vlm.qwen2_vl")
 from .aki import AKI
 from .ristretto import Ristretto
-from .vlaa_thinker import VLAAThinkerChat
+try:
+    from .vlaa_thinker import VLAAThinkerChat
+except ModuleNotFoundError:
+    VLAAThinkerChat = _unavailable_model("VLAAThinkerChat", "vlmeval.vlm.qwen2_vl")
 from .kimi_vl import KimiVL
-from .wethink_vl import WeThinkVL
+try:
+    from .wethink_vl import WeThinkVL
+except ModuleNotFoundError:
+    WeThinkVL = _unavailable_model("WeThinkVL", "vlmeval.vlm.qwen2_vl")
 from .flash_vl import FlashVL
 from .oryx import Oryx
-from .treevgr import TreeVGR
+try:
+    from .treevgr import TreeVGR
+except ModuleNotFoundError:
+    TreeVGR = _unavailable_model("TreeVGR", "vlmeval.vlm.qwen2_vl")
 from .varco_vision import VarcoVision
 from .qtunevl import (
     QTuneVL,

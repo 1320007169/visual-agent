@@ -36,7 +36,7 @@ from tensordict import TensorDict
 
 from verl.protocol import DataProto
 from verl.tools.base_tool import initialize_tools_from_config
-from verl.utils import hf_tokenizer
+from verl.utils import hf_processor, hf_tokenizer
 from verl.utils.fs import copy_to_local
 
 logger = logging.getLogger(__file__)
@@ -76,6 +76,46 @@ def _attach_images_to_messages(messages: List[Dict[str, Any]], images: List[Any]
                 normalized.append(part)
         message["content"] = normalized
 
+def _collect_message_images(messages: List[Dict[str, Any]]) -> List[Any]:
+    """Collect OpenAI image parts from a slice of a conversation."""
+    images = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                continue
+            image_url = part.get("image_url")
+            if isinstance(image_url, dict):
+                image_url = image_url.get("url")
+            if image_url is not None:
+                images.append(image_url)
+    return images
+
+
+def _encode_response_with_images(tokenizer, processor, response_text: str, images: List[Any]):
+    """Tokenize a response and build matching features for returned images."""
+    if not images:
+        encoded = tokenizer(response_text, return_tensors="pt", add_special_tokens=False)
+        return encoded["input_ids"][0], encoded["attention_mask"][0], {}
+    if processor is None:
+        raise RuntimeError("a multimodal processor is required for tool-returned images")
+
+    from verl.utils.dataset.vision_utils import process_image
+
+    model_inputs = processor(
+        text=[response_text],
+        images=[process_image(image) for image in images],
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
+    input_ids = model_inputs.pop("input_ids")[0]
+    attention_mask = model_inputs.pop("attention_mask")[0]
+    multi_modal_inputs = dict(model_inputs)
+    multi_modal_inputs.pop("second_per_grid_ts", None)
+    return input_ids, attention_mask, multi_modal_inputs
+
 
 class CompletionCallback(ABC):
     def __init__(self, config: DictConfig, scheduler: "ChatCompletionScheduler"):
@@ -92,6 +132,7 @@ class CompletionCallback(ABC):
 
         local_path = copy_to_local(config.actor_rollout_ref.model.path)
         self.tokenizer = hf_tokenizer(local_path, trust_remote_code=True)
+        self.processor = hf_processor(local_path, trust_remote_code=True, use_fast=True)
 
     @property
     def tool_schemas(self):
@@ -203,11 +244,13 @@ class ToolCompletionCallback(CompletionCallback):
         finally:
             await tool.release(instance_id)
 
+        returned_images = tool_metrics.get("returned_images", [])
+        if returned_images:
+            info.setdefault("images", []).extend(returned_images)
+
         if xml_mode:
             text = f"<tool_response>\n{tool_response}\n</tool_response>"
-            returned_images = tool_metrics.get("returned_images", [])
             if returned_images:
-                info.setdefault("images", []).extend(returned_images)
                 return {
                     "role": "user",
                     "content": [
@@ -216,6 +259,19 @@ class ToolCompletionCallback(CompletionCallback):
                     ],
                 }
             return {"role": "user", "content": text}
+        if returned_images:
+            # Native/Hermes tool calls must return crop images in the tool
+            # message itself. Merely extending ``info["images"]`` keeps the
+            # images in scheduler state, but the next OpenAI chat request only
+            # sees ``messages`` and therefore cannot inspect those crops.
+            return {
+                "role": "tool",
+                "content": [
+                    {"type": "text", "text": tool_response},
+                    *[{"type": "image_url", "image_url": {"url": image}} for image in returned_images],
+                ],
+                "tool_call_id": tool_call_id,
+            }
         return {"role": "tool", "content": tool_response, "tool_call_id": tool_call_id}
 
     def postprocess(self, batch: DataProto, batch_conversations: List[List[Dict[str, str]]], n: int) -> DataProto:
@@ -227,33 +283,80 @@ class ToolCompletionCallback(CompletionCallback):
         # position_ids:   [0,0,0,0,0,1,2,3, | 4,5,6,7,8,9,10,11]
 
         # prompts: [prompt] from input dataset
-        prompts = [self.tokenizer.apply_chat_template(prompt, tools=self.tool_schemas, add_generation_prompt=True, tokenize=False) for prompt in batch.non_tensor_batch["raw_prompt"]]
-        assert len(batch_conversations) == len(prompts) * n
+        prompt_texts = [
+            self.tokenizer.apply_chat_template(prompt, tools=self.tool_schemas, add_generation_prompt=True, tokenize=False)
+            for prompt in batch.non_tensor_batch["raw_prompt"]
+        ]
+        assert len(batch_conversations) == len(prompt_texts) * n
 
-        # sequences: [prompt + response]
-        sequences = [self.tokenizer.apply_chat_template(conversation, tools=self.tool_schemas, add_generation_prompt=False, tokenize=False) for conversation in batch_conversations]
+        sequences = [
+            self.tokenizer.apply_chat_template(conversation, tools=self.tool_schemas, add_generation_prompt=False, tokenize=False)
+            for conversation in batch_conversations
+        ]
+        response_texts = [sequence[len(prompt_texts[i // n]) :] for i, sequence in enumerate(sequences)]
+        response_input_ids = []
+        response_attention_masks = []
+        rollout_multi_modal_inputs = []
+        raw_prompts = batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0)
+        for index, response_text in enumerate(response_texts):
+            response_messages = batch_conversations[index][len(raw_prompts[index]) :]
+            returned_images = _collect_message_images(response_messages)
+            input_ids, attention_mask, mm_inputs = _encode_response_with_images(
+                self.tokenizer,
+                self.processor,
+                response_text,
+                returned_images,
+            )
+            response_input_ids.append(input_ids)
+            response_attention_masks.append(attention_mask)
+            rollout_multi_modal_inputs.append(mm_inputs)
 
-        # responses: [response]
-        responses = [sequence[len(prompts[i // n]) :] for i, sequence in enumerate(sequences)]
+        responses = {
+            "input_ids": torch.nn.utils.rnn.pad_sequence(
+                response_input_ids,
+                batch_first=True,
+                padding_value=self.tokenizer.pad_token_id,
+            ),
+            "attention_mask": torch.nn.utils.rnn.pad_sequence(
+                response_attention_masks,
+                batch_first=True,
+                padding_value=0,
+            ),
+        }
 
-        prompts = self.tokenizer(prompts, return_tensors="pt", padding="longest", padding_side="left")
-        responses = self.tokenizer(responses, return_tensors="pt", padding="longest", padding_side="right")
+        prompt_input_ids = batch.batch["input_ids"]
+        prompt_attention_mask = batch.batch["attention_mask"]
+        prompt_position_ids = batch.batch["position_ids"]
         if n > 1:
-            prompts["input_ids"] = prompts["input_ids"].repeat_interleave(n, dim=0)
-            prompts["attention_mask"] = prompts["attention_mask"].repeat_interleave(n, dim=0)
+            prompt_input_ids = prompt_input_ids.repeat_interleave(n, dim=0)
+            prompt_attention_mask = prompt_attention_mask.repeat_interleave(n, dim=0)
+            prompt_position_ids = prompt_position_ids.repeat_interleave(n, dim=0)
 
         # response_mask: response mask with tools calling masked out
         response_mask = self._mask_out_tools_calling_tokens(batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0), batch_conversations, responses["input_ids"], responses["attention_mask"])
 
-        input_ids = torch.cat([prompts["input_ids"], responses["input_ids"]], dim=1)
-        attention_mask = torch.cat([prompts["attention_mask"], responses["attention_mask"]], dim=1)
-        position_ids = (attention_mask.cumsum(dim=1) - 1) * attention_mask
+        input_ids = torch.cat([prompt_input_ids, responses["input_ids"]], dim=1)
+        attention_mask = torch.cat([prompt_attention_mask, responses["attention_mask"]], dim=1)
+        # Multi-turn GRPO and the actor update expect a full-sequence
+        # loss_mask. Prompt tokens and tool-call/tool-response tokens must not
+        # contribute to the policy loss; response_mask already excludes the
+        # latter, so prepend zeros for the prompt portion.
+        prompt_loss_mask = torch.zeros_like(prompt_attention_mask)
+        loss_mask = torch.cat([prompt_loss_mask, response_mask], dim=1)
+        response_length = responses["input_ids"].size(1)
+        delta_position_id = torch.arange(1, response_length + 1, device=prompt_position_ids.device)
+        delta_position_id = delta_position_id.unsqueeze(0).expand(len(input_ids), -1)
+        if prompt_position_ids.dim() == 3:
+            delta_position_id = delta_position_id.unsqueeze(1).expand(-1, 3, -1)
+        response_position_ids = prompt_position_ids[..., -1:] + delta_position_id
+        position_ids = torch.cat([prompt_position_ids, response_position_ids], dim=-1)
 
         batch = TensorDict(
             {
-                "prompts": prompts["input_ids"],  # [bsz, prompt_length]
+                "prompts": prompt_input_ids,  # [bsz, prompt_length]
                 "responses": responses["input_ids"],  # [bsz, response_length]
                 "response_mask": response_mask,  # [bsz, response_length]
+                "loss_mask": loss_mask,  # [bsz, prompt_length + response_length]
                 "input_ids": input_ids,  # [bsz, prompt_length + response_length]
                 "attention_mask": attention_mask,  # [bsz, prompt_length + response_length]
                 "position_ids": position_ids,  # [bsz, prompt_length + response_length]
@@ -262,7 +365,13 @@ class ToolCompletionCallback(CompletionCallback):
         )
 
         num_turns = np.array([len(conversation) for conversation in batch_conversations], dtype=np.int32)
-        return DataProto(batch=batch, non_tensor_batch={"__num_turns__": num_turns})
+        return DataProto(
+            batch=batch,
+            non_tensor_batch={
+                "__num_turns__": num_turns,
+                "rollout_multi_modal_inputs": np.array(rollout_multi_modal_inputs, dtype=object),
+            },
+        )
 
     def _mask_out_tools_calling_tokens(
         self,
@@ -350,6 +459,11 @@ class ChatCompletionScheduler:
 
         # LRU cache to map request_id to address
         self.request_id_to_address = LRUCache(maxsize=max_cache_size)
+        max_concurrent_requests = int(self.config.multi_turn.get("max_concurrent_requests", 28))
+        if max_concurrent_requests <= 0:
+            raise ValueError(f"max_concurrent_requests must be positive, got {max_concurrent_requests}")
+        self.request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+        print(f"Chat scheduler max concurrent multi-turn requests: {max_concurrent_requests}", flush=True)
 
         self.background_tasks = set()
         if self.config.multi_turn.completion_callback is None:
@@ -499,16 +613,20 @@ class ChatCompletionScheduler:
         sampling_params: Dict[str, Any],
         images: List[Any] | None = None,
     ):
-        done = asyncio.Event()
+        # Hold one slot for the full trajectory, including all recursive tool
+        # turns. This bounds vLLM and visual-tool load while allowing a large
+        # global rollout batch to be processed in waves.
+        async with self.request_semaphore:
+            done = asyncio.Event()
 
-        info = {
-            "__done__": done,
-            "__depth__": 0,  # indicate how many ongoing completion requests
-            "__sampling_params__": sampling_params,
-            "images": images or [],
-        }
+            info = {
+                "__done__": done,
+                "__depth__": 0,  # indicate how many ongoing completion requests
+                "__sampling_params__": sampling_params,
+                "images": images or [],
+            }
 
-        self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
+            self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
 
-        # Wait until all completion requests are done
-        await done.wait()
+            # Wait until all completion requests are done
+            await done.wait()

@@ -2,7 +2,7 @@ tools:
   - class_name: verl.tools.visual_tool.OnlineVisualTool
     config: &online_visual_tool
       base_url: ${oc.env:VISUAL_TOOL_API_BASE,http://127.0.0.1:9000}
-      api_key: ${oc.env:VISUAL_TOOL_API_KEY,}
+      api_key: ${oc.env:VISUAL_TOOL_API_KEY,''}
       timeout: ${oc.env:VISUAL_TOOL_TIMEOUT,300}
       max_retries: ${oc.env:VISUAL_TOOL_MAX_RETRIES,2}
     tool_schema:

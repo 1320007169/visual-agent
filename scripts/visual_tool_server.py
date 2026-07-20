@@ -166,7 +166,12 @@ class Sam3Backend:
         self.lock = threading.Lock()
 
     def segment(self, image: Image.Image, query: str) -> dict[str, Any]:
-        with self.lock, self.torch.inference_mode():
+        device_type = self.device.split(":", 1)[0]
+        with self.lock, self.torch.inference_mode(), self.torch.autocast(
+            device_type=device_type,
+            dtype=self.torch.bfloat16,
+            enabled=device_type == "cuda",
+        ):
             state = self.processor.set_image(image)
             try:
                 output = self.processor.set_text_prompt(state=state, prompt=query)
@@ -205,12 +210,20 @@ class GroundingDinoBackend:
         with self.lock, self.torch.inference_mode():
             inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.device)
             outputs = self.model(**inputs)
-            result = self.processor.post_process_grounded_object_detection(
+            postprocess = self.processor.post_process_grounded_object_detection
+            threshold_name = (
+                "box_threshold"
+                if "box_threshold" in inspect.signature(postprocess).parameters
+                else "threshold"
+            )
+            result = postprocess(
                 outputs,
                 inputs.input_ids,
-                box_threshold=self.box_threshold,
-                text_threshold=self.text_threshold,
-                target_sizes=[image.size[::-1]],
+                **{
+                    threshold_name: self.box_threshold,
+                    "text_threshold": self.text_threshold,
+                    "target_sizes": [image.size[::-1]],
+                },
             )[0]
         boxes = _normalize_boxes(result.get("boxes"), *image.size)
         scores = [round(float(x), 6) for x in _to_list(result.get("scores"))]

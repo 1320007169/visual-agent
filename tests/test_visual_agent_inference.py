@@ -10,6 +10,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from visual_agent_inference import (  # noqa: E402
     HTTPVisualToolExecutor,
+    InferenceError,
     ToolExecutionResult,
     ToolInvocation,
     VisualAgent,
@@ -38,6 +39,11 @@ class FakeToolExecutor:
     def execute(self, invocation, images):
         self.calls.append((invocation, images))
         return ToolExecutionResult(output={"count": 2})
+
+
+class FailingToolExecutor:
+    def execute(self, invocation, images):
+        raise InferenceError("target was not localized")
 
 
 class FakeResponse:
@@ -71,6 +77,15 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertEqual(invocation.name, "sam3_crop_zoom")
         self.assertEqual(invocation.arguments["target_image"], 0)
 
+    def test_parse_qwen_attribute_tool_call(self):
+        invocation = parse_tool_invocation(
+            {
+                "content": '<tool_call function="grounding_detect" arguments="{&quot;query&quot;:&quot;person&quot;,&quot;target_image&quot;:0}"></tool_call>'
+            }
+        )
+        self.assertEqual(invocation.name, "grounding_detect")
+        self.assertEqual(invocation.arguments, {"query": "person", "target_image": 0})
+
     def test_xml_multiturn_agent(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
             image.write(b"not-a-real-jpeg-but-valid-for-transport")
@@ -81,6 +96,18 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertEqual(result.response, "<answer>2</answer>")
         self.assertEqual(len(executor.calls), 1)
         self.assertIn("<tool_response>", result.messages[-2]["content"])
+
+    def test_agent_recovers_from_tool_error(self):
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"not-a-real-jpeg-but-valid-for-transport")
+            image.flush()
+            result = VisualAgent(
+                FakeModelClient(), tool_executor=FailingToolExecutor()
+            ).run([image.name], "Count cars")
+
+        self.assertEqual(result.response, "<answer>2</answer>")
+        self.assertIn('"status": "error"', result.messages[-2]["content"])
+        self.assertEqual(result.tool_calls[0]["error"], "target was not localized")
 
     def test_http_executor_contract(self):
         session = FakeSession()

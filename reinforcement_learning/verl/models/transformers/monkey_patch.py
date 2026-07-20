@@ -310,7 +310,23 @@ def apply_monkey_patch(
 
 
 def apply_monkey_patch_for_dummy_image(processor, module):
-    """use dummy image in case of zero-3 hang"""
+    """Use a Qwen2.5-VL dummy image to avoid a known Zero-3 hang.
+
+    This patch is model-specific. Importing its Qwen2.5-VL implementation for
+    Qwen3-VL is both unnecessary and incompatible with newer Transformers,
+    where private Qwen2.5 documentation symbols have been removed.
+    """
+
+    if hasattr(module._fsdp_wrapped_module, "v_head"):
+        unwrapped_module = module._fsdp_wrapped_module.pretrained_model
+    else:
+        unwrapped_module = module._fsdp_wrapped_module
+
+    model_type = getattr(getattr(unwrapped_module, "config", None), "model_type", None)
+    if model_type != "qwen2_5_vl":
+        print(f"Skipping Qwen2.5-VL dummy-image patch for model_type={model_type!r}")
+        return
+
     from PIL import Image
     from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
     from transformers.models.qwen2_5_vl.processing_qwen2_5_vl import Qwen2_5_VLProcessor
@@ -318,11 +334,6 @@ def apply_monkey_patch_for_dummy_image(processor, module):
     from .dummy_image import qwen2_5_vl_forward
 
     dummy_images = [Image.new("RGB", (64, 64), (255, 255, 255))]
-
-    if hasattr(module._fsdp_wrapped_module, "v_head"):
-        unwrapped_module = module._fsdp_wrapped_module.pretrained_model
-    else:
-        unwrapped_module = module._fsdp_wrapped_module
 
     # FIXME(wuhuan): 修复 zero3 多图 hang 的问题，这里后面换成更优雅的解法
     if False: # and isinstance(processor, AgiVLProcessorV11):
@@ -332,7 +343,7 @@ def apply_monkey_patch_for_dummy_image(processor, module):
         res = processor.image_processor(images=dummy_images, return_tensors="pt")
         unwrapped_module._dummy_mm_inputs = res
         Qwen2_5_VLForConditionalGeneration.forward = qwen2_5_vl_forward
-    print(f"Monkey patch dummy image for Zero-3 Hang bugs")
+    print("Monkey patch dummy image for Zero-3 Hang bugs")
 
 
 def apply_monkey_patch_for_valuehead(module):

@@ -1,0 +1,41 @@
+tools:
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: &online_visual_tool
+      base_url: ${oc.env:VISUAL_TOOL_API_BASE,http://127.0.0.1:9000}
+      api_key: ${oc.env:VISUAL_TOOL_API_KEY,''}
+      timeout: ${oc.env:VISUAL_TOOL_TIMEOUT,300}
+      max_retries: ${oc.env:VISUAL_TOOL_MAX_RETRIES,2}
+    tool_schema:
+      type: function
+      function:
+        name: sam3_segment_multi
+        description: Segment one or more target or anchor objects in an image using natural-language queries.
+        parameters:
+          type: object
+          properties:
+            queries:
+              type: array
+              description: Objects to segment. Each entry has role target or anchor and a natural-language query.
+            target_image:
+              type: integer
+              description: Zero-based index into the sample images array.
+          required: [queries, target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: grounding_detect
+        description: Detect boxes for an object in an image using a natural-language query.
+        parameters:
+          type: object
+          properties:
+            query:
+              type: string
+              description: Object or region to detect.
+            target_image:
+              type: integer
+              description: Zero-based index into the sample images array.
+          required: [query, target_image]
+

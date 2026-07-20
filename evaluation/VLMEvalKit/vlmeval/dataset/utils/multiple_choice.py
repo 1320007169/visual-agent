@@ -444,7 +444,7 @@ def eval_vanilla(model, item, dataset_name=None):
     if opt == item['GT']:
         return dict(hit=1, log=f'Match Log: {match_log}. ')
     else:
-        if opt == 'Z':
+        if opt == 'Z' and model is not None:
             prompt_judge = build_prompt_judge(
                 item['question'], item['prediction'], item['GT'] if 'GT' in item else item['answer']
             )

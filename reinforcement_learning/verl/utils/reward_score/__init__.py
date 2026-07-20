@@ -97,6 +97,10 @@ def default_compute_score(data_source, solution_str, ground_truth, extra_info=No
         from . import deepeyesv2
         res = deepeyesv2.compute_score_acc(solution_str, ground_truth, extra_info, data_source=data_source)
 
+    elif data_source in ['visual-agent-thyme', 'visual-agent-zwz-relation']:
+        from . import visual_agent_thyme
+        res = visual_agent_thyme.compute_score(solution_str, ground_truth, extra_info)
+
     elif data_source in [
         'mmsearch-test', 
         'simpleqa-openai-test', 

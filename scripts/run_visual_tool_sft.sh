@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -o pipefail
 
 # Huawei platform paths. Override any value from the job environment if needed.
@@ -33,7 +32,11 @@ HF_HOME="${HF_HOME:-$PLATFORM_WORK_ROOT/cache/huggingface}"
 XDG_CACHE_HOME="${XDG_CACHE_HOME:-$PLATFORM_WORK_ROOT/cache/xdg}"
 TORCH_HOME="${TORCH_HOME:-$PLATFORM_WORK_ROOT/cache/torch}"
 RUN_ID="${RUN_ID:-visual_sft_$(date +%Y%m%d_%H%M%S)}"
-VISUAL_TOOL_OUTPUT_DIR="${VISUAL_TOOL_OUTPUT_DIR:-$ROOT_DIR/saves/visual_tool_sft_v0/full/sft_$RUN_ID}"
+VISUAL_TOOL_OUTPUT_DIR="${VISUAL_TOOL_OUTPUT_DIR:-$ROOT_DIR/saves/visual_agent_parquet_sft/full/sft_$RUN_ID}"
+CONFIG_PATH="$ROOT_DIR/configs/train_visual_tool_sft_full.yaml"
+DATASET_NAME="visual_agent_parquet_sft"
+DATASET_JSONL="$ROOT_DIR/data/visual_agent_parquet.jsonl"
+DATASET_SAMPLES=3679
 
 die() {
   echo "error: $*" >&2
@@ -66,6 +69,7 @@ fi
 
 [[ -d "$REPO_ROOT" ]] || die "repository root does not exist: $REPO_ROOT"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+[[ -f "$DATASET_JSONL" ]] || die "dataset JSONL does not exist: $DATASET_JSONL"
 [[ -f "$REPO_ROOT/scripts/train_visual_tool_sft_full.sh" ]] || {
   die "REPO_ROOT does not contain the training launcher: $REPO_ROOT"
 }
@@ -114,6 +118,7 @@ fi
 
 export CUDA_VISIBLE_DEVICES NNODES NPROC_PER_NODE TARGET_GLOBAL_BATCH_SIZE MASTER_PORT
 export MODEL_NAME_OR_PATH
+export CONFIG_PATH
 export HF_HOME XDG_CACHE_HOME TORCH_HOME
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
@@ -139,6 +144,9 @@ LOG_FILE="$LOG_DIR/train-node${NODE_LOG_RANK}-$(date +%Y%m%d_%H%M%S).log"
   echo "XDG_CACHE_HOME: $XDG_CACHE_HOME"
   echo "TORCH_HOME: $TORCH_HOME"
   echo "Visual-tool output override: ${VISUAL_TOOL_OUTPUT_DIR:-<config default>}"
+  echo "Dataset: $DATASET_NAME"
+  echo "Dataset JSONL: $DATASET_JSONL"
+  echo "Dataset samples: $DATASET_SAMPLES"
   echo "Python: $(command -v python || true)"
   echo "Torchrun: $(command -v torchrun || true)"
   echo "LLaMA-Factory: ${LLAMAFACTORY_CLI:-$(command -v llamafactory-cli || true)}"

@@ -9,22 +9,70 @@
 tmp/
 *.log
 .venv-llamafactory/
+.venv/
+venv/
+env/
+.tox/
+.nox/
 saves/
 **/checkpoint-*/
 **/.ipynb_checkpoints/
 data/visual_tool_sft_v0*.jsonl
 data/Visual_Agent/
+/data/*
+!/data/README.md
 Visual_Agent/
-images/
-images
 model/
+models/
+/images
+data/**/images/
+Visual_Agent/training_trajectories_natural/images/
+
+# Training and evaluation outputs
+outputs/
+**/outputs/
+runs/
+wandb/
+lightning_logs/
+tensorboard/
+ray_results/
+multirun/
+**/.hydra/
+
+# Logs and process files
+logs/
+*.out
+*.err
+*.pid
+slurm-*.out
+
+# Local caches and temporary files
+**/.cache/
+.cache-*/
+*.tmp
+*.temp
+*.bak
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
 __pycache__/
 *.py[cod]
 *$py.class
 
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
 .coverage
+coverage.xml
+htmlcov/
 
 build/
+dist/
+wheels/
 *.egg-info/

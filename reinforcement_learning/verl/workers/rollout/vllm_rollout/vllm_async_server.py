@@ -86,7 +86,15 @@ class ExternalRayDistributedExecutor(Executor):
         timeout: Optional[float] = None,
         args: Tuple = (),
         kwargs: Optional[Dict[str, Any]] = None,
+        non_block: bool = False,
     ) -> List[Any]:
+        """Execute one method on all externally managed Ray workers.
+
+        vLLM 0.11 calls ``collective_rpc(..., non_block=True)`` from its V1
+        batch queue and expects futures with ``done``/``result`` methods. Ray
+        object references expose compatible concurrent futures via ``future``.
+        Older vLLM versions only use the blocking path, which remains unchanged.
+        """
         # TODO(wuxibin): support ray compiled graph
         if isinstance(method, str):
             sent_method = method
@@ -95,8 +103,10 @@ class ExternalRayDistributedExecutor(Executor):
         del method
 
         # ~3ms overhead per schedule step due to SchedulerOutput/ModelRunnerOutput serialization/deserialization.
-        outputs = ray.get([worker.execute_method.remote(sent_method, *args, **(kwargs or {})) for worker in self.workers])
-        return outputs
+        object_refs = [worker.execute_method.remote(sent_method, *args, **(kwargs or {})) for worker in self.workers]
+        if non_block:
+            return [object_ref.future() for object_ref in object_refs]
+        return ray.get(object_refs, timeout=timeout)
 
     def check_health(self):
         return

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import json
 import mimetypes
 import os
@@ -29,6 +30,10 @@ except ImportError:
 
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+TOOL_CALL_ATTR_RE = re.compile(
+    r'<tool_call\b(?=[^>]*\bfunction="([^"]+)")(?=[^>]*\barguments="([^"]*)")[^>]*>',
+    re.DOTALL,
+)
 
 
 class InferenceError(RuntimeError):
@@ -109,13 +114,22 @@ def parse_tool_invocation(message: dict[str, Any]) -> ToolInvocation | None:
         return _validate_tool_invocation(name, arguments)
 
     matches = TOOL_CALL_RE.findall(_message_text(message))
-    if not matches:
+    if matches:
+        try:
+            payload = json.loads(matches[-1])
+        except json.JSONDecodeError as exc:
+            raise InferenceError(f"Model returned invalid <tool_call> JSON: {exc}") from exc
+        return _validate_tool_invocation(payload.get("name"), payload.get("arguments", {}))
+
+    attribute_calls = TOOL_CALL_ATTR_RE.findall(_message_text(message))
+    if not attribute_calls:
         return None
+    name, raw_arguments = attribute_calls[-1]
     try:
-        payload = json.loads(matches[-1])
+        arguments = json.loads(html.unescape(raw_arguments))
     except json.JSONDecodeError as exc:
-        raise InferenceError(f"Model returned invalid <tool_call> JSON: {exc}") from exc
-    return _validate_tool_invocation(payload.get("name"), payload.get("arguments", {}))
+        raise InferenceError(f"Model returned invalid tool-call arguments: {exc}") from exc
+    return _validate_tool_invocation(html.unescape(name), arguments)
 
 
 def _validate_tool_invocation(name: Any, arguments: Any) -> ToolInvocation:
@@ -143,6 +157,9 @@ def build_system_prompt() -> str:
         "When closer inspection, grounding, segmentation, or counting is needed, call one "
         "visual tool and wait for its result. Emit a tool call exactly as "
         "<tool_call>{\"name\":\"tool_name\",\"arguments\":{...}}</tool_call>. "
+        "If a tool reports an error or cannot localize the target, adjust the query, "
+        "try another available tool, or answer from the supplied image instead of "
+        "repeating the same failed call. "
         "After receiving <tool_response>, continue reasoning and give the final answer inside "
         "<answer>...</answer>. Available tools:\n"
         f"{schemas}"
@@ -359,7 +376,26 @@ class VisualAgent:
                     "Set --tool-api-base or VISUAL_TOOL_API_BASE."
                 )
 
-            tool_result = self.tool_executor.execute(invocation, images)
+            try:
+                tool_result = self.tool_executor.execute(invocation, images)
+            except InferenceError as exc:
+                error_result = {"status": "error", "error": str(exc)}
+                trace.append({
+                    "name": invocation.name,
+                    "arguments": invocation.arguments,
+                    "error": str(exc),
+                    "returned_images": 0,
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "<tool_response>\n"
+                        f"{json.dumps(error_result, ensure_ascii=False)}\n"
+                        "</tool_response>"
+                    ),
+                })
+                continue
+
             trace.append({
                 "name": invocation.name,
                 "arguments": invocation.arguments,
