@@ -60,7 +60,9 @@ ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-}"
 RAY_PORT="${RAY_PORT:-6379}"
 RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
 RAY_CLUSTER_TIMEOUT="${RAY_CLUSTER_TIMEOUT:-600}"
-WORKER_WAIT_TIMEOUT="${WORKER_WAIT_TIMEOUT:-86400}"
+# Full ZWZ runs take several days. Keep worker nodes alive for one week while
+# they wait for the node-0 driver to finish.
+WORKER_WAIT_TIMEOUT="${WORKER_WAIT_TIMEOUT:-604800}"
 
 SMOKE_DATA_DIR="${SMOKE_DATA_DIR:-$REPO_ROOT/data/visual_tool_rl_smoke_2node}"
 TRAIN_FILE="${TRAIN_FILE:-$SMOKE_DATA_DIR/train.parquet}"
