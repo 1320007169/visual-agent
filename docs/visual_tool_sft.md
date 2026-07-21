@@ -99,9 +99,10 @@ Content-Type: application/json
 }
 ```
 
-`crop_zoom` does not require a localization backend. The agent supplies an
-absolute pixel box in the selected image and the service returns a `336x336`
-crop using the same expansion and image-return path as `sam3_crop_zoom`:
+`crop_zoom` does not require a localization backend. The agent supplies a
+Qwen3-VL relative box whose coordinates range from 0 to 1000. The service maps
+it to the selected image's pixels and returns a `336x336` crop using the same
+expansion and image-return path as `sam3_crop_zoom`:
 
 ```json
 {

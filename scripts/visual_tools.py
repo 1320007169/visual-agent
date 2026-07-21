@@ -24,16 +24,16 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "crop_zoom",
-            "description": "Crop and enlarge a region selected with an absolute pixel bounding box.",
+            "description": "Crop and enlarge a region selected with Qwen3-VL relative coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bbox_2d": {
                         "type": "array",
-                        "items": {"type": "number"},
+                        "items": {"type": "number", "minimum": 0, "maximum": 1000},
                         "minItems": 4,
                         "maxItems": 4,
-                        "description": "Absolute image-pixel coordinates [x1, y1, x2, y2].",
+                        "description": "Relative [x1, y1, x2, y2] coordinates, each from 0 to 1000.",
                     },
                     "target_image": {
                         "type": "integer",

@@ -43,6 +43,29 @@ logger = logging.getLogger(__file__)
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 
 
+def _tool_error_observation(
+    tool_name: str,
+    error: Exception,
+    *,
+    xml_mode: bool,
+    tool_call_id: str | None,
+) -> Dict[str, Any]:
+    error_text = str(error).strip() or type(error).__name__
+    payload = json.dumps(
+        {
+            "status": "error",
+            "tool": tool_name,
+            "error_type": type(error).__name__,
+            "message": error_text[:1000],
+            "recoverable": True,
+        },
+        ensure_ascii=False,
+    )
+    if xml_mode:
+        return {"role": "user", "content": f"<tool_response>\n{payload}\n</tool_response>"}
+    return {"role": "tool", "content": payload, "tool_call_id": tool_call_id}
+
+
 def _image_to_data_url(image: Any) -> str:
     if isinstance(image, str) and image.startswith(("data:image/", "http://", "https://")):
         return image
@@ -229,11 +252,20 @@ class ToolCompletionCallback(CompletionCallback):
             tool_call_id = None
         else:
             tool_name = tool_call.function.name
-            tool_args = json.loads(tool_call.function.arguments)
             tool_call_id = tool_call.id
-        if tool_name not in self.tools:
-            raise KeyError(f"Model requested unknown tool: {tool_name}")
-        tool = self.tools[tool_name]
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+            except (TypeError, json.JSONDecodeError) as exc:
+                return _tool_error_observation(
+                    tool_name, exc, xml_mode=False, tool_call_id=tool_call_id
+                )
+        if not isinstance(tool_args, dict):
+            return _tool_error_observation(
+                tool_name,
+                ValueError("Tool arguments must be a JSON object"),
+                xml_mode=xml_mode,
+                tool_call_id=tool_call_id,
+            )
 
         trace = info.get("__trace__")
         tool_started = time.perf_counter()
@@ -243,21 +275,40 @@ class ToolCompletionCallback(CompletionCallback):
             "model_turn": len(trace["model_calls"]) if trace is not None else None,
             "started_at_unix": time.time(),
         }
+        tool = self.tools.get(tool_name)
         instance_id = None
+        tool_response = ""
+        tool_metrics: Dict[str, Any] = {}
+        tool_error: Exception | None = None
         try:
+            if tool is None:
+                raise KeyError(f"Model requested unknown tool: {tool_name}")
             instance_id = await tool.create(images=info.get("images", []))
             tool_response, tool_reward_score, tool_metrics = await tool.execute(instance_id, tool_args)
-        except Exception as e:
-            tool_trace["status"] = "error"
-            tool_trace["error"] = f"{type(e).__name__}: {e}"
-            logger.exception(f"Error when executing tool: {e}")
-            return e
+        except Exception as exc:
+            tool_error = exc
+            logger.exception("Error when executing tool %s: %s", tool_name, exc)
         finally:
-            if instance_id is not None:
-                await tool.release(instance_id)
+            if instance_id is not None and tool is not None:
+                try:
+                    await tool.release(instance_id)
+                except Exception as exc:
+                    tool_trace["release_error"] = f"{type(exc).__name__}: {exc}"
+                    logger.exception("Error when releasing tool %s: %s", tool_name, exc)
             tool_trace["latency_ms"] = round((time.perf_counter() - tool_started) * 1000, 3)
             if trace is not None:
                 trace["tool_calls"].append(tool_trace)
+
+        if tool_error is not None:
+            tool_trace["status"] = "error"
+            tool_trace["error"] = f"{type(tool_error).__name__}: {tool_error}"
+            tool_trace["returned_image_count"] = 0
+            return _tool_error_observation(
+                tool_name,
+                tool_error,
+                xml_mode=xml_mode,
+                tool_call_id=tool_call_id,
+            )
 
         returned_images = tool_metrics.get("returned_images", [])
         tool_trace["status"] = "success"

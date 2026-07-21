@@ -30,6 +30,20 @@ class _CropTool:
         assert instance_id == "crop-test"
 
 
+class _FailingTool:
+    def __init__(self):
+        self.released = False
+
+    async def create(self, instance_id=None, **kwargs):
+        return "failure-test"
+
+    async def execute(self, instance_id, parameters, **kwargs):
+        raise RuntimeError("no region was detected")
+
+    async def release(self, instance_id):
+        self.released = True
+
+
 def _callback():
     callback = ToolCompletionCallback.__new__(ToolCompletionCallback)
     callback.tools = {"sam3_crop_zoom": _CropTool()}
@@ -56,6 +70,58 @@ def test_native_tool_response_includes_returned_crop_image():
         "image_url": {"url": "data:image/jpeg;base64,AA=="},
     }
     assert info["images"] == ["original-image", "data:image/jpeg;base64,AA=="]
+
+
+def test_native_tool_failure_returns_recoverable_observation():
+    failing_tool = _FailingTool()
+    callback = ToolCompletionCallback.__new__(ToolCompletionCallback)
+    callback.tools = {"sam3_crop_zoom": failing_tool}
+    tool_call = SimpleNamespace(
+        id="call-error",
+        function=SimpleNamespace(
+            name="sam3_crop_zoom",
+            arguments=json.dumps({"query": "missing sign"}),
+        ),
+    )
+
+    message = asyncio.run(callback._call_tool(tool_call, {"images": []}, xml_mode=False))
+
+    payload = json.loads(message["content"])
+    assert message["role"] == "tool"
+    assert message["tool_call_id"] == "call-error"
+    assert payload == {
+        "status": "error",
+        "tool": "sam3_crop_zoom",
+        "error_type": "RuntimeError",
+        "message": "no region was detected",
+        "recoverable": True,
+    }
+    assert failing_tool.released is True
+
+
+def test_xml_tool_failure_returns_recoverable_observation():
+    callback = ToolCompletionCallback.__new__(ToolCompletionCallback)
+    callback.tools = {"sam3_crop_zoom": _FailingTool()}
+    tool_call = {"name": "sam3_crop_zoom", "arguments": {"query": "missing sign"}}
+
+    message = asyncio.run(callback._call_tool(tool_call, {"images": []}, xml_mode=True))
+
+    assert message["role"] == "user"
+    assert "<tool_response>" in message["content"]
+    assert '"status": "error"' in message["content"]
+    assert '"recoverable": true' in message["content"]
+
+
+def test_unknown_tool_returns_recoverable_observation():
+    callback = ToolCompletionCallback.__new__(ToolCompletionCallback)
+    callback.tools = {}
+    tool_call = {"name": "missing_tool", "arguments": {}}
+
+    message = asyncio.run(callback._call_tool(tool_call, {"images": []}, xml_mode=True))
+
+    assert message["role"] == "user"
+    assert '"tool": "missing_tool"' in message["content"]
+    assert '"error_type": "KeyError"' in message["content"]
 
 
 def test_xml_tool_response_still_includes_returned_crop_image():
@@ -139,4 +205,3 @@ def test_collect_and_merge_returned_image_inputs():
     )
     assert merged["pixel_values"].shape == (5, 3)
     assert merged["image_grid_thw"].tolist() == [[1, 2, 2], [1, 3, 3]]
-

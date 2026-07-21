@@ -53,10 +53,10 @@ def crop_zoom(
     output_side: int = 336,
     crop_writer: CropWriter | None = None,
 ) -> Json:
-    """Crop a model-selected absolute pixel bbox and return an enlarged image."""
+    """Crop a Qwen3-VL relative [0, 1000] bbox and return an enlarged image."""
 
     image = _get_image(images, target_image)
-    selected_box = _require_absolute_bbox(bbox_2d, image.size)
+    relative_box, selected_box = _relative_bbox_to_absolute(bbox_2d, image.size)
     if label is not None:
         label = _require_text(label, "label")
     try:
@@ -80,7 +80,8 @@ def crop_zoom(
         text_summary="Cropped and enlarged the specified image region for closer inspection.",
     )
     return {
-        "bbox_2d": selected_box,
+        "bbox_2d": relative_box,
+        "pixel_bbox_2d": selected_box,
         "label": label,
         "target_image": target_image,
         "crop_zoom": crop_obs,
@@ -405,9 +406,11 @@ def _get_image(images: list[Image.Image], target_image: int) -> Image.Image:
     return images[target_image].convert("RGB")
 
 
-def _require_absolute_bbox(value: Any, image_size: tuple[int, int]) -> list[float]:
+def _relative_bbox_to_absolute(
+    value: Any, image_size: tuple[int, int]
+) -> tuple[list[float], list[float]]:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
-        raise ValueError("bbox_2d must be [x1, y1, x2, y2] in absolute image pixels")
+        raise ValueError("bbox_2d must be relative [x1, y1, x2, y2] coordinates from 0 to 1000")
     try:
         x1, y1, x2, y2 = [float(v) for v in value]
     except (TypeError, ValueError) as exc:
@@ -415,16 +418,23 @@ def _require_absolute_bbox(value: Any, image_size: tuple[int, int]) -> list[floa
     if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
         raise ValueError("bbox_2d coordinates must be finite numbers")
 
-    width, height = image_size
-    clamped = [
+    relative_box = [
         max(0.0, x1),
         max(0.0, y1),
-        min(float(width), x2),
-        min(float(height), y2),
+        min(1000.0, x2),
+        min(1000.0, y2),
     ]
-    if clamped[0] >= clamped[2] or clamped[1] >= clamped[3]:
-        raise ValueError(f"bbox_2d does not define a valid region in the target image: {value}")
-    return _round_box(clamped)
+    if relative_box[0] >= relative_box[2] or relative_box[1] >= relative_box[3]:
+        raise ValueError(f"bbox_2d does not define a valid relative region: {value}")
+
+    width, height = image_size
+    absolute_box = [
+        relative_box[0] / 1000 * width,
+        relative_box[1] / 1000 * height,
+        relative_box[2] / 1000 * width,
+        relative_box[3] / 1000 * height,
+    ]
+    return _round_box(relative_box), _round_box(absolute_box)
 
 
 def _require_text(value: Any, name: str) -> str:

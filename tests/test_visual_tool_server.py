@@ -84,17 +84,18 @@ class VisualToolServerTest(unittest.TestCase):
         )
         self.assertEqual(result["crop_zoom"]["crop_path"], "tool://images/1/request_crop_zoom.jpg")
 
-    def test_crop_zoom_uses_absolute_pixel_bbox(self):
+    def test_crop_zoom_maps_qwen3_relative_bbox_to_pixels(self):
         result, images = ToolService(None, None).execute(
             "crop_zoom",
-            {"bbox_2d": [10, 20, 30, 50], "target_image": 0, "label": "sign"},
+            {"bbox_2d": [50, 200, 150, 500], "target_image": 0, "label": "sign"},
             [self.image],
             instance_id="rollout-8",
         )
 
         crop = decode_image(images[0])
         self.assertEqual(crop.size, (336, 336))
-        self.assertEqual(result["bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(result["bbox_2d"], [50.0, 200.0, 150.0, 500.0])
+        self.assertEqual(result["pixel_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
         self.assertEqual(result["crop_zoom"]["target_image"], 1)
         self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
         self.assertEqual(
@@ -102,16 +103,17 @@ class VisualToolServerTest(unittest.TestCase):
         )
         self.assertEqual(result["source"], "crop_zoom")
 
-    def test_crop_zoom_clamps_bbox_to_image(self):
+    def test_crop_zoom_clamps_relative_bbox(self):
         result, _ = self.service.execute(
-            "crop_zoom", {"bbox_2d": [-5, 10, 210, 110], "target_image": 0}, [self.image]
+            "crop_zoom", {"bbox_2d": [-5, 100, 1050, 1100], "target_image": 0}, [self.image]
         )
-        self.assertEqual(result["bbox_2d"], [0.0, 10.0, 200.0, 100.0])
+        self.assertEqual(result["bbox_2d"], [0.0, 100.0, 1000.0, 1000.0])
+        self.assertEqual(result["pixel_bbox_2d"], [0.0, 10.0, 200.0, 100.0])
 
     def test_crop_zoom_rejects_invalid_bbox(self):
-        with self.assertRaisesRegex(ToolServerError, "valid region"):
+        with self.assertRaisesRegex(ToolServerError, "valid relative region"):
             self.service.execute(
-                "crop_zoom", {"bbox_2d": [30, 20, 10, 50], "target_image": 0}, [self.image]
+                "crop_zoom", {"bbox_2d": [300, 200, 100, 500], "target_image": 0}, [self.image]
             )
 
     def test_multi_crop_matches_sft_shape_and_image_indices(self):
