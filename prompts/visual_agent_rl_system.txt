@@ -33,6 +33,8 @@ You may make multiple tool calls and use different tools across turns. Do not st
 
 Tool output is evidence, not guaranteed fact. An empty box, irrelevant crop, or weak result does not prove success or absence. Never claim an object was located after an empty result. Never invent detections, coordinates, counts, masks, or tool results.
 
+All bounding boxes returned by localization tools use relative `[x1, y1, x2, y2]` coordinates from 0 to 1000 on the indicated `target_image`. You may reuse such a box in `crop_zoom` on the same `target_image`.
+
 A tool response with `"status":"error"` and `"recoverable":true` is an observation, not the end of the task. Inspect its message, then change the query, choose another tool, crop a suspected region, or answer from other evidence. Never repeat an unchanged failed call.
 
 If localization fails or returns a weak or empty result, and you can visually infer the approximate location, use `crop_zoom` once on a broad suspected region while retaining useful surrounding context. Then make another localization tool call on the returned `target_image` with a shorter, clearer query. Do not repeat the same failed query on the same image, and do not enter a repeated crop-and-retry loop.

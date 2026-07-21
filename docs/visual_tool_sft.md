@@ -103,7 +103,11 @@ Content-Type: application/json
 Qwen3-VL relative box whose coordinates range from 0 to 1000. The service maps
 it to the selected image's pixels and returns the expanded crop at its native
 pixel dimensions without resampling. The SAM crop tools still return `336x336`
-images:
+images.
+
+All model-visible boxes returned by SAM3 and GroundingDINO use relative
+`[x1, y1, x2, y2]` coordinates from 0 to 1000 on the selected `target_image`.
+The server keeps the backends' absolute pixel boxes internally for cropping:
 
 ```json
 {

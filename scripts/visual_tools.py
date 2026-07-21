@@ -57,7 +57,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "sam3_segment_multi",
-            "description": "Segment one or more target or anchor objects in an image using natural-language queries.",
+            "description": "Segment one or more objects and return boxes as relative 0-1000 coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -78,7 +78,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "grounding_detect",
-            "description": "Detect boxes for an object in an image using a natural-language query.",
+            "description": "Detect an object and return boxes as relative 0-1000 coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -96,7 +96,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "sam3_crop_zoom",
-            "description": "Crop and zoom one target object or region from an image for closer visual inspection.",
+            "description": "Localize and crop one target; returned boxes use relative 0-1000 coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -118,7 +118,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "sam3_crop_zoom_multi",
-            "description": "Crop and zoom multiple target objects or regions from an image for closer visual inspection.",
+            "description": "Localize and crop multiple targets; returned boxes use relative 0-1000 coordinates.",
             "parameters": {
                 "type": "object",
                 "properties": {

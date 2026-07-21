@@ -53,6 +53,8 @@ class VisualToolServerTest(unittest.TestCase):
             "grounding_detect", {"query": "person", "target_image": 0}, [self.image]
         )
         self.assertEqual(result["count"], 1)
+        self.assertEqual(result["boxes"], [[5.0, 20.0, 100.0, 300.0]])
+        self.assertEqual(result["coordinate_space"], "relative_0_1000")
         self.assertEqual(result["source"], "groundingdino")
         self.assertEqual(images, [])
 
@@ -63,6 +65,8 @@ class VisualToolServerTest(unittest.TestCase):
             [self.image],
         )
         self.assertEqual(result["queries"][0]["mask_area_px"], [321])
+        self.assertEqual(result["queries"][0]["boxes"], [[50.0, 200.0, 150.0, 500.0]])
+        self.assertEqual(result["coordinate_space"], "relative_0_1000")
         self.assertEqual(result["queries"][0]["count"], 1)
         self.assertEqual(result["source"], "sam3")
         self.assertNotIn("selected_box", result["queries"][0])
@@ -76,7 +80,10 @@ class VisualToolServerTest(unittest.TestCase):
         crop = decode_image(images[0])
         self.assertEqual(crop.size, (336, 336))
         self.assertEqual(result["crop_zoom"]["target_image"], 1)
-        self.assertEqual(result["target"]["selected_box"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(result["target"]["selected_box"], [50.0, 200.0, 150.0, 500.0])
+        self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [50.0, 200.0, 150.0, 500.0])
+        self.assertEqual(result["crop_zoom"]["bbox_2d"], [0.0, 0.0, 480.0, 960.0])
+        self.assertEqual(result["coordinate_space"], "relative_0_1000")
         self.assertNotIn("crop_zoom", result["target"])
         self.assertEqual(
             result["crop_zoom"]["text_summary"],
@@ -96,8 +103,10 @@ class VisualToolServerTest(unittest.TestCase):
         self.assertEqual(crop.size, (96, 96))
         self.assertEqual(result["bbox_2d"], [50.0, 200.0, 150.0, 500.0])
         self.assertEqual(result["pixel_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(result["coordinate_space"], "relative_0_1000")
         self.assertEqual(result["crop_zoom"]["target_image"], 1)
-        self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [50.0, 200.0, 150.0, 500.0])
+        self.assertEqual(result["crop_zoom"]["coordinate_space"], "relative_0_1000")
         self.assertEqual(
             result["crop_zoom"]["text_summary"],
             "Cropped the specified image region at its native resolution.",

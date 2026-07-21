@@ -85,6 +85,7 @@ def crop_zoom(
         "target_image": target_image,
         "crop_zoom": crop_obs,
         "image_outputs": crop_obs["image_outputs"],
+        "coordinate_space": "relative_0_1000",
         "source": "crop_zoom",
     }
 
@@ -101,7 +102,8 @@ def grounding_detect(
     image = _get_image(images, target_image)
     query = _require_text(query, "query")
     detected = grounding_backend.detect(image, query)
-    boxes = _round_boxes(detected.get("boxes") or [])
+    pixel_boxes = _round_boxes(detected.get("boxes") or [])
+    boxes = [_absolute_bbox_to_relative(box, image.size) for box in pixel_boxes]
     labels = [str(v) for v in detected.get("labels") or [query] * len(boxes)]
     confidence = _round_floats(detected.get("confidence") or [])
     return {
@@ -110,6 +112,7 @@ def grounding_detect(
         "labels": labels,
         "confidence": confidence,
         "count": len(boxes),
+        "coordinate_space": "relative_0_1000",
         "source": "groundingdino",
     }
 
@@ -128,8 +131,11 @@ def sam3_segment_multi(
     groups = []
     for item in normalized_queries:
         segmented = sam3_backend.segment(image, item["query"])
-        groups.append(_segment_group(item, segmented, include_selection=False))
-    return {"queries": groups, "source": "sam3"}
+        group, _ = _segment_group(
+            item, segmented, include_selection=False, image_size=image.size
+        )
+        groups.append(group)
+    return {"queries": groups, "coordinate_space": "relative_0_1000", "source": "sam3"}
 
 
 def sam3_crop_zoom(
@@ -150,10 +156,15 @@ def sam3_crop_zoom(
     image = _get_image(images, target_image)
     query = _require_text(query, "query")
     segmented = sam3_backend.segment(image, query)
-    target = _segment_group({"role": "target", "query": query}, segmented, include_selection=True)
+    target, selected_pixel_box = _segment_group(
+        {"role": "target", "query": query},
+        segmented,
+        include_selection=True,
+        image_size=image.size,
+    )
     crop_obs = _make_crop_zoom(
         image=image,
-        selected_box=target.get("selected_box"),
+        selected_box=selected_pixel_box,
         query=query,
         crop_dir=Path(crop_dir),
         filename=f"{uid}_crop_zoom.jpg",
@@ -170,6 +181,7 @@ def sam3_crop_zoom(
         "target": target,
         "crop_zoom": crop_obs,
         "image_outputs": crop_obs["image_outputs"],
+        "coordinate_space": "relative_0_1000",
         "source": "sam3_crop_zoom",
     }
 
@@ -196,10 +208,12 @@ def sam3_crop_zoom_multi(
     image_outputs = []
     for index, item in enumerate(normalized_queries, start=1):
         segmented = sam3_backend.segment(image, item["query"])
-        group = _segment_group(item, segmented, include_selection=True)
+        group, selected_pixel_box = _segment_group(
+            item, segmented, include_selection=True, image_size=image.size
+        )
         crop_obs = _make_crop_zoom(
             image=image,
-            selected_box=group.get("selected_box"),
+            selected_box=selected_pixel_box,
             query=item["query"],
             crop_dir=crop_dir,
             filename=f"{uid}_crop_zoom_t{index}.jpg",
@@ -213,7 +227,12 @@ def sam3_crop_zoom_multi(
         group["crop_zoom"] = crop_obs
         groups.append(group)
         image_outputs.extend(crop_obs["image_outputs"])
-    return {"queries": groups, "image_outputs": image_outputs, "source": "sam3_crop_zoom_multi"}
+    return {
+        "queries": groups,
+        "image_outputs": image_outputs,
+        "coordinate_space": "relative_0_1000",
+        "source": "sam3_crop_zoom_multi",
+    }
 
 
 def execute_tool_call(
@@ -278,8 +297,15 @@ def execute_tool_call(
     raise ValueError(f"unsupported tool call: {name!r}")
 
 
-def _segment_group(query_item: Json, segmented: Json, *, include_selection: bool) -> Json:
-    boxes = _round_boxes(segmented.get("boxes") or [])
+def _segment_group(
+    query_item: Json,
+    segmented: Json,
+    *,
+    include_selection: bool,
+    image_size: tuple[int, int],
+) -> tuple[Json, list[float] | None]:
+    pixel_boxes = _round_boxes(segmented.get("boxes") or [])
+    boxes = [_absolute_bbox_to_relative(box, image_size) for box in pixel_boxes]
     confidence = _round_floats(segmented.get("confidence") or [])
     mask_area_px = [int(v) for v in segmented.get("mask_area_px") or []]
     group = {
@@ -298,7 +324,7 @@ def _segment_group(query_item: Json, segmented: Json, *, include_selection: bool
                 "selected_mask_area_px": mask_area_px[0] if mask_area_px else None,
             }
         )
-    return group
+    return group, pixel_boxes[0] if pixel_boxes else None
 
 
 def _make_crop_zoom(
@@ -338,8 +364,9 @@ def _make_crop_zoom(
     return {
         "target_image": crop_target_image,
         "crop_path": str(crop_path),
-        "requested_bbox_2d": _round_box(selected_box),
-        "bbox_2d": crop_bbox,
+        "requested_bbox_2d": _absolute_bbox_to_relative(selected_box, image.size),
+        "bbox_2d": _absolute_bbox_to_relative(crop_bbox, image.size),
+        "coordinate_space": "relative_0_1000",
         "slack_ratio": float(slack_ratio),
         "image_outputs": [image_output],
         "text_summary": text_summary,
@@ -435,6 +462,20 @@ def _relative_bbox_to_absolute(
         relative_box[3] / 1000 * height,
     ]
     return _round_box(relative_box), _round_box(absolute_box)
+
+
+def _absolute_bbox_to_relative(
+    value: list[float], image_size: tuple[int, int]
+) -> list[float]:
+    width, height = image_size
+    x1, y1, x2, y2 = [float(v) for v in value]
+    relative_box = [
+        max(0.0, min(1000.0, x1 / width * 1000)),
+        max(0.0, min(1000.0, y1 / height * 1000)),
+        max(0.0, min(1000.0, x2 / width * 1000)),
+        max(0.0, min(1000.0, y2 / height * 1000)),
+    ]
+    return _round_box(relative_box)
 
 
 def _require_text(value: Any, name: str) -> str:
