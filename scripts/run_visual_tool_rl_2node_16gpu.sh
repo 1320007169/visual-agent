@@ -238,10 +238,15 @@ PYTOOLS
   fi
 fi
 export VISUAL_TOOL_API_BASES
+IFS=',' read -r -a VISUAL_TOOL_ENDPOINT_ARRAY <<< "$VISUAL_TOOL_API_BASES"
+[[ "${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}" -eq "$NNODES" ]] || {
+  die "expected $NNODES visual-tool endpoints, got ${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}: $VISUAL_TOOL_API_BASES"
+}
 
 [[ "$SAM3_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "SAM3_REPLICAS must be a positive integer"
 [[ "$GROUNDING_DINO_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "GROUNDING_DINO_REPLICAS must be a positive integer"
 [[ "$VISUAL_TOOL_STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_STARTUP_TIMEOUT must be a positive integer"
+[[ "$WORKER_WAIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WORKER_WAIT_TIMEOUT must be a positive integer"
 
 # The ModelArts node-local /tmp has a small quota. Large GRPO batches force
 # Ray to spill many objects, so put spill objects on the shared high-capacity
@@ -338,6 +343,7 @@ echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
 echo "Max concurrent trajectories: $MAX_CONCURRENT_REQUESTS"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
+echo "Worker wait timeout: $WORKER_WAIT_TIMEOUT seconds"
 echo "Output: $OUTPUT_DIR"
 echo "Log: $LOG_FILE"
 echo "Rollout traces: ${ROLLOUT_DATA_DIR:-disabled}"
