@@ -20,6 +20,7 @@ backend objects with these methods:
 The returned dictionaries match the tool response shapes used by the current
 Visual Agent SFT data for:
 
+    - crop_zoom
     - grounding_detect
     - sam3_segment_multi
     - sam3_crop_zoom
@@ -28,6 +29,7 @@ Visual Agent SFT data for:
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,6 +38,55 @@ from PIL import Image
 
 Json = dict[str, Any]
 CropWriter = Callable[[Image.Image, str, int], str]
+
+
+def crop_zoom(
+    images: list[Image.Image],
+    bbox_2d: list[float],
+    *,
+    crop_dir: str | Path,
+    uid: str = "sample",
+    target_image: int = 0,
+    label: str | None = None,
+    slack_ratio: float = 0.0,
+    min_crop_side: int = 96,
+    output_side: int = 336,
+    crop_writer: CropWriter | None = None,
+) -> Json:
+    """Crop a model-selected absolute pixel bbox and return an enlarged image."""
+
+    image = _get_image(images, target_image)
+    selected_box = _require_absolute_bbox(bbox_2d, image.size)
+    if label is not None:
+        label = _require_text(label, "label")
+    try:
+        slack_ratio = float(slack_ratio)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("slack_ratio must be a non-negative number") from exc
+    if not math.isfinite(slack_ratio) or slack_ratio < 0:
+        raise ValueError("slack_ratio must be a non-negative number")
+
+    crop_obs = _make_crop_zoom(
+        image=image,
+        selected_box=selected_box,
+        query=label or "specified region",
+        crop_dir=Path(crop_dir),
+        filename=f"{uid}_crop_zoom.jpg",
+        crop_target_image=len(images),
+        slack_ratio=slack_ratio,
+        min_crop_side=min_crop_side,
+        output_side=output_side,
+        crop_writer=crop_writer,
+        text_summary="Cropped and enlarged the specified image region for closer inspection.",
+    )
+    return {
+        "bbox_2d": selected_box,
+        "label": label,
+        "target_image": target_image,
+        "crop_zoom": crop_obs,
+        "image_outputs": crop_obs["image_outputs"],
+        "source": "crop_zoom",
+    }
 
 
 def grounding_detect(
@@ -181,6 +232,16 @@ def execute_tool_call(
 
     name = tool_call.get("name")
     arguments = tool_call.get("arguments") or {}
+    if name == "crop_zoom":
+        return crop_zoom(
+            images,
+            crop_dir=crop_dir,
+            uid=uid,
+            crop_writer=crop_writer,
+            min_crop_side=min_crop_side,
+            output_side=output_side,
+            **arguments,
+        )
     if name == "grounding_detect":
         if grounding_backend is None:
             raise ValueError("grounding_backend is required for grounding_detect")
@@ -342,6 +403,28 @@ def _get_image(images: list[Image.Image], target_image: int) -> Image.Image:
     if target_image < 0 or target_image >= len(images):
         raise ValueError(f"target_image {target_image} outside images[0:{len(images)}]")
     return images[target_image].convert("RGB")
+
+
+def _require_absolute_bbox(value: Any, image_size: tuple[int, int]) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ValueError("bbox_2d must be [x1, y1, x2, y2] in absolute image pixels")
+    try:
+        x1, y1, x2, y2 = [float(v) for v in value]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("bbox_2d coordinates must be finite numbers") from exc
+    if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+        raise ValueError("bbox_2d coordinates must be finite numbers")
+
+    width, height = image_size
+    clamped = [
+        max(0.0, x1),
+        max(0.0, y1),
+        min(float(width), x2),
+        min(float(height), y2),
+    ]
+    if clamped[0] >= clamped[2] or clamped[1] >= clamped[3]:
+        raise ValueError(f"bbox_2d does not define a valid region in the target image: {value}")
+    return _round_box(clamped)
 
 
 def _require_text(value: Any, name: str) -> str:

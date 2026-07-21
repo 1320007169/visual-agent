@@ -11,6 +11,7 @@ from typing import Any
 
 
 VISUAL_TOOL_NAMES = {
+    "crop_zoom",
     "sam3_segment_multi",
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
@@ -19,6 +20,39 @@ VISUAL_TOOL_NAMES = {
 
 
 VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "crop_zoom",
+            "description": "Crop and enlarge a region selected with an absolute pixel bounding box.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bbox_2d": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "description": "Absolute image-pixel coordinates [x1, y1, x2, y2].",
+                    },
+                    "target_image": {
+                        "type": "integer",
+                        "description": "Zero-based index into the sample images array.",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Optional label for the selected region.",
+                    },
+                    "slack_ratio": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Optional extra context around the bounding box; defaults to 0.",
+                    },
+                },
+                "required": ["bbox_2d", "target_image"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {

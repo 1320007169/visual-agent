@@ -28,6 +28,7 @@ from sft_tool_call_logic import execute_tool_call
 
 
 SUPPORTED_TOOLS = {
+    "crop_zoom",
     "sam3_segment_multi",
     "grounding_detect",
     "sam3_crop_zoom",

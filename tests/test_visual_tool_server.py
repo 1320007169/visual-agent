@@ -84,6 +84,36 @@ class VisualToolServerTest(unittest.TestCase):
         )
         self.assertEqual(result["crop_zoom"]["crop_path"], "tool://images/1/request_crop_zoom.jpg")
 
+    def test_crop_zoom_uses_absolute_pixel_bbox(self):
+        result, images = ToolService(None, None).execute(
+            "crop_zoom",
+            {"bbox_2d": [10, 20, 30, 50], "target_image": 0, "label": "sign"},
+            [self.image],
+            instance_id="rollout-8",
+        )
+
+        crop = decode_image(images[0])
+        self.assertEqual(crop.size, (336, 336))
+        self.assertEqual(result["bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(result["crop_zoom"]["target_image"], 1)
+        self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(
+            result["crop_zoom"]["crop_path"], "tool://images/1/rollout-8_crop_zoom.jpg"
+        )
+        self.assertEqual(result["source"], "crop_zoom")
+
+    def test_crop_zoom_clamps_bbox_to_image(self):
+        result, _ = self.service.execute(
+            "crop_zoom", {"bbox_2d": [-5, 10, 210, 110], "target_image": 0}, [self.image]
+        )
+        self.assertEqual(result["bbox_2d"], [0.0, 10.0, 200.0, 100.0])
+
+    def test_crop_zoom_rejects_invalid_bbox(self):
+        with self.assertRaisesRegex(ToolServerError, "valid region"):
+            self.service.execute(
+                "crop_zoom", {"bbox_2d": [30, 20, 10, 50], "target_image": 0}, [self.image]
+            )
+
     def test_multi_crop_matches_sft_shape_and_image_indices(self):
         result, images = self.service.execute(
             "sam3_crop_zoom_multi",

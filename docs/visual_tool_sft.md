@@ -21,6 +21,7 @@ The training rows use LLaMA-Factory ShareGPT formatting with `messages` and `ima
 
 ## Supported Visual Tools
 
+- `crop_zoom`
 - `sam3_segment_multi`
 - `grounding_detect`
 - `sam3_crop_zoom`
@@ -79,7 +80,7 @@ the factory receives `model_path` and `device` and returns `(model, processor)`.
 Set the same `VISUAL_TOOL_API_KEY` on the service, inference process, and RL
 workers if the endpoint is reachable outside a trusted private network.
 
-The four tools in this repository operate on still images, so
+The SAM3-backed tools in this repository operate on still images, so
 `SAM3_MODEL_PATH` must point to `sam3.pt` (or its containing directory).
 `sam3.1_multiplex.pt` is an official SAM3.1 video/object-multiplex checkpoint;
 it is downloaded for future video support but is intentionally rejected by
@@ -94,6 +95,23 @@ Content-Type: application/json
   "instance_id": "rollout-or-request-id",
   "name": "sam3_crop_zoom",
   "arguments": {"query": "red car", "target_image": 0, "slack_ratio": 0.15},
+  "images": ["data:image/png;base64,..."]
+}
+```
+
+`crop_zoom` does not require a localization backend. The agent supplies an
+absolute pixel box in the selected image and the service returns a `336x336`
+crop using the same expansion and image-return path as `sam3_crop_zoom`:
+
+```json
+{
+  "instance_id": "rollout-or-request-id",
+  "name": "crop_zoom",
+  "arguments": {
+    "bbox_2d": [226, 399, 265, 464],
+    "target_image": 0,
+    "label": "white van"
+  },
   "images": ["data:image/png;base64,..."]
 }
 ```

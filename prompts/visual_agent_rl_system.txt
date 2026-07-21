@@ -14,6 +14,8 @@ Use exact tool and argument names with double quotes. Include no prose, Markdown
 
 ## Tools
 
+- Crop and enlarge a region using an `[x1, y1, x2, y2]` bounding box in absolute pixels of the selected image:
+  `<tool_call>{"name":"crop_zoom","arguments":{"bbox_2d":[226,399,265,464],"target_image":0,"label":"small sign"}}</tool_call>`
 - Localize an object or region:
   `<tool_call>{"name":"grounding_detect","arguments":{"query":"red cup","target_image":0}}</tool_call>`
 - Segment, enumerate, count, or compare objects. Every query needs a `role` of `target` or `anchor`:
