@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Two-node / 16-GPU ModelArts GRPO launcher for Visual-Agent VLMs.
+# One-to-three-node ModelArts GRPO launcher for Visual-Agent VLMs.
 # Run the same command once on every node:
 #   bash /home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/scripts/run_visual_tool_rl_2node_16gpu.sh
 #
 # Default placement on each 8-GPU node:
-#   GPUs 0-6: VERL actor/ref/vLLM workers (14 RL GPUs across two nodes)
+#   GPUs 0-6: VERL actor/ref/vLLM workers
 #   GPU 7:    local SAM3 + GroundingDINO HTTP service
 #
 # ModelArts normally supplies the node list through VC_WORKER_HOSTS. If it does
-# not, set the same MASTER_ADDR on both nodes and set NODE_RANK to 0 and 1.
+# not, set the same MASTER_ADDR on every node and use ranks 0 to NNODES-1.
 
 BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
@@ -85,7 +85,7 @@ JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
 RUN_ID="${RUN_ID:-visual_rl_2node16_${JOB_TOKEN}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/saves/visual_tool_rl_smoke_2node/$RUN_ID}"
 LOG_DIR="${LOG_DIR:-$BASE/logs/visual-tool-rl-2node}"
-SYNC_DIR="${SYNC_DIR:-$BASE/tmp/visual-tool-rl-2node/$RUN_ID}"
+SYNC_DIR="${SYNC_DIR:-$BASE/tmp/visual-tool-rl-${NNODES}node/$RUN_ID}"
 DONE_FILE="$SYNC_DIR/driver.done"
 
 RL_PYTHON="$RL_ENV_DIR/bin/python"
@@ -120,7 +120,7 @@ ensure_symlink "$PLATFORM_DATASET_ROOT" /home/ma-user/work/dataset
 ensure_symlink "$PLATFORM_ALGORITHM_ROOT" /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
 
-[[ "$NNODES" =~ ^[12]$ ]] || die "this launcher supports NNODES=1 or 2, got $NNODES"
+[[ "$NNODES" =~ ^[123]$ ]] || die "this launcher supports NNODES from 1 to 3, got $NNODES"
 [[ -d "$REPO_ROOT" ]] || die "repository not found: $REPO_ROOT"
 [[ -d "$RL_ROOT/verl" ]] || die "VERL source not found: $RL_ROOT"
 [[ -x "$RL_PYTHON" ]] || die "RL Python not executable: $RL_PYTHON"
@@ -183,7 +183,8 @@ if [[ "$NNODES" == "1" ]]; then
   [[ "${NODE_RANK:-0}" == "0" ]] || die "NODE_RANK must be 0 for a one-node run, got '${NODE_RANK:-unset}'"
   NODE_RANK=0
 else
-  [[ "$NODE_RANK" =~ ^[01]$ ]] || die "NODE_RANK must be 0 or 1; got '${NODE_RANK:-unset}'"
+  [[ "$NODE_RANK" =~ ^[0-9]+$ ]] || die "NODE_RANK must be an integer; got '${NODE_RANK:-unset}'"
+  (( NODE_RANK < NNODES )) || die "NODE_RANK=$NODE_RANK must be smaller than NNODES=$NNODES"
 fi
 
 MASTER_IP="$($RL_PYTHON - "$MASTER_ADDR" <<'PYRESOLVE'
@@ -233,7 +234,7 @@ PYTOOLS
   elif [[ "$NNODES" == "1" ]]; then
     VISUAL_TOOL_API_BASES="http://$NODE_IP:$VISUAL_TOOL_PORT"
   else
-    die "worker host list was not detected; set VISUAL_TOOL_API_BASES to both node endpoints"
+    die "worker host list was not detected; set VISUAL_TOOL_API_BASES to all node endpoints"
   fi
 fi
 export VISUAL_TOOL_API_BASES
@@ -247,7 +248,7 @@ export VISUAL_TOOL_API_BASES
 # model volume. Keep the Ray session/socket root at a short local path because
 # Linux AF_UNIX socket paths are limited to 107 bytes; the session logs are
 # small and were not the source of the previous 50 GB quota exhaustion.
-RAY_STORAGE_ROOT="${RAY_STORAGE_ROOT:-$BASE/tmp/ray-2node/$RUN_ID}"
+RAY_STORAGE_ROOT="${RAY_STORAGE_ROOT:-$BASE/tmp/ray-${NNODES}node/$RUN_ID}"
 RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/va-ray-${NODE_RANK}}"
 RAY_SPILL_DIR="${RAY_SPILL_DIR:-$RAY_STORAGE_ROOT/node${NODE_RANK}/spill}"
 export RAY_TMPDIR="$RAY_TEMP_DIR"
@@ -316,7 +317,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "============================================================"
-echo "Visual-agent VLM RL two-node run"
+echo "Visual-agent VLM RL ${NNODES}-node run"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Node rank / IP: $NODE_RANK / $NODE_IP"
 echo "Platform ids: MA_NODE_RANK=${MA_NODE_RANK:-unset} VC_TASK_INDEX=${VC_TASK_INDEX:-unset} RANK=${RANK:-unset}"
@@ -533,7 +534,7 @@ else
   exit $?
 fi
 
-# Node 0 waits until both seven-GPU Ray nodes are visible.
+# Node 0 waits until every seven-GPU Ray node is visible.
 "$RL_PYTHON" - "$RAY_ADDRESS" "$NNODES" "$TOTAL_RL_GPUS" "$RAY_CLUSTER_TIMEOUT" <<'PYRAYWAIT'
 import sys
 import time
@@ -552,7 +553,7 @@ while time.time() < deadline:
         break
     time.sleep(5)
 else:
-    raise SystemExit("Ray cluster did not reach the requested two-node resources")
+    raise SystemExit("Ray cluster did not reach the requested resources")
 ray.shutdown()
 PYRAYWAIT
 
@@ -575,7 +576,7 @@ for base_url in base_urls:
 PYREMOTEHEALTH
 
 else
-  echo "DRY_RUN=1: skipping Ray cluster startup and two-node rendezvous"
+  echo "DRY_RUN=1: skipping Ray cluster startup and multi-node rendezvous"
   export CUDA_VISIBLE_DEVICES="$RL_CUDA_VISIBLE_DEVICES"
 fi
 
