@@ -50,10 +50,9 @@ def crop_zoom(
     label: str | None = None,
     slack_ratio: float = 0.0,
     min_crop_side: int = 96,
-    output_side: int = 336,
     crop_writer: CropWriter | None = None,
 ) -> Json:
-    """Crop a Qwen3-VL relative [0, 1000] bbox and return an enlarged image."""
+    """Crop a Qwen3-VL relative [0, 1000] bbox without resampling it."""
 
     image = _get_image(images, target_image)
     relative_box, selected_box = _relative_bbox_to_absolute(bbox_2d, image.size)
@@ -75,9 +74,9 @@ def crop_zoom(
         crop_target_image=len(images),
         slack_ratio=slack_ratio,
         min_crop_side=min_crop_side,
-        output_side=output_side,
+        output_side=None,
         crop_writer=crop_writer,
-        text_summary="Cropped and enlarged the specified image region for closer inspection.",
+        text_summary="Cropped the specified image region at its native resolution.",
     )
     return {
         "bbox_2d": relative_box,
@@ -240,7 +239,6 @@ def execute_tool_call(
             uid=uid,
             crop_writer=crop_writer,
             min_crop_side=min_crop_side,
-            output_side=output_side,
             **arguments,
         )
     if name == "grounding_detect":
@@ -313,7 +311,7 @@ def _make_crop_zoom(
     crop_target_image: int,
     slack_ratio: float,
     min_crop_side: int,
-    output_side: int,
+    output_side: int | None,
     crop_writer: CropWriter | None,
     text_summary: str,
 ) -> Json:
@@ -321,7 +319,9 @@ def _make_crop_zoom(
         raise ValueError(f"SAM3 returned no selected box for query {query!r}")
     crop_bbox = _expanded_square_bbox(selected_box, image.size, slack_ratio, min_crop_side)
     rect = _integer_crop_rect(crop_bbox, image.size)
-    crop = image.crop(rect).resize((output_side, output_side), Image.Resampling.LANCZOS)
+    crop = image.crop(rect)
+    if output_side is not None:
+        crop = crop.resize((output_side, output_side), Image.Resampling.LANCZOS)
     if crop_writer is None:
         crop_dir.mkdir(parents=True, exist_ok=True)
         crop_path = str(crop_dir / filename)

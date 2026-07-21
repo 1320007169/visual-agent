@@ -101,8 +101,9 @@ Content-Type: application/json
 
 `crop_zoom` does not require a localization backend. The agent supplies a
 Qwen3-VL relative box whose coordinates range from 0 to 1000. The service maps
-it to the selected image's pixels and returns a `336x336` crop using the same
-expansion and image-return path as `sam3_crop_zoom`:
+it to the selected image's pixels and returns the expanded crop at its native
+pixel dimensions without resampling. The SAM crop tools still return `336x336`
+images:
 
 ```json
 {

@@ -93,11 +93,15 @@ class VisualToolServerTest(unittest.TestCase):
         )
 
         crop = decode_image(images[0])
-        self.assertEqual(crop.size, (336, 336))
+        self.assertEqual(crop.size, (96, 96))
         self.assertEqual(result["bbox_2d"], [50.0, 200.0, 150.0, 500.0])
         self.assertEqual(result["pixel_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
         self.assertEqual(result["crop_zoom"]["target_image"], 1)
         self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [10.0, 20.0, 30.0, 50.0])
+        self.assertEqual(
+            result["crop_zoom"]["text_summary"],
+            "Cropped the specified image region at its native resolution.",
+        )
         self.assertEqual(
             result["crop_zoom"]["crop_path"], "tool://images/1/rollout-8_crop_zoom.jpg"
         )

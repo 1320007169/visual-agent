@@ -24,7 +24,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "crop_zoom",
-            "description": "Crop and enlarge a region selected with Qwen3-VL relative coordinates.",
+            "description": "Crop a region selected with Qwen3-VL relative coordinates without resampling.",
             "parameters": {
                 "type": "object",
                 "properties": {
