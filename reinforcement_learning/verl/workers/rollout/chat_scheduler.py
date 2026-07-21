@@ -235,16 +235,34 @@ class ToolCompletionCallback(CompletionCallback):
             raise KeyError(f"Model requested unknown tool: {tool_name}")
         tool = self.tools[tool_name]
 
-        instance_id = await tool.create(images=info.get("images", []))
+        trace = info.get("__trace__")
+        tool_started = time.perf_counter()
+        tool_trace = {
+            "tool": tool_name,
+            "arguments": tool_args,
+            "model_turn": len(trace["model_calls"]) if trace is not None else None,
+            "started_at_unix": time.time(),
+        }
+        instance_id = None
         try:
+            instance_id = await tool.create(images=info.get("images", []))
             tool_response, tool_reward_score, tool_metrics = await tool.execute(instance_id, tool_args)
         except Exception as e:
+            tool_trace["status"] = "error"
+            tool_trace["error"] = f"{type(e).__name__}: {e}"
             logger.exception(f"Error when executing tool: {e}")
             return e
         finally:
-            await tool.release(instance_id)
+            if instance_id is not None:
+                await tool.release(instance_id)
+            tool_trace["latency_ms"] = round((time.perf_counter() - tool_started) * 1000, 3)
+            if trace is not None:
+                trace["tool_calls"].append(tool_trace)
 
         returned_images = tool_metrics.get("returned_images", [])
+        tool_trace["status"] = "success"
+        tool_trace["service_latency_ms"] = tool_metrics.get("latency_ms")
+        tool_trace["returned_image_count"] = len(returned_images)
         if returned_images:
             info.setdefault("images", []).extend(returned_images)
 
@@ -450,6 +468,7 @@ class ChatCompletionScheduler:
             max_cache_size: int, max cache size of request_id to address mapping.
         """
         self.config = config.actor_rollout_ref.rollout
+        self.trace_rollouts = bool(config.trainer.get("rollout_data_dir", None))
         model_path = config.actor_rollout_ref.model.path
         self.model_name = "/".join(model_path.split("/")[-2:])
 
@@ -510,6 +529,12 @@ class ChatCompletionScheduler:
         self.request_id_to_address[request_id] = address
 
         completions, exception = None, None
+        model_started = time.perf_counter()
+        model_trace = {
+            "turn": len(messages),
+            "started_at_unix": time.time(),
+            "server": address,
+        }
         try:
             # NOTE: OpenAI client uses httpx, seems to have performance issue in high concurrency requests.
             completions = await self._chat_completions_aiohttp(
@@ -523,6 +548,18 @@ class ChatCompletionScheduler:
         except Exception as e:
             # Let user handle the exception
             exception = e
+        finally:
+            model_trace["latency_ms"] = round((time.perf_counter() - model_started) * 1000, 3)
+            model_trace["status"] = "error" if exception is not None else "success"
+            if exception is not None:
+                model_trace["error"] = f"{type(exception).__name__}: {exception}"
+            elif completions is not None:
+                model_trace["finish_reason"] = str(completions.choices[0].finish_reason)
+                if completions.usage is not None:
+                    model_trace["prompt_tokens"] = completions.usage.prompt_tokens
+                    model_trace["completion_tokens"] = completions.usage.completion_tokens
+            if info.get("__trace__") is not None:
+                info["__trace__"]["model_calls"].append(model_trace)
 
         info["__depth__"] -= 1
 
@@ -600,8 +637,10 @@ class ChatCompletionScheduler:
                 )
             )
 
-        await asyncio.gather(*tasks)
+        trajectory_traces = await asyncio.gather(*tasks)
         output_batch = self.completion_callback.postprocess(batch, batch_conversations, n=n)
+        if self.trace_rollouts:
+            output_batch.non_tensor_batch["rollout_trace"] = np.array(trajectory_traces, dtype=object)
         output_batch.meta_info["timing"] = {"generate_sequences": time.time() - t_start}
         print("[ChatCompletionScheduler] generate_sequences done")
         return output_batch
@@ -616,13 +655,24 @@ class ChatCompletionScheduler:
         # Hold one slot for the full trajectory, including all recursive tool
         # turns. This bounds vLLM and visual-tool load while allowing a large
         # global rollout batch to be processed in waves.
+        queued_at = time.perf_counter()
         async with self.request_semaphore:
+            trajectory_started = time.perf_counter()
             done = asyncio.Event()
+            trace = None
+            if self.trace_rollouts:
+                trace = {
+                    "started_at_unix": time.time(),
+                    "queue_latency_ms": round((trajectory_started - queued_at) * 1000, 3),
+                    "model_calls": [],
+                    "tool_calls": [],
+                }
 
             info = {
                 "__done__": done,
                 "__depth__": 0,  # indicate how many ongoing completion requests
                 "__sampling_params__": sampling_params,
+                "__trace__": trace,
                 "images": images or [],
             }
 
@@ -630,3 +680,25 @@ class ChatCompletionScheduler:
 
             # Wait until all completion requests are done
             await done.wait()
+            if trace is None:
+                return None
+
+            active_latency_ms = (time.perf_counter() - trajectory_started) * 1000
+            model_latency_ms = sum(item["latency_ms"] for item in trace["model_calls"])
+            tool_latency_ms = sum(item["latency_ms"] for item in trace["tool_calls"])
+            scheduler_latency_ms = max(0.0, active_latency_ms - model_latency_ms - tool_latency_ms)
+            trace.update(
+                {
+                    "active_latency_ms": round(active_latency_ms, 3),
+                    "total_latency_ms": round(active_latency_ms + trace["queue_latency_ms"], 3),
+                    "model_latency_ms": round(model_latency_ms, 3),
+                    "tool_latency_ms": round(tool_latency_ms, 3),
+                    "scheduler_latency_ms": round(scheduler_latency_ms, 3),
+                    "model_time_ratio": round(model_latency_ms / active_latency_ms, 6) if active_latency_ms else 0.0,
+                    "tool_time_ratio": round(tool_latency_ms / active_latency_ms, 6) if active_latency_ms else 0.0,
+                    "scheduler_time_ratio": round(scheduler_latency_ms / active_latency_ms, 6) if active_latency_ms else 0.0,
+                    "model_call_count": len(trace["model_calls"]),
+                    "tool_call_count": len(trace["tool_calls"]),
+                }
+            )
+            return trace

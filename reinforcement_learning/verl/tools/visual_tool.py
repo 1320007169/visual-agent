@@ -19,6 +19,7 @@ from .schemas import OpenAIFunctionToolSchema
 # One rollout may call different visual tools in sequence. All tool objects
 # therefore share the image list for the same rollout/request instance ID.
 _ONLINE_VISUAL_TOOL_INSTANCES: dict[str, dict[str, Any]] = {}
+_ONLINE_VISUAL_TOOL_PENDING: dict[tuple[str, ...], dict[str, int]] = {}
 
 
 class OfflineVisualTool(BaseTool):
@@ -89,7 +90,15 @@ class OnlineVisualTool(BaseTool):
 
     def __init__(self, config: dict, tool_schema: OpenAIFunctionToolSchema):
         super().__init__(config, tool_schema)
-        self.base_url = str(config.get("base_url", "http://127.0.0.1:9000")).rstrip("/")
+        configured_urls = config.get("base_urls") or config.get("base_url", "http://127.0.0.1:9000")
+        if isinstance(configured_urls, str):
+            configured_urls = configured_urls.split(",")
+        self.base_urls = tuple(str(url).strip().rstrip("/") for url in configured_urls if str(url).strip())
+        if not self.base_urls:
+            raise ValueError("OnlineVisualTool requires at least one base URL")
+        self._pending = _ONLINE_VISUAL_TOOL_PENDING.setdefault(
+            self.base_urls, {base_url: 0 for base_url in self.base_urls}
+        )
         self.api_key = config.get("api_key") or None
         self.timeout = float(config.get("timeout", 300.0))
         self.max_retries = int(config.get("max_retries", 2))
@@ -120,10 +129,17 @@ class OnlineVisualTool(BaseTool):
 
         error: Exception | None = None
         timeout = aiohttp.ClientTimeout(total=self.timeout)
+        selected_base_url = self.base_urls[0]
+        failed_base_url: str | None = None
         for attempt in range(self.max_retries + 1):
+            candidates = tuple(url for url in self.base_urls if url != failed_base_url) or self.base_urls
+            selected_base_url = min(candidates, key=lambda url: self._pending[url])
+            self._pending[selected_base_url] += 1
             try:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(f"{self.base_url}/execute", json=payload, headers=headers) as response:
+                    async with session.post(
+                        f"{selected_base_url}/execute", json=payload, headers=headers
+                    ) as response:
                         response_text = await response.text()
                         if response.status >= 400:
                             raise RuntimeError(f"visual tool HTTP {response.status}: {response_text[:1000]}")
@@ -133,9 +149,12 @@ class OnlineVisualTool(BaseTool):
                 break
             except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError, RuntimeError) as exc:
                 error = exc
+                failed_base_url = selected_base_url
                 if attempt >= self.max_retries:
                     raise RuntimeError(f"Online visual tool {self.name} failed: {exc}") from exc
                 await asyncio.sleep(min(2**attempt, 5))
+            finally:
+                self._pending[selected_base_url] -= 1
         else:  # pragma: no cover - loop always raises or breaks
             raise RuntimeError(f"Online visual tool {self.name} failed: {error}")
 
@@ -145,7 +164,14 @@ class OnlineVisualTool(BaseTool):
         output = result.get("result", result.get("output", result))
         response_text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
         metrics = dict(result.get("metrics") or {})
-        metrics.update({"online": True, "tool": self.name, "returned_images": returned_images})
+        metrics.update(
+            {
+                "online": True,
+                "tool": self.name,
+                "endpoint": selected_base_url,
+                "returned_images": returned_images,
+            }
+        )
         return response_text, float(result.get("reward", 0.0)), metrics
 
     async def calc_reward(self, instance_id: str, **kwargs) -> float:

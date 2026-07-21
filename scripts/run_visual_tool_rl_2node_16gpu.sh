@@ -55,6 +55,7 @@ SAVE_FREQ="${SAVE_FREQ:--1}"
 TEST_FREQ="${TEST_FREQ:--1}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 TRAINER_PROJECT_NAME="${TRAINER_PROJECT_NAME:-visual-agent-rl-smoke-2node}"
+ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-}"
 
 RAY_PORT="${RAY_PORT:-6379}"
 RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
@@ -68,12 +69,15 @@ TRAIN_FILES="${TRAIN_FILES:-$TRAIN_FILE}"
 VAL_FILES="${VAL_FILES:-$VAL_FILE}"
 TOOL_CONFIG_PATH="${TOOL_CONFIG_PATH:-$RL_ROOT/examples/sglang_multiturn/config/tool_config/visual_tool_config.yaml}"
 
-VISUAL_TOOL_HOST="${VISUAL_TOOL_HOST:-127.0.0.1}"
+VISUAL_TOOL_HOST="${VISUAL_TOOL_HOST:-0.0.0.0}"
 VISUAL_TOOL_PORT="${VISUAL_TOOL_PORT:-9000}"
-export VISUAL_TOOL_API_BASE="${VISUAL_TOOL_API_BASE:-http://127.0.0.1:$VISUAL_TOOL_PORT}"
+LOCAL_VISUAL_TOOL_API_BASE="http://127.0.0.1:$VISUAL_TOOL_PORT"
 START_VISUAL_TOOL_SERVER="${START_VISUAL_TOOL_SERVER:-1}"
 SAM3_MODEL_PATH="${SAM3_MODEL_PATH:-$BASE/visual-tools/sam3/sam3.pt}"
 GROUNDING_DINO_MODEL_PATH="${GROUNDING_DINO_MODEL_PATH:-$BASE/visual-tools/grounding-dino-base-transformers}"
+SAM3_REPLICAS="${SAM3_REPLICAS:-1}"
+GROUNDING_DINO_REPLICAS="${GROUNDING_DINO_REPLICAS:-1}"
+VISUAL_TOOL_STARTUP_TIMEOUT="${VISUAL_TOOL_STARTUP_TIMEOUT:-600}"
 
 JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
 RUN_ID="${RUN_ID:-visual_rl_2node16_${JOB_TOKEN}}"
@@ -197,12 +201,52 @@ finally:
 PYNODEIP
 )}"
 
+# The rollout driver runs on node 0, so localhost would leave node 1's tool
+# GPU idle. Resolve every worker address and expose the resulting comma-
+# separated endpoint list to all OnlineVisualTool instances.
+VISUAL_TOOL_API_BASES="${VISUAL_TOOL_API_BASES:-${VISUAL_TOOL_API_BASE:-}}"
+if [[ -z "$VISUAL_TOOL_API_BASES" ]]; then
+  if [[ -n "$HOST_LIST_RAW" ]]; then
+    VISUAL_TOOL_API_BASES="$($RL_PYTHON - "$HOST_LIST_RAW" "$VISUAL_TOOL_PORT" "$NNODES" <<'PYTOOLS'
+import json
+import socket
+import sys
+
+raw, port, node_count = sys.argv[1:]
+try:
+    parsed = json.loads(raw)
+except json.JSONDecodeError:
+    parsed = [item.strip().strip("'\"") for item in raw.strip("[]").split(",") if item.strip()]
+if isinstance(parsed, dict):
+    for key in ("hosts", "worker_hosts", "workers"):
+        if key in parsed:
+            parsed = parsed[key]
+            break
+hosts = [str(item) for item in parsed][:int(node_count)]
+if len(hosts) != int(node_count):
+    raise SystemExit(f"expected {node_count} worker hosts, got {len(hosts)}")
+print(",".join(f"http://{socket.gethostbyname(host)}:{port}" for host in hosts))
+PYTOOLS
+)"
+  elif [[ "$NNODES" == "1" ]]; then
+    VISUAL_TOOL_API_BASES="http://$NODE_IP:$VISUAL_TOOL_PORT"
+  else
+    die "worker host list was not detected; set VISUAL_TOOL_API_BASES to both node endpoints"
+  fi
+fi
+export VISUAL_TOOL_API_BASES
+
+[[ "$SAM3_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "SAM3_REPLICAS must be a positive integer"
+[[ "$GROUNDING_DINO_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "GROUNDING_DINO_REPLICAS must be a positive integer"
+[[ "$VISUAL_TOOL_STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_STARTUP_TIMEOUT must be a positive integer"
+
 # The ModelArts node-local /tmp has a small quota. Large GRPO batches force
-# Ray to spill many objects, so keep both Ray session files and spill objects
-# on the shared high-capacity model volume. Use a per-node directory because
-# filesystem spill files are local to the node that creates them.
+# Ray to spill many objects, so put spill objects on the shared high-capacity
+# model volume. Keep the Ray session/socket root at a short local path because
+# Linux AF_UNIX socket paths are limited to 107 bytes; the session logs are
+# small and were not the source of the previous 50 GB quota exhaustion.
 RAY_STORAGE_ROOT="${RAY_STORAGE_ROOT:-$BASE/tmp/ray-2node/$RUN_ID}"
-RAY_TEMP_DIR="${RAY_TEMP_DIR:-$RAY_STORAGE_ROOT/node${NODE_RANK}/tmp}"
+RAY_TEMP_DIR="${RAY_TEMP_DIR:-/tmp/va-ray-${NODE_RANK}}"
 RAY_SPILL_DIR="${RAY_SPILL_DIR:-$RAY_STORAGE_ROOT/node${NODE_RANK}/spill}"
 export RAY_TMPDIR="$RAY_TEMP_DIR"
 
@@ -215,6 +259,19 @@ TOTAL_RL_GPUS="$((NNODES * N_GPUS_PER_NODE))"
 }
 (( TRAIN_BATCH_SIZE % TOTAL_RL_GPUS == 0 )) || {
   die "TRAIN_BATCH_SIZE ($TRAIN_BATCH_SIZE) must be divisible by total RL GPUs ($TOTAL_RL_GPUS)"
+}
+[[ "$ROLLOUT_N" =~ ^[1-9][0-9]*$ ]] || die "ROLLOUT_N must be a positive integer, got $ROLLOUT_N"
+[[ "$PPO_MINI_BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] || {
+  die "PPO_MINI_BATCH_SIZE must be a positive integer, got $PPO_MINI_BATCH_SIZE"
+}
+PPO_SCALED_BATCH="$((PPO_MINI_BATCH_SIZE * ROLLOUT_N))"
+(( PPO_SCALED_BATCH % TOTAL_RL_GPUS == 0 )) || {
+  die "PPO_MINI_BATCH_SIZE * ROLLOUT_N ($PPO_SCALED_BATCH) must be divisible by total RL GPUs ($TOTAL_RL_GPUS)"
+}
+PPO_MINI_BATCH_PER_GPU="$((PPO_SCALED_BATCH / TOTAL_RL_GPUS))"
+TRAJECTORIES_PER_GPU="$((TRAIN_BATCH_SIZE * ROLLOUT_N / TOTAL_RL_GPUS))"
+(( TRAJECTORIES_PER_GPU % PPO_MINI_BATCH_PER_GPU == 0 )) || {
+  die "per-GPU trajectories ($TRAJECTORIES_PER_GPU) must be divisible by normalized PPO mini batch ($PPO_MINI_BATCH_PER_GPU)"
 }
 
 mkdir -p "$LOG_DIR" "$OUTPUT_DIR" "$SMOKE_DATA_DIR" "$SYNC_DIR" \
@@ -271,13 +328,16 @@ echo "Initial checkpoint: $MODEL_PATH"
 echo "RL GPUs per node: $RL_CUDA_VISIBLE_DEVICES ($N_GPUS_PER_NODE)"
 echo "Total RL GPUs: $TOTAL_RL_GPUS"
 echo "Local tool GPU: $TOOL_GPU"
-echo "Local tool API: $VISUAL_TOOL_API_BASE"
+echo "Local tool API: $LOCAL_VISUAL_TOOL_API_BASE"
+echo "Rollout tool APIs: $VISUAL_TOOL_API_BASES"
+echo "Tool replicas per node (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
 echo "Max concurrent trajectories: $MAX_CONCURRENT_REQUESTS"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
 echo "Output: $OUTPUT_DIR"
 echo "Log: $LOG_FILE"
+echo "Rollout traces: ${ROLLOUT_DATA_DIR:-disabled}"
 echo "============================================================"
 
 echo "Environment fingerprint before importing the RL stack"
@@ -369,28 +429,38 @@ if [[ "$START_VISUAL_TOOL_SERVER" == "1" ]]; then
     LD_LIBRARY_PATH="$TOOL_ENV_DIR/lib:$TOOL_CUDA_LIBRARY_DIR:${LD_LIBRARY_PATH:-}" \
     SAM3_MODEL_PATH="$SAM3_MODEL_PATH" \
     SAM3_DEVICE=cuda:0 \
+    SAM3_REPLICAS="$SAM3_REPLICAS" \
     GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" \
     GROUNDING_DINO_DEVICE=cuda:0 \
+    GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
     VISUAL_TOOL_BACKEND=all \
     "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
       --backend all --host "$VISUAL_TOOL_HOST" --port "$VISUAL_TOOL_PORT" \
       >>"$TOOL_LOG_FILE" 2>&1 &
   TOOL_PID=$!
 
-  "$RL_PYTHON" - "$VISUAL_TOOL_API_BASE" <<'PYHEALTH'
+  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASE" "$SAM3_REPLICAS" "$GROUNDING_DINO_REPLICAS" "$VISUAL_TOOL_STARTUP_TIMEOUT" <<'PYHEALTH'
 import json
 import sys
 import time
 import urllib.request
 
 base = sys.argv[1].rstrip("/")
+expected_sam3, expected_grounding = map(int, sys.argv[2:4])
+timeout = int(sys.argv[4])
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 last_error = None
-for _ in range(240):
+deadline = time.time() + timeout
+while time.time() < deadline:
     try:
         with opener.open(base + "/health", timeout=3) as response:
             payload = json.load(response)
-        if payload.get("sam3_loaded") and payload.get("grounding_dino_loaded"):
+        if (
+            payload.get("sam3_loaded")
+            and payload.get("grounding_dino_loaded")
+            and payload.get("sam3_replicas") == expected_sam3
+            and payload.get("grounding_dino_replicas") == expected_grounding
+        ):
             print("Local visual-tool service ready:", payload)
             break
     except Exception as exc:
@@ -400,7 +470,7 @@ else:
     raise SystemExit(f"visual-tool service did not become ready: {last_error}")
 PYHEALTH
 elif [[ "$START_VISUAL_TOOL_SERVER" == "0" && "${DRY_RUN:-0}" != "1" ]]; then
-  "$RL_PYTHON" - "$VISUAL_TOOL_API_BASE" <<'PYHEALTH'
+  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASE" <<'PYHEALTH'
 import json
 import sys
 import urllib.request
@@ -483,6 +553,24 @@ else:
     raise SystemExit("Ray cluster did not reach the requested two-node resources")
 ray.shutdown()
 PYRAYWAIT
+
+# By this point every worker has passed its local health check. Confirm from
+# the node-0 driver that cross-node routing is also reachable.
+"$RL_PYTHON" - "$VISUAL_TOOL_API_BASES" "$SAM3_REPLICAS" "$GROUNDING_DINO_REPLICAS" <<'PYREMOTEHEALTH'
+import json
+import sys
+import urllib.request
+
+base_urls = [item.strip().rstrip("/") for item in sys.argv[1].split(",") if item.strip()]
+expected_sam3, expected_grounding = map(int, sys.argv[2:])
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+for base_url in base_urls:
+    with opener.open(base_url + "/health", timeout=15) as response:
+        payload = json.load(response)
+    assert payload.get("sam3_replicas") == expected_sam3, (base_url, payload)
+    assert payload.get("grounding_dino_replicas") == expected_grounding, (base_url, payload)
+    print("Driver can reach visual-tool endpoint:", base_url, payload)
+PYREMOTEHEALTH
 
 else
   echo "DRY_RUN=1: skipping Ray cluster startup and two-node rendezvous"
@@ -588,6 +676,9 @@ TRAIN_ARGS=(
   "trainer.experiment_name=$RUN_ID"
   "trainer.default_local_dir=$OUTPUT_DIR"
 )
+if [[ -n "$ROLLOUT_DATA_DIR" ]]; then
+  TRAIN_ARGS+=("trainer.rollout_data_dir=$ROLLOUT_DATA_DIR")
+fi
 if [[ -n "$CUSTOM_DATASET_PATH" || -n "$CUSTOM_DATASET_NAME" ]]; then
   [[ -n "$CUSTOM_DATASET_PATH" && -n "$CUSTOM_DATASET_NAME" ]] || {
     die "CUSTOM_DATASET_PATH and CUSTOM_DATASET_NAME must be set together"

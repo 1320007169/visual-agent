@@ -533,7 +533,7 @@ class RayPPOTrainer:
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
-    def _dump_generations(self, inputs, outputs, scores, reward_extra_infos_dict, dump_path):
+    def _dump_generations(self, inputs, outputs, scores, reward_extra_infos_dict, dump_path, rollout_traces=None):
         """Dump rollout/validation samples as JSONL."""
         os.makedirs(dump_path, exist_ok=True)
         filename = os.path.join(dump_path, f"{self.global_steps}.jsonl")
@@ -545,6 +545,8 @@ class RayPPOTrainer:
             "score": scores,
             "step": [self.global_steps] * n,
         }
+        if rollout_traces is not None and len(rollout_traces) == n:
+            base_data["rollout_trace"] = rollout_traces
 
         for k, v in reward_extra_infos_dict.items():
             if len(v) == n:
@@ -1195,6 +1197,7 @@ class RayPPOTrainer:
                                 scores=scores,
                                 reward_extra_infos_dict=reward_extra_infos_dict,
                                 dump_path=rollout_data_dir,
+                                rollout_traces=batch.non_tensor_batch.get("rollout_trace"),
                             )
 
                     # validate
@@ -1219,6 +1222,34 @@ class RayPPOTrainer:
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
+                rollout_traces = batch.non_tensor_batch.get("rollout_trace")
+                if rollout_traces is not None:
+                    valid_traces = [trace for trace in rollout_traces if isinstance(trace, dict)]
+                    if valid_traces:
+                        model_ratios = [trace["model_time_ratio"] for trace in valid_traces]
+                        tool_ratios = [trace["tool_time_ratio"] for trace in valid_traces]
+                        scheduler_ratios = [trace["scheduler_time_ratio"] for trace in valid_traces]
+                        active_latencies = [trace["active_latency_ms"] for trace in valid_traces]
+                        queue_latencies = [trace["queue_latency_ms"] for trace in valid_traces]
+                        tool_call_counts = [trace["tool_call_count"] for trace in valid_traces]
+                        metrics.update(
+                            {
+                                "rollout_trace/model_time_ratio_mean": float(np.mean(model_ratios)),
+                                "rollout_trace/tool_time_ratio_mean": float(np.mean(tool_ratios)),
+                                "rollout_trace/scheduler_time_ratio_mean": float(np.mean(scheduler_ratios)),
+                                "rollout_trace/active_latency_ms_p50": float(np.percentile(active_latencies, 50)),
+                                "rollout_trace/active_latency_ms_p95": float(np.percentile(active_latencies, 95)),
+                                "rollout_trace/queue_latency_ms_p50": float(np.percentile(queue_latencies, 50)),
+                                "rollout_trace/queue_latency_ms_p95": float(np.percentile(queue_latencies, 95)),
+                                "rollout_trace/model_call_count_mean": float(
+                                    np.mean([trace["model_call_count"] for trace in valid_traces])
+                                ),
+                                "rollout_trace/tool_call_count_mean": float(np.mean(tool_call_counts)),
+                                "rollout_trace/tool_call_trajectory_rate": float(
+                                    np.mean([count > 0 for count in tool_call_counts])
+                                ),
+                            }
+                        )
                 # TODO: implement actual tflpo and theoretical tflpo
                 n_gpus = self.resource_pool_manager.get_n_gpus()
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))

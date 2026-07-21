@@ -10,6 +10,7 @@ import importlib
 import inspect
 import io
 import os
+import queue
 import sys
 import threading
 import time
@@ -236,6 +237,42 @@ class GroundingDinoBackend:
         return {"boxes": boxes, "confidence": scores, "labels": labels}
 
 
+class BackendPool:
+    """Dispatch blocking inference calls across independent model replicas."""
+
+    def __init__(self, backends: list[Any]):
+        if not backends:
+            raise ValueError("BackendPool requires at least one backend")
+        self.backends = backends
+        self._available: queue.Queue[Any] = queue.Queue()
+        for backend in backends:
+            self._available.put(backend)
+
+    @property
+    def replica_count(self) -> int:
+        return len(self.backends)
+
+    def _call(self, method: str, *args, **kwargs):
+        backend = self._available.get()
+        try:
+            return getattr(backend, method)(*args, **kwargs)
+        finally:
+            self._available.put(backend)
+
+    def segment(self, image: Image.Image, query: str) -> dict[str, Any]:
+        return self._call("segment", image, query)
+
+    def detect(self, image: Image.Image, query: str) -> dict[str, Any]:
+        return self._call("detect", image, query)
+
+
+def _replica_count(env_name: str) -> int:
+    value = int(os.getenv(env_name, "1"))
+    if value < 1:
+        raise ToolServerError(f"{env_name} must be at least 1, got {value}")
+    return value
+
+
 @dataclass
 class ToolService:
     sam3: Any | None
@@ -279,17 +316,27 @@ def load_service(backend: str) -> ToolService:
     sam3 = None
     grounding_dino = None
     if backend in {"all", "sam3"}:
-        sam3 = Sam3Backend(
-            os.getenv("SAM3_MODEL_PATH") or None,
-            os.getenv("SAM3_DEVICE", "cuda:0"),
-            float(os.getenv("SAM3_CONFIDENCE_THRESHOLD", "0.5")),
+        sam3 = BackendPool(
+            [
+                Sam3Backend(
+                    os.getenv("SAM3_MODEL_PATH") or None,
+                    os.getenv("SAM3_DEVICE", "cuda:0"),
+                    float(os.getenv("SAM3_CONFIDENCE_THRESHOLD", "0.5")),
+                )
+                for _ in range(_replica_count("SAM3_REPLICAS"))
+            ]
         )
     if backend in {"all", "groundingdino"}:
-        grounding_dino = GroundingDinoBackend(
-            os.getenv("GROUNDING_DINO_MODEL_PATH", "IDEA-Research/grounding-dino-base"),
-            os.getenv("GROUNDING_DINO_DEVICE", "cuda:1" if backend == "all" else "cuda:0"),
-            float(os.getenv("GROUNDING_DINO_BOX_THRESHOLD", "0.35")),
-            float(os.getenv("GROUNDING_DINO_TEXT_THRESHOLD", "0.25")),
+        grounding_dino = BackendPool(
+            [
+                GroundingDinoBackend(
+                    os.getenv("GROUNDING_DINO_MODEL_PATH", "IDEA-Research/grounding-dino-base"),
+                    os.getenv("GROUNDING_DINO_DEVICE", "cuda:1" if backend == "all" else "cuda:0"),
+                    float(os.getenv("GROUNDING_DINO_BOX_THRESHOLD", "0.35")),
+                    float(os.getenv("GROUNDING_DINO_TEXT_THRESHOLD", "0.25")),
+                )
+                for _ in range(_replica_count("GROUNDING_DINO_REPLICAS"))
+            ]
         )
     return ToolService(sam3=sam3, grounding_dino=grounding_dino)
 
@@ -313,6 +360,8 @@ def create_app(service: ToolService):
             "status": "ok",
             "sam3_loaded": service.sam3 is not None,
             "grounding_dino_loaded": service.grounding_dino is not None,
+            "sam3_replicas": getattr(service.sam3, "replica_count", 0),
+            "grounding_dino_replicas": getattr(service.grounding_dino, "replica_count", 0),
         }
 
     @app.post("/execute")
