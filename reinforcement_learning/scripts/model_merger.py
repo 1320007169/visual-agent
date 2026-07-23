@@ -69,38 +69,6 @@ except ImportError:
 from tqdm import tqdm
 from verl.utils import hf_processor, hf_tokenizer
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--backend", type=str, default='fsdp', help="The backend of the model", choices=["fsdp", "megatron"])
-parser.add_argument("--tie-word-embedding", action="store_true", help="Whether to tie word embedding weights")
-parser.add_argument("--is-value-model", action="store_true", help="Whether the model loaded as value model")
-parser.add_argument("--hf_model_path", type=str, required=True, help="The path for the huggingface model")
-parser.add_argument(
-    "--local_dir",
-    type=str,
-    required=True,
-    help="The path for your saved model. For megatron, point to the base dir of model, rng, optimizer checkpoints, commonly be `config.default_local_dir/global_step_\{global_step\}`.",
-)
-parser.add_argument("--target_dir", default=None, help="The path for the target model")
-parser.add_argument("--hf_upload_path", default=False, type=str, help="The path of the huggingface repo to upload")
-parser.add_argument("--test", action="store_true", help="test correctness of hf_model")
-parser.add_argument(
-    "--test_hf_dir",
-    type=str,
-    required=False,
-    help="test correctness of hf_model, , with hf_model in checkpoint.contents",
-)
-args = parser.parse_args()
-
-if args.target_dir is None:
-    args.target_dir = os.path.join(args.local_dir, "huggingface")
-
-os.makedirs(args.target_dir, exist_ok=True)
-if args.test:
-    assert args.test_hf_dir is not None, (
-        "You must run verl save checkpoint first, with hf_model in checkpoint.contents, and provide the directory here"
-    )
-
-
 @dataclass
 class ModelMergerConfig:
     operation: str  # 'merge' or 'test'

@@ -21,6 +21,7 @@ from visual_agent_inference import (  # noqa: E402
     HTTPVisualToolExecutor,
     OpenAICompatibleModelClient,
     VisualAgent,
+    image_to_data_url,
 )
 
 
@@ -64,6 +65,7 @@ class VisualAgentAPI(BaseAPI):
         max_turns: int = 8,
         max_tokens: int = 4096,
         temperature: float = 0,
+        use_tools: bool = True,
         use_native_tools: bool = False,
         verbose: bool = False,
         **kwargs: Any,
@@ -81,15 +83,19 @@ class VisualAgentAPI(BaseAPI):
         self.max_turns = max_turns
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.use_tools = use_tools
         self.use_native_tools = use_native_tools
         self._endpoint_index = 0
         self._endpoint_lock = threading.Lock()
         super().__init__(retry=retry, wait=wait, verbose=verbose, **kwargs)
 
     def set_inference_mode(self, mode: str) -> None:
-        if mode != "agent":
+        expected_mode = "agent" if self.use_tools else "non-think"
+        if mode != expected_mode:
             self.logger.warning(
-                "VisualAgentAPI always uses the visual-tool agent loop; ignoring inference mode %r", mode
+                "VisualAgentAPI is configured for %s inference; ignoring inference mode %r",
+                expected_mode,
+                mode,
             )
 
     def _next_endpoints(self) -> tuple[str, str]:
@@ -127,6 +133,34 @@ class VisualAgentAPI(BaseAPI):
             api_key=self.tool_api_key,
             timeout=self.timeout,
         )
+        if not self.use_tools:
+            content = [
+                {"type": "image_url", "image_url": {"url": image_to_data_url(path)}}
+                for path in images
+            ]
+            content.append({"type": "text", "text": question})
+            messages = [{"role": "user", "content": content}]
+            assistant = model_client.chat(
+                messages,
+                tools=None,
+                temperature=float(kwargs.pop("temperature", self.temperature)),
+                max_tokens=int(kwargs.pop("max_tokens", self.max_tokens)),
+            )
+            answer = assistant.get("content") or assistant.get("reasoning_content") or ""
+            answer = str(answer).strip()
+            messages.append({"role": "assistant", "content": answer})
+            trace = {
+                "response": answer,
+                "turns": 1,
+                "tool_calls": [],
+                "messages": messages,
+            }
+            return 0, {
+                "response": answer,
+                "raw_response": json.dumps(_redact_data_urls(trace), ensure_ascii=False),
+                "image_path_list": images,
+            }, trace
+
         agent = VisualAgent(
             model_client,
             tool_executor=tool_executor,

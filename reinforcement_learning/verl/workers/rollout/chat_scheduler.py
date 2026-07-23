@@ -654,6 +654,12 @@ class ChatCompletionScheduler:
             temperature=self.config.temperature,
             top_p=self.config.top_p,
         )
+        max_tokens_per_turn = self.config.multi_turn.get("max_tokens_per_turn")
+        if max_tokens_per_turn is not None:
+            max_tokens_per_turn = int(max_tokens_per_turn)
+            if max_tokens_per_turn <= 0:
+                raise ValueError("multi_turn.max_tokens_per_turn must be positive")
+            kwargs["max_tokens"] = max_tokens_per_turn
 
         # override sampling params for validation
         if batch.meta_info.get("validate", False):

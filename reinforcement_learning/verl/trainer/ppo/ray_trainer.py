@@ -859,8 +859,22 @@ class RayPPOTrainer:
         # find global_step_folder
         if self.config.trainer.resume_mode == "auto":
             if global_step_folder is None:
-                print("Training from scratch")
-                return 0
+                warm_start_data_path = self.config.trainer.get("warm_start_data_path", None)
+                warm_start_global_step = int(self.config.trainer.get("warm_start_global_step", 0))
+                if warm_start_data_path:
+                    if os.path.isdir(warm_start_data_path):
+                        warm_start_data_path = os.path.join(warm_start_data_path, "data.pt")
+                    if not os.path.isfile(warm_start_data_path):
+                        raise FileNotFoundError(f"Warm-start dataloader state not found: {warm_start_data_path}")
+                    dataloader_state_dict = torch.load(warm_start_data_path, weights_only=False)
+                    self.train_dataloader.load_state_dict(dataloader_state_dict)
+                    print(f"Warm-started dataloader state from: {warm_start_data_path}")
+                self.global_steps = warm_start_global_step
+                if warm_start_data_path or warm_start_global_step:
+                    print(f"Warm-starting training at logical global step {self.global_steps} with a fresh optimizer")
+                else:
+                    print("Training from scratch")
+                return self.global_steps
         else:
             if self.config.trainer.resume_mode == "resume_path":
                 assert isinstance(self.config.trainer.resume_from_path, str), "resume ckpt must be str type"

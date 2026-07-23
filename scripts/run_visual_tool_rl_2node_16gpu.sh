@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-to-three-node ModelArts GRPO launcher for Visual-Agent VLMs.
+# One-to-four-node ModelArts GRPO launcher for Visual-Agent VLMs.
 # Run the same command once on every node:
 #   bash /home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/scripts/run_visual_tool_rl_2node_16gpu.sh
 #
@@ -30,6 +30,7 @@ PLATFORM_MODEL_ROOT="${PLATFORM_MODEL_ROOT:-/opt/huawei/quoteModel/xiaoyi_tmpsto
 NNODES="${NNODES:-2}"
 RL_CUDA_VISIBLE_DEVICES="${RL_CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6}"
 TOOL_GPU="${TOOL_GPU:-7}"
+TOOL_CUDA_VISIBLE_DEVICES="${TOOL_CUDA_VISIBLE_DEVICES:-$TOOL_GPU}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-14}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-2}"
 ROLLOUT_N="${ROLLOUT_N:-2}"
@@ -37,6 +38,7 @@ PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-$TRAIN_BATCH_SIZE}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-2048}"
+MAX_TOKENS_PER_TURN="${MAX_TOKENS_PER_TURN:-}"
 MAX_TURNS="${MAX_TURNS:-9}"
 TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
@@ -52,8 +54,13 @@ FILTER_OVERLONG_PROMPTS="${FILTER_OVERLONG_PROMPTS:-True}"
 TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-False}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 SAVE_FREQ="${SAVE_FREQ:--1}"
+SAVE_HF_MODEL="${SAVE_HF_MODEL:-0}"
 TEST_FREQ="${TEST_FREQ:--1}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
+RESUME_MODE="${RESUME_MODE:-disable}"
+RESUME_FROM_PATH="${RESUME_FROM_PATH:-}"
+WARM_START_DATA_PATH="${WARM_START_DATA_PATH:-}"
+WARM_START_GLOBAL_STEP="${WARM_START_GLOBAL_STEP:-0}"
 TRAINER_PROJECT_NAME="${TRAINER_PROJECT_NAME:-visual-agent-rl-smoke-2node}"
 ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-}"
 
@@ -73,7 +80,7 @@ TOOL_CONFIG_PATH="${TOOL_CONFIG_PATH:-$RL_ROOT/examples/sglang_multiturn/config/
 
 VISUAL_TOOL_HOST="${VISUAL_TOOL_HOST:-0.0.0.0}"
 VISUAL_TOOL_PORT="${VISUAL_TOOL_PORT:-9000}"
-LOCAL_VISUAL_TOOL_API_BASE="http://127.0.0.1:$VISUAL_TOOL_PORT"
+VISUAL_TOOL_SERVERS_PER_NODE="${VISUAL_TOOL_SERVERS_PER_NODE:-1}"
 START_VISUAL_TOOL_SERVER="${START_VISUAL_TOOL_SERVER:-1}"
 SAM3_MODEL_PATH="${SAM3_MODEL_PATH:-$BASE/visual-tools/sam3/sam3.pt}"
 GROUNDING_DINO_MODEL_PATH="${GROUNDING_DINO_MODEL_PATH:-$BASE/visual-tools/grounding-dino-base-transformers}"
@@ -91,7 +98,7 @@ DONE_FILE="$SYNC_DIR/driver.done"
 RL_PYTHON="$RL_ENV_DIR/bin/python"
 RAY_BIN="$RL_ENV_DIR/bin/ray"
 TOOL_PYTHON="$TOOL_ENV_DIR/bin/python"
-TOOL_PID=""
+TOOL_PIDS=()
 # Do not use the generic RANK variable here: some ModelArts images set RANK=0
 # independently on every worker before the user entrypoint starts. Prefer
 # node-level platform variables, then fall back to matching the host list.
@@ -120,7 +127,7 @@ ensure_symlink "$PLATFORM_DATASET_ROOT" /home/ma-user/work/dataset
 ensure_symlink "$PLATFORM_ALGORITHM_ROOT" /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
 
-[[ "$NNODES" =~ ^[123]$ ]] || die "this launcher supports NNODES from 1 to 3, got $NNODES"
+[[ "$NNODES" =~ ^[1-4]$ ]] || die "this launcher supports NNODES from 1 to 4, got $NNODES"
 [[ -d "$REPO_ROOT" ]] || die "repository not found: $REPO_ROOT"
 [[ -d "$RL_ROOT/verl" ]] || die "VERL source not found: $RL_ROOT"
 [[ -x "$RL_PYTHON" ]] || die "RL Python not executable: $RL_PYTHON"
@@ -204,18 +211,29 @@ finally:
 PYNODEIP
 )}"
 
+[[ "$VISUAL_TOOL_SERVERS_PER_NODE" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_SERVERS_PER_NODE must be a positive integer"
+LOCAL_VISUAL_TOOL_API_BASES="$($RL_PYTHON - "$VISUAL_TOOL_PORT" "$VISUAL_TOOL_SERVERS_PER_NODE" <<'PYLOCALTOOLS'
+import sys
+
+base_port, server_count = map(int, sys.argv[1:])
+print(",".join(f"http://127.0.0.1:{base_port + index}" for index in range(server_count)))
+PYLOCALTOOLS
+)"
+IFS=',' read -r -a LOCAL_VISUAL_TOOL_ENDPOINT_ARRAY <<< "$LOCAL_VISUAL_TOOL_API_BASES"
+LOCAL_VISUAL_TOOL_API_BASE="${LOCAL_VISUAL_TOOL_ENDPOINT_ARRAY[0]}"
+
 # The rollout driver runs on node 0, so localhost would leave node 1's tool
 # GPU idle. Resolve every worker address and expose the resulting comma-
 # separated endpoint list to all OnlineVisualTool instances.
 VISUAL_TOOL_API_BASES="${VISUAL_TOOL_API_BASES:-${VISUAL_TOOL_API_BASE:-}}"
 if [[ -z "$VISUAL_TOOL_API_BASES" ]]; then
   if [[ -n "$HOST_LIST_RAW" ]]; then
-    VISUAL_TOOL_API_BASES="$($RL_PYTHON - "$HOST_LIST_RAW" "$VISUAL_TOOL_PORT" "$NNODES" <<'PYTOOLS'
+    VISUAL_TOOL_API_BASES="$($RL_PYTHON - "$HOST_LIST_RAW" "$VISUAL_TOOL_PORT" "$NNODES" "$VISUAL_TOOL_SERVERS_PER_NODE" <<'PYTOOLS'
 import json
 import socket
 import sys
 
-raw, port, node_count = sys.argv[1:]
+raw, port, node_count, servers_per_node = sys.argv[1:]
 try:
     parsed = json.loads(raw)
 except json.JSONDecodeError:
@@ -228,25 +246,54 @@ if isinstance(parsed, dict):
 hosts = [str(item) for item in parsed][:int(node_count)]
 if len(hosts) != int(node_count):
     raise SystemExit(f"expected {node_count} worker hosts, got {len(hosts)}")
-print(",".join(f"http://{socket.gethostbyname(host)}:{port}" for host in hosts))
+endpoints = []
+for host in hosts:
+    address = socket.gethostbyname(host)
+    endpoints.extend(
+        f"http://{address}:{int(port) + index}"
+        for index in range(int(servers_per_node))
+    )
+print(",".join(endpoints))
 PYTOOLS
 )"
   elif [[ "$NNODES" == "1" ]]; then
-    VISUAL_TOOL_API_BASES="http://$NODE_IP:$VISUAL_TOOL_PORT"
+    VISUAL_TOOL_API_BASES="$($RL_PYTHON - "$NODE_IP" "$VISUAL_TOOL_PORT" "$VISUAL_TOOL_SERVERS_PER_NODE" <<'PYTOOLS'
+import sys
+
+host, port, server_count = sys.argv[1:]
+print(",".join(f"http://{host}:{int(port) + index}" for index in range(int(server_count))))
+PYTOOLS
+)"
   else
     die "worker host list was not detected; set VISUAL_TOOL_API_BASES to all node endpoints"
   fi
 fi
 export VISUAL_TOOL_API_BASES
 IFS=',' read -r -a VISUAL_TOOL_ENDPOINT_ARRAY <<< "$VISUAL_TOOL_API_BASES"
-[[ "${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}" -eq "$NNODES" ]] || {
-  die "expected $NNODES visual-tool endpoints, got ${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}: $VISUAL_TOOL_API_BASES"
+EXPECTED_TOOL_ENDPOINTS="$((NNODES * VISUAL_TOOL_SERVERS_PER_NODE))"
+[[ "${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}" -eq "$EXPECTED_TOOL_ENDPOINTS" ]] || {
+  die "expected $EXPECTED_TOOL_ENDPOINTS visual-tool endpoints, got ${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}: $VISUAL_TOOL_API_BASES"
 }
 
 [[ "$SAM3_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "SAM3_REPLICAS must be a positive integer"
 [[ "$GROUNDING_DINO_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "GROUNDING_DINO_REPLICAS must be a positive integer"
 [[ "$VISUAL_TOOL_STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_STARTUP_TIMEOUT must be a positive integer"
 [[ "$WORKER_WAIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WORKER_WAIT_TIMEOUT must be a positive integer"
+[[ "$SAVE_HF_MODEL" == "0" || "$SAVE_HF_MODEL" == "1" ]] || die "SAVE_HF_MODEL must be 0 or 1"
+[[ "$WARM_START_GLOBAL_STEP" =~ ^[0-9]+$ ]] || die "WARM_START_GLOBAL_STEP must be a non-negative integer"
+if [[ -n "$WARM_START_DATA_PATH" ]]; then
+  [[ -f "$WARM_START_DATA_PATH" || -f "$WARM_START_DATA_PATH/data.pt" ]] || {
+    die "warm-start dataloader state not found: $WARM_START_DATA_PATH"
+  }
+fi
+case "$RESUME_MODE" in
+  auto|disable) ;;
+  resume_path)
+    [[ -n "$RESUME_FROM_PATH" ]] || die "RESUME_FROM_PATH is required when RESUME_MODE=resume_path"
+    [[ "$RESUME_FROM_PATH" == *global_step_* ]] || die "RESUME_FROM_PATH must point to a global_step_* directory"
+    ;;
+  *) die "RESUME_MODE must be auto, disable, or resume_path; got $RESUME_MODE" ;;
+esac
 
 # The ModelArts node-local /tmp has a small quota. Large GRPO batches force
 # Ray to spill many objects, so put spill objects on the shared high-capacity
@@ -261,7 +308,23 @@ export RAY_TMPDIR="$RAY_TEMP_DIR"
 IFS=',' read -r -a RL_GPU_ARRAY <<< "$RL_CUDA_VISIBLE_DEVICES"
 N_GPUS_PER_NODE="${#RL_GPU_ARRAY[@]}"
 TOTAL_RL_GPUS="$((NNODES * N_GPUS_PER_NODE))"
-[[ "$N_GPUS_PER_NODE" -eq 7 ]] || die "expected seven RL GPUs per node, got $N_GPUS_PER_NODE"
+(( N_GPUS_PER_NODE > 0 && N_GPUS_PER_NODE <= 8 )) || {
+  die "expected between one and eight RL GPUs per node, got $N_GPUS_PER_NODE"
+}
+IFS=',' read -r -a TOOL_GPU_ARRAY <<< "$TOOL_CUDA_VISIBLE_DEVICES"
+TOOL_GPU_COUNT="${#TOOL_GPU_ARRAY[@]}"
+(( TOOL_GPU_COUNT > 0 )) || die "TOOL_CUDA_VISIBLE_DEVICES must contain at least one GPU"
+for gpu in "${RL_GPU_ARRAY[@]}" "${TOOL_GPU_ARRAY[@]}"; do
+  [[ "$gpu" =~ ^[0-7]$ ]] || die "GPU index must be between 0 and 7, got '$gpu'"
+done
+for rl_gpu in "${RL_GPU_ARRAY[@]}"; do
+  for tool_gpu in "${TOOL_GPU_ARRAY[@]}"; do
+    [[ "$rl_gpu" != "$tool_gpu" ]] || die "GPU $rl_gpu is assigned to both RL and visual tools"
+  done
+done
+(( VISUAL_TOOL_SERVERS_PER_NODE >= TOOL_GPU_COUNT )) || {
+  die "VISUAL_TOOL_SERVERS_PER_NODE must be at least the number of tool GPUs ($TOOL_GPU_COUNT)"
+}
 [[ "$TRAIN_BATCH_SIZE" -ge "$TOTAL_RL_GPUS" ]] || {
   die "TRAIN_BATCH_SIZE ($TRAIN_BATCH_SIZE) must be at least total RL GPUs ($TOTAL_RL_GPUS)"
 }
@@ -312,10 +375,12 @@ cleanup() {
   if [[ "$NODE_RANK" == "0" ]]; then
     printf '%s\n' "$status" > "$DONE_FILE" 2>/dev/null || true
   fi
-  if [[ -n "$TOOL_PID" ]] && kill -0 "$TOOL_PID" 2>/dev/null; then
-    kill "$TOOL_PID" 2>/dev/null || true
-    wait "$TOOL_PID" 2>/dev/null || true
-  fi
+  for tool_pid in "${TOOL_PIDS[@]:-}"; do
+    if [[ -n "$tool_pid" ]] && kill -0 "$tool_pid" 2>/dev/null; then
+      kill "$tool_pid" 2>/dev/null || true
+      wait "$tool_pid" 2>/dev/null || true
+    fi
+  done
   "$RAY_BIN" stop --force >/dev/null 2>&1 || true
   exit "$status"
 }
@@ -335,14 +400,19 @@ echo "Tool environment: $TOOL_ENV_DIR"
 echo "Initial checkpoint: $MODEL_PATH"
 echo "RL GPUs per node: $RL_CUDA_VISIBLE_DEVICES ($N_GPUS_PER_NODE)"
 echo "Total RL GPUs: $TOTAL_RL_GPUS"
-echo "Local tool GPU: $TOOL_GPU"
-echo "Local tool API: $LOCAL_VISUAL_TOOL_API_BASE"
+echo "Local tool GPUs: $TOOL_CUDA_VISIBLE_DEVICES ($TOOL_GPU_COUNT)"
+echo "Local tool APIs: $LOCAL_VISUAL_TOOL_API_BASES"
 echo "Rollout tool APIs: $VISUAL_TOOL_API_BASES"
-echo "Tool replicas per node (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
+echo "Tool servers per node: $VISUAL_TOOL_SERVERS_PER_NODE"
+echo "Tool replicas per server (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
 echo "Max concurrent trajectories: $MAX_CONCURRENT_REQUESTS"
+echo "Max tokens per model turn: ${MAX_TOKENS_PER_TURN:-rollout default}"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
+echo "Save portable HuggingFace model: $SAVE_HF_MODEL"
+echo "Resume mode / path: $RESUME_MODE / ${RESUME_FROM_PATH:-automatic-or-none}"
+echo "Warm-start data / logical step: ${WARM_START_DATA_PATH:-disabled} / $WARM_START_GLOBAL_STEP"
 echo "Worker wait timeout: $WORKER_WAIT_TIMEOUT seconds"
 echo "Output: $OUTPUT_DIR"
 echo "Log: $LOG_FILE"
@@ -430,64 +500,75 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 if [[ "$START_VISUAL_TOOL_SERVER" == "1" ]]; then
-  echo "Starting local SAM3 + GroundingDINO on physical GPU $TOOL_GPU"
-  env \
-    CUDA_VISIBLE_DEVICES="$TOOL_GPU" \
-    CUDA_HOME="$TOOL_CUDA_HOME" \
-    PATH="$TOOL_ENV_DIR/bin:$TOOL_CUDA_HOME/bin:$PATH" \
-    LD_LIBRARY_PATH="$TOOL_ENV_DIR/lib:$TOOL_CUDA_LIBRARY_DIR:${LD_LIBRARY_PATH:-}" \
-    SAM3_MODEL_PATH="$SAM3_MODEL_PATH" \
-    SAM3_DEVICE=cuda:0 \
-    SAM3_REPLICAS="$SAM3_REPLICAS" \
-    GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" \
-    GROUNDING_DINO_DEVICE=cuda:0 \
-    GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
-    VISUAL_TOOL_BACKEND=all \
-    "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
-      --backend all --host "$VISUAL_TOOL_HOST" --port "$VISUAL_TOOL_PORT" \
-      >>"$TOOL_LOG_FILE" 2>&1 &
-  TOOL_PID=$!
+  echo "Starting $VISUAL_TOOL_SERVERS_PER_NODE local visual-tool servers on physical GPUs $TOOL_CUDA_VISIBLE_DEVICES"
+  for server_index in "${!LOCAL_VISUAL_TOOL_ENDPOINT_ARRAY[@]}"; do
+    server_port="$((VISUAL_TOOL_PORT + server_index))"
+    server_tool_gpu="${TOOL_GPU_ARRAY[$((server_index % TOOL_GPU_COUNT))]}"
+    server_log="${TOOL_LOG_FILE%.log}-server${server_index}.log"
+    env \
+      CUDA_VISIBLE_DEVICES="$server_tool_gpu" \
+      CUDA_HOME="$TOOL_CUDA_HOME" \
+      PATH="$TOOL_ENV_DIR/bin:$TOOL_CUDA_HOME/bin:$PATH" \
+      LD_LIBRARY_PATH="$TOOL_ENV_DIR/lib:$TOOL_CUDA_LIBRARY_DIR:${LD_LIBRARY_PATH:-}" \
+      SAM3_MODEL_PATH="$SAM3_MODEL_PATH" \
+      SAM3_DEVICE=cuda:0 \
+      SAM3_REPLICAS="$SAM3_REPLICAS" \
+      GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" \
+      GROUNDING_DINO_DEVICE=cuda:0 \
+      GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
+      VISUAL_TOOL_BACKEND=all \
+      "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
+        --backend all --host "$VISUAL_TOOL_HOST" --port "$server_port" \
+        >>"$server_log" 2>&1 &
+    TOOL_PIDS+=("$!")
+    echo "Started visual-tool server $server_index on GPU $server_tool_gpu, port $server_port; log: $server_log"
+  done
 
-  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASE" "$SAM3_REPLICAS" "$GROUNDING_DINO_REPLICAS" "$VISUAL_TOOL_STARTUP_TIMEOUT" <<'PYHEALTH'
+  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASES" "$SAM3_REPLICAS" "$GROUNDING_DINO_REPLICAS" "$VISUAL_TOOL_STARTUP_TIMEOUT" <<'PYHEALTH'
 import json
 import sys
 import time
 import urllib.request
 
-base = sys.argv[1].rstrip("/")
+base_urls = [item.strip().rstrip("/") for item in sys.argv[1].split(",") if item.strip()]
 expected_sam3, expected_grounding = map(int, sys.argv[2:4])
 timeout = int(sys.argv[4])
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-last_error = None
+pending = set(base_urls)
+last_errors = {}
 deadline = time.time() + timeout
 while time.time() < deadline:
-    try:
-        with opener.open(base + "/health", timeout=3) as response:
-            payload = json.load(response)
-        if (
-            payload.get("sam3_loaded")
-            and payload.get("grounding_dino_loaded")
-            and payload.get("sam3_replicas") == expected_sam3
-            and payload.get("grounding_dino_replicas") == expected_grounding
-        ):
-            print("Local visual-tool service ready:", payload)
-            break
-    except Exception as exc:
-        last_error = exc
+    for base in tuple(pending):
+        try:
+            with opener.open(base + "/health", timeout=3) as response:
+                payload = json.load(response)
+            if (
+                payload.get("sam3_loaded")
+                and payload.get("grounding_dino_loaded")
+                and payload.get("sam3_replicas") == expected_sam3
+                and payload.get("grounding_dino_replicas") == expected_grounding
+            ):
+                print("Local visual-tool service ready:", base, payload)
+                pending.remove(base)
+        except Exception as exc:
+            last_errors[base] = str(exc)
+    if not pending:
+        break
     time.sleep(1)
 else:
-    raise SystemExit(f"visual-tool service did not become ready: {last_error}")
+    raise SystemExit(f"visual-tool services did not become ready: {sorted(pending)}; errors={last_errors}")
 PYHEALTH
 elif [[ "$START_VISUAL_TOOL_SERVER" == "0" && "${DRY_RUN:-0}" != "1" ]]; then
-  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASE" <<'PYHEALTH'
+  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASES" <<'PYHEALTH'
 import json
 import sys
 import urllib.request
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-with opener.open(sys.argv[1].rstrip("/") + "/health", timeout=10) as response:
-    payload = json.load(response)
-assert payload.get("sam3_loaded") and payload.get("grounding_dino_loaded"), payload
-print("Using existing local visual-tool service:", payload)
+for base_url in [item.strip().rstrip("/") for item in sys.argv[1].split(",") if item.strip()]:
+    with opener.open(base_url + "/health", timeout=10) as response:
+        payload = json.load(response)
+    assert payload.get("sam3_loaded") and payload.get("grounding_dino_loaded"), payload
+    print("Using existing local visual-tool service:", base_url, payload)
 PYHEALTH
 elif [[ "$START_VISUAL_TOOL_SERVER" != "0" ]]; then
   die "START_VISUAL_TOOL_SERVER must be 0 or 1"
@@ -680,11 +761,29 @@ TRAIN_ARGS=(
   "trainer.test_freq=$TEST_FREQ"
   "trainer.total_epochs=$TOTAL_EPOCHS"
   "trainer.total_training_steps=$TOTAL_TRAINING_STEPS"
-  "trainer.resume_mode=disable"
+  "trainer.resume_mode=$RESUME_MODE"
   "trainer.project_name=$TRAINER_PROJECT_NAME"
   "trainer.experiment_name=$RUN_ID"
   "trainer.default_local_dir=$OUTPUT_DIR"
 )
+if [[ "$SAVE_HF_MODEL" == "1" ]]; then
+  TRAIN_ARGS+=("actor_rollout_ref.actor.checkpoint.save_contents=['model','hf_model','optimizer','extra']")
+fi
+if [[ "$RESUME_MODE" == "resume_path" ]]; then
+  TRAIN_ARGS+=("trainer.resume_from_path=$RESUME_FROM_PATH")
+fi
+if [[ -n "$WARM_START_DATA_PATH" || "$WARM_START_GLOBAL_STEP" != "0" ]]; then
+  TRAIN_ARGS+=(
+    "+trainer.warm_start_data_path=$WARM_START_DATA_PATH"
+    "+trainer.warm_start_global_step=$WARM_START_GLOBAL_STEP"
+  )
+fi
+if [[ -n "$MAX_TOKENS_PER_TURN" ]]; then
+  [[ "$MAX_TOKENS_PER_TURN" =~ ^[1-9][0-9]*$ ]] || {
+    die "MAX_TOKENS_PER_TURN must be a positive integer, got $MAX_TOKENS_PER_TURN"
+  }
+  TRAIN_ARGS+=("+actor_rollout_ref.rollout.multi_turn.max_tokens_per_turn=$MAX_TOKENS_PER_TURN")
+fi
 if [[ -n "$ROLLOUT_DATA_DIR" ]]; then
   TRAIN_ARGS+=("trainer.rollout_data_dir=$ROLLOUT_DATA_DIR")
 fi
@@ -703,5 +802,5 @@ set -x
 "$RL_PYTHON" -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "${HYDRA_ARGS[@]}"
 status=$?
 set +x
-echo "Two-node RL smoke test finished with exit code $status at $(date '+%Y-%m-%d %H:%M:%S')"
+echo "$NNODES-node RL run finished with exit code $status at $(date '+%Y-%m-%d %H:%M:%S')"
 exit "$status"

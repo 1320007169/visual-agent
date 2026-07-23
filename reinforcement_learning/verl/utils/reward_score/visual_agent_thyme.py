@@ -12,6 +12,29 @@ def extract_answer(text: str) -> str | None:
     return matches[-1].strip() if matches else None
 
 
+def has_strict_answer_format(text: str) -> bool:
+    """Require exactly one non-empty answer tag at the end of the final turn."""
+    if len(re.findall(r"<answer>", text, flags=re.IGNORECASE)) != 1:
+        return False
+    if len(re.findall(r"</answer>", text, flags=re.IGNORECASE)) != 1:
+        return False
+
+    final_message = text
+    if re.search(r"<tool_response>", text, flags=re.IGNORECASE):
+        assistant_markers = list(
+            re.finditer(r"(?:<\|im_start\|>|^|\s)assistant\s*", text, flags=re.IGNORECASE)
+        )
+        if not assistant_markers:
+            return False
+        final_message = text[assistant_markers[-1].end() :]
+
+    return re.search(
+        r"<answer>\s*[^<>]+?\s*</answer>\s*$",
+        final_message,
+        flags=re.DOTALL | re.IGNORECASE,
+    ) is not None
+
+
 def normalize_answer(text: str) -> str:
     text = text.strip().lower()
     text = re.sub(r"\s+", " ", text)
@@ -106,7 +129,7 @@ Candidate answer:
 
 def compute_score(solution_str: str, ground_truth: str, extra_info=None):
     answer = extract_answer(solution_str)
-    format_reward = 1.0 if answer else 0.0
+    format_reward = 1.0 if has_strict_answer_format(solution_str) else 0.0
     if not answer:
         return {"score": 0.0, "acc": 0.0, "format": 0.0, "tool_used": 0.0}
 
