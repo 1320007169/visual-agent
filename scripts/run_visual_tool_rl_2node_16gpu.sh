@@ -44,6 +44,9 @@ TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
 MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-28}"
+ENABLE_CHUNKED_PREFILL="${ENABLE_CHUNKED_PREFILL:-False}"
+USE_DYNAMIC_BSZ="${USE_DYNAMIC_BSZ:-False}"
+PPO_MAX_TOKEN_LEN_PER_GPU="${PPO_MAX_TOKEN_LEN_PER_GPU:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}"
 PREPARE_SMOKE_DATA="${PREPARE_SMOKE_DATA:-1}"
 DATA_PROMPT_KEY="${DATA_PROMPT_KEY:-prompt}"
 CUSTOM_DATASET_PATH="${CUSTOM_DATASET_PATH:-}"
@@ -280,6 +283,18 @@ EXPECTED_TOOL_ENDPOINTS="$((NNODES * VISUAL_TOOL_SERVERS_PER_NODE))"
 [[ "$VISUAL_TOOL_STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_STARTUP_TIMEOUT must be a positive integer"
 [[ "$WORKER_WAIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WORKER_WAIT_TIMEOUT must be a positive integer"
 [[ "$SAVE_HF_MODEL" == "0" || "$SAVE_HF_MODEL" == "1" ]] || die "SAVE_HF_MODEL must be 0 or 1"
+[[ "$ENABLE_CHUNKED_PREFILL" == "True" || "$ENABLE_CHUNKED_PREFILL" == "False" ]] || {
+  die "ENABLE_CHUNKED_PREFILL must be True or False, got $ENABLE_CHUNKED_PREFILL"
+}
+[[ "$USE_DYNAMIC_BSZ" == "True" || "$USE_DYNAMIC_BSZ" == "False" ]] || {
+  die "USE_DYNAMIC_BSZ must be True or False, got $USE_DYNAMIC_BSZ"
+}
+[[ "$PPO_MAX_TOKEN_LEN_PER_GPU" =~ ^[1-9][0-9]*$ ]] || {
+  die "PPO_MAX_TOKEN_LEN_PER_GPU must be a positive integer, got $PPO_MAX_TOKEN_LEN_PER_GPU"
+}
+(( PPO_MAX_TOKEN_LEN_PER_GPU >= MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH )) || {
+  die "PPO_MAX_TOKEN_LEN_PER_GPU ($PPO_MAX_TOKEN_LEN_PER_GPU) must fit one full sequence ($((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH)))"
+}
 [[ "$WARM_START_GLOBAL_STEP" =~ ^[0-9]+$ ]] || die "WARM_START_GLOBAL_STEP must be a non-negative integer"
 if [[ -n "$WARM_START_DATA_PATH" ]]; then
   [[ -f "$WARM_START_DATA_PATH" || -f "$WARM_START_DATA_PATH/data.pt" ]] || {
@@ -408,6 +423,8 @@ echo "Tool replicas per server (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDI
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
 echo "Max concurrent trajectories: $MAX_CONCURRENT_REQUESTS"
+echo "Chunked prefill: $ENABLE_CHUNKED_PREFILL"
+echo "Dynamic token batching / max tokens per GPU: $USE_DYNAMIC_BSZ / $PPO_MAX_TOKEN_LEN_PER_GPU"
 echo "Max tokens per model turn: ${MAX_TOKENS_PER_TURN:-rollout default}"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
 echo "Save portable HuggingFace model: $SAVE_HF_MODEL"
@@ -725,6 +742,8 @@ TRAIN_ARGS=(
   "actor_rollout_ref.actor.optim.lr=1e-6"
   "actor_rollout_ref.actor.ppo_mini_batch_size=$PPO_MINI_BATCH_SIZE"
   "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1"
+  "actor_rollout_ref.actor.use_dynamic_bsz=$USE_DYNAMIC_BSZ"
+  "actor_rollout_ref.actor.ppo_max_token_len_per_gpu=$PPO_MAX_TOKEN_LEN_PER_GPU"
   "actor_rollout_ref.actor.use_kl_loss=False"
   "actor_rollout_ref.actor.kl_loss_coef=0.0"
   "actor_rollout_ref.actor.entropy_coeff=0"
@@ -734,7 +753,7 @@ TRAIN_ARGS=(
   "actor_rollout_ref.rollout.mode=async"
   "actor_rollout_ref.rollout.tensor_model_parallel_size=1"
   "actor_rollout_ref.rollout.gpu_memory_utilization=$ROLLOUT_GPU_MEMORY_UTILIZATION"
-  "actor_rollout_ref.rollout.enable_chunked_prefill=False"
+  "actor_rollout_ref.rollout.enable_chunked_prefill=$ENABLE_CHUNKED_PREFILL"
   "actor_rollout_ref.rollout.enforce_eager=False"
   "actor_rollout_ref.rollout.free_cache_engine=False"
   "actor_rollout_ref.rollout.n=$ROLLOUT_N"

@@ -42,13 +42,23 @@ export CUSTOM_DATASET_PATH="${CUSTOM_DATASET_PATH:-$RL_ROOT/verl/utils/dataset/z
 export CUSTOM_DATASET_NAME="${CUSTOM_DATASET_NAME:-ZwzOriginalRelationDataset}"
 export PREPARE_SMOKE_DATA=0
 
-# 112 prompts x 16 samples = 1,792 trajectories per update, processed in
-# waves of 28. The PPO mini batch is divisible across 14 RL GPUs.
+# 112 prompts x 16 samples = 1,792 trajectories per update. The PPO mini
+# batch is divisible across 14 RL GPUs.
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-112}"
 export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-14}"
 export ROLLOUT_N="${ROLLOUT_N:-16}"
 export PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-28}"
-export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-28}"
+# Each trajectory holds one scheduler slot for its whole multi-turn life, so
+# the cap is cluster-wide, not per engine. 224 keeps 16 trajectories in flight
+# per vLLM engine (14 RL GPUs); 28 left the engines ~90% idle and produced
+# ~50-minute steps with p95 queue waits near 30 minutes. Chunked prefill stops
+# 8k-token prompt prefills from stalling co-scheduled decodes at this depth.
+export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-224}"
+export ENABLE_CHUNKED_PREFILL="${ENABLE_CHUNKED_PREFILL:-True}"
+# Token-packed PPO micro batches; enable after the concurrency change has been
+# validated. The per-GPU token cap must fit MAX_PROMPT_LENGTH+MAX_RESPONSE_LENGTH.
+export USE_DYNAMIC_BSZ="${USE_DYNAMIC_BSZ:-False}"
+export PPO_MAX_TOKEN_LEN_PER_GPU="${PPO_MAX_TOKEN_LEN_PER_GPU:-24576}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-165}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-8192}"
