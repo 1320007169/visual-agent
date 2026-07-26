@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
@@ -9,6 +10,8 @@ from verl.workers.rollout.chat_scheduler import (
     ToolCompletionCallback,
     _collect_message_images,
     _encode_response_with_images,
+    _image_to_data_url,
+    _prepare_rollout_images,
 )
 
 
@@ -205,3 +208,37 @@ def test_collect_and_merge_returned_image_inputs():
     )
     assert merged["pixel_values"].shape == (5, 3)
     assert merged["image_grid_thw"].tolist() == [[1, 2, 2], [1, 3, 3]]
+
+
+def test_source_image_transport_preserves_original_file_bytes(tmp_path):
+    original_bytes = b"original-png-file-bytes"
+    image_path = tmp_path / "source.png"
+    image_path.write_bytes(original_bytes)
+
+    data_url = _image_to_data_url(str(image_path))
+
+    assert data_url.startswith("data:image/png;base64,")
+    assert base64.b64decode(data_url.split(",", 1)[1]) == original_bytes
+
+
+def test_source_image_transport_encodes_once_per_source_prompt(tmp_path):
+    image_path = tmp_path / "source.jpg"
+    image_path.write_bytes(b"first-version")
+    cache = {}
+
+    first = _prepare_rollout_images([str(image_path)], 0, "source_cached", cache)
+    image_path.write_bytes(b"changed-after-first-encoding")
+    second = _prepare_rollout_images([str(image_path)], 0, "source_cached", cache)
+    other_source = _prepare_rollout_images([str(image_path)], 1, "source_cached", cache)
+
+    assert first is second
+    assert base64.b64decode(first[0].split(",", 1)[1]) == b"first-version"
+    assert base64.b64decode(other_source[0].split(",", 1)[1]) == b"changed-after-first-encoding"
+
+
+def test_pil_png_transport_keeps_existing_behavior():
+    images = [object()]
+    cache = {}
+
+    assert _prepare_rollout_images(images, 0, "pil_png", cache) is images
+    assert cache == {}

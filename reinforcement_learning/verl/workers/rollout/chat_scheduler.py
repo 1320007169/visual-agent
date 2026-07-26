@@ -19,6 +19,7 @@ import io
 import itertools
 import json
 import logging
+import os
 import time
 import re
 from abc import ABC, abstractmethod
@@ -69,7 +70,15 @@ def _tool_error_observation(
 def _image_to_data_url(image: Any) -> str:
     if isinstance(image, str) and image.startswith(("data:image/", "http://", "https://")):
         return image
-    if isinstance(image, bytes):
+    if isinstance(image, str):
+        image_path = os.path.expanduser(image)
+        if not os.path.isfile(image_path):
+            raise ValueError(f"Rollout image path does not exist: {image}")
+        with open(image_path, "rb") as image_file:
+            data = image_file.read()
+        suffix = os.path.splitext(image_path)[1].lower()
+        mime = "image/png" if suffix == ".png" else "image/jpeg"
+    elif isinstance(image, bytes):
         data, mime = image, "image/jpeg"
     elif hasattr(image, "save"):
         buffer = io.BytesIO()
@@ -78,6 +87,21 @@ def _image_to_data_url(image: Any) -> str:
     else:
         raise TypeError(f"Unsupported rollout image type: {type(image).__name__}")
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _prepare_rollout_images(
+    images: List[Any],
+    source_index: int,
+    transport_mode: str,
+    encoded_cache: Dict[int, List[str]],
+) -> List[Any]:
+    if transport_mode == "pil_png":
+        return images
+    if transport_mode != "source_cached":
+        raise ValueError(f"Unsupported VISUAL_AGENT_IMAGE_TRANSPORT={transport_mode!r}")
+    if source_index not in encoded_cache:
+        encoded_cache[source_index] = [_image_to_data_url(image) for image in images]
+    return encoded_cache[source_index]
 
 
 def _attach_images_to_messages(messages: List[Dict[str, Any]], images: List[Any]) -> None:
@@ -672,6 +696,8 @@ class ChatCompletionScheduler:
         # validation dataset has already been repeated in `PPOTrainer._validate`.
         n = 1 if batch.meta_info.get("validate", False) else self.config.n
         tasks, batch_conversations = [], [None] * len(batch) * n
+        image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
+        encoded_image_cache: Dict[int, List[str]] = {}
         for batch_index, conversation in enumerate(batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0)):
             # raw_prompt: [{"role": "user", "content": ""}, ["role": "assistant", "content"], ...]
             batch_conversations[batch_index] = conversation.tolist()
@@ -681,6 +707,12 @@ class ChatCompletionScheduler:
                 mm_data = batch.non_tensor_batch["origin_multi_modal_data"][source_index]
                 if isinstance(mm_data, dict):
                     images = list(mm_data.get("image") or [])
+            images = _prepare_rollout_images(
+                images,
+                source_index,
+                image_transport_mode,
+                encoded_image_cache,
+            )
             _attach_images_to_messages(batch_conversations[batch_index], images)
 
             tasks.append(
