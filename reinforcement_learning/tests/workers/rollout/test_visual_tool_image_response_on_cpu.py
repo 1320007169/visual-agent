@@ -231,9 +231,13 @@ def test_source_image_transport_encodes_once_per_source_prompt(tmp_path):
     second = _prepare_rollout_images([str(image_path)], 0, "source_cached", cache)
     other_source = _prepare_rollout_images([str(image_path)], 1, "source_cached", cache)
 
-    assert first is second
+    assert first is not second
     assert base64.b64decode(first[0].split(",", 1)[1]) == b"first-version"
+    assert base64.b64decode(second[0].split(",", 1)[1]) == b"first-version"
     assert base64.b64decode(other_source[0].split(",", 1)[1]) == b"changed-after-first-encoding"
+
+    first.append("crop-from-first-rollout")
+    assert second == [cache[0][0]]
 
 
 def test_pil_png_transport_keeps_existing_behavior():

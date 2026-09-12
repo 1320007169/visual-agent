@@ -48,11 +48,11 @@ def crop_zoom(
     uid: str = "sample",
     target_image: int = 0,
     label: str | None = None,
-    slack_ratio: float = 0.0,
+    slack_ratio: float = 0.1,
     min_crop_side: int = 96,
     crop_writer: CropWriter | None = None,
 ) -> Json:
-    """Crop a Qwen3-VL relative [0, 1000] bbox without resampling it."""
+    """Crop a Qwen3-VL relative bbox with 10% surrounding context by default."""
 
     image = _get_image(images, target_image)
     relative_box, selected_box = _relative_bbox_to_absolute(bbox_2d, image.size)
@@ -146,7 +146,7 @@ def sam3_crop_zoom(
     crop_dir: str | Path,
     uid: str = "sample",
     target_image: int = 0,
-    slack_ratio: float = 0.35,
+    slack_ratio: float = 0.1,
     min_crop_side: int = 96,
     output_side: int = 336,
     crop_writer: CropWriter | None = None,
@@ -194,7 +194,7 @@ def sam3_crop_zoom_multi(
     crop_dir: str | Path,
     uid: str = "sample",
     target_image: int = 0,
-    slack_ratio: float = 0.35,
+    slack_ratio: float = 0.1,
     min_crop_side: int = 96,
     output_side: int = 336,
     crop_writer: CropWriter | None = None,

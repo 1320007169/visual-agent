@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from functools import lru_cache
@@ -28,6 +29,16 @@ def has_strict_answer_format(text: str) -> bool:
             return False
         final_message = text[assistant_markers[-1].end() :]
 
+    # Reward managers decode response IDs with special tokens enabled. Accept
+    # chat terminators emitted by common model templates, but no ordinary text,
+    # after the final answer tag.
+    final_message = re.sub(
+        r"(?:\s*(?:<\|im_end\|>|<\|endoftext\|>|<\|eot_id\|>|</s>))+\s*$",
+        "",
+        final_message,
+        flags=re.IGNORECASE,
+    )
+
     return re.search(
         r"<answer>\s*[^<>]+?\s*</answer>\s*$",
         final_message,
@@ -39,6 +50,80 @@ def normalize_answer(text: str) -> str:
     text = text.strip().lower()
     text = re.sub(r"\s+", " ", text)
     return text.strip(" \t\r\n.,;:!?")
+
+
+RELATION_LABELS = frozenset(
+    {
+        "above", "below", "left of", "right of", "in front of",
+        "behind", "inside", "contain", "overlap", "next to",
+    }
+)
+RELATION_ALIASES = {
+    "left": "left of",
+    "to the left of": "left of",
+    "on the left of": "left of",
+    "right": "right of",
+    "to the right of": "right of",
+    "on the right of": "right of",
+    "under": "below",
+    "beneath": "below",
+    "inside of": "inside",
+    "within": "inside",
+    "contains": "contain",
+    "containing": "contain",
+    "overlaps": "overlap",
+    "overlapping": "overlap",
+    "beside": "next to",
+    "adjacent to": "next to",
+}
+
+
+def normalize_relation_answer(text: str) -> str | None:
+    """Normalize a complete relation label, rejecting ambiguous or free-form text."""
+    if not isinstance(text, str):
+        return None
+    normalized = normalize_answer(text)
+    normalized = RELATION_ALIASES.get(normalized, normalized)
+    return normalized if normalized in RELATION_LABELS else None
+
+
+def relation_match(prediction: str, ground_truth: str) -> bool:
+    prediction = normalize_relation_answer(prediction)
+    ground_truth = normalize_relation_answer(ground_truth)
+    return prediction is not None and ground_truth is not None and prediction == ground_truth
+
+
+def _is_zwz_relation_task(extra_info) -> bool:
+    if not isinstance(extra_info, dict):
+        return False
+    return (
+        extra_info.get("source") == "zwz_rl_vqa/original_images"
+        or extra_info.get("data_source") == "visual-agent-zwz-relation"
+        or extra_info.get("task_type") == "zwz_original_relation"
+    )
+
+
+def grounding_query_penalty(text: str) -> tuple[int, float]:
+    max_words = int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0"))
+    penalty_per_query = float(os.environ.get("GROUNDING_QUERY_PENALTY", "0"))
+    if max_words < 1 or penalty_per_query <= 0:
+        return 0, 0.0
+
+    invalid_queries = 0
+    for raw_call in re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL):
+        try:
+            call = json.loads(raw_call)
+        except json.JSONDecodeError:
+            continue
+        if call.get("name") != "grounding_detect":
+            continue
+        arguments = call.get("arguments")
+        query = arguments.get("query") if isinstance(arguments, dict) else None
+        if not isinstance(query, str) or len(query.split()) > max_words:
+            invalid_queries += 1
+
+    max_penalty = float(os.environ.get("GROUNDING_QUERY_MAX_PENALTY", "0.2"))
+    return invalid_queries, min(max_penalty, penalty_per_query * invalid_queries)
 
 
 def rule_match(prediction: str, ground_truth: str) -> bool:
@@ -130,18 +215,32 @@ Candidate answer:
 def compute_score(solution_str: str, ground_truth: str, extra_info=None):
     answer = extract_answer(solution_str)
     format_reward = 1.0 if has_strict_answer_format(solution_str) else 0.0
+    invalid_queries, query_penalty = grounding_query_penalty(solution_str)
     if not answer:
-        return {"score": 0.0, "acc": 0.0, "format": 0.0, "tool_used": 0.0}
+        result = {"score": 0.0, "acc": 0.0, "format": 0.0, "tool_used": 0.0}
+        if int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0")) > 0:
+            result["invalid_grounding_queries"] = float(invalid_queries)
+            result["query_penalty"] = query_penalty
+        return result
 
-    question = str((extra_info or {}).get("question", ""))
-    correct = rule_match(answer, ground_truth)
-    if not correct:
-        correct = judge_match(question, answer, ground_truth)
+    if _is_zwz_relation_task(extra_info):
+        # Closed relation labels must not receive a semantic-judge fallback:
+        # ambiguous answers such as "on" can otherwise match several labels.
+        correct = relation_match(answer, ground_truth)
+    else:
+        question = str((extra_info or {}).get("question", ""))
+        correct = rule_match(answer, ground_truth)
+        if not correct:
+            correct = judge_match(question, answer, ground_truth)
     accuracy_reward = 1.0 if correct else 0.0
     tool_used = 1.0 if "<tool_call>" in solution_str else 0.0
-    return {
-        "score": 0.9 * accuracy_reward + 0.1 * format_reward,
+    result = {
+        "score": max(0.0, 0.9 * accuracy_reward + 0.1 * format_reward - query_penalty),
         "acc": accuracy_reward,
         "format": format_reward,
         "tool_used": tool_used,
     }
+    if int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0")) > 0:
+        result["invalid_grounding_queries"] = float(invalid_queries)
+        result["query_penalty"] = query_penalty
+    return result

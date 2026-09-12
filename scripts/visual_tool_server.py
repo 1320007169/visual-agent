@@ -208,9 +208,23 @@ class GroundingDinoBackend:
         self.lock = threading.Lock()
 
     def detect(self, image: Image.Image, query: str) -> dict[str, Any]:
-        prompt = query.strip().rstrip(".") + "."
+        # GroundingDINO's text encoder has a 256-token limit. Long model
+        # queries otherwise fail inside the encoder and turn into repeated
+        # HTTP 500s during a rollout.
+        prompt = " ".join(str(query).split()).strip().rstrip(".") + "."
+        if prompt == ".":
+            raise ValueError("grounding_detect query must not be empty")
+        max_text_tokens = int(os.getenv("GROUNDING_DINO_MAX_TEXT_TOKENS", "256"))
+        if max_text_tokens < 1:
+            raise ValueError("GROUNDING_DINO_MAX_TEXT_TOKENS must be positive")
         with self.lock, self.torch.inference_mode():
-            inputs = self.processor(images=image, text=prompt, return_tensors="pt").to(self.device)
+            inputs = self.processor(
+                images=image,
+                text=prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_text_tokens,
+            ).to(self.device)
             outputs = self.model(**inputs)
             postprocess = self.processor.post_process_grounded_object_detection
             threshold_name = (
@@ -245,6 +259,9 @@ class BackendPool:
         if not backends:
             raise ValueError("BackendPool requires at least one backend")
         self.backends = backends
+        self.acquire_timeout = float(os.getenv("VISUAL_TOOL_BACKEND_ACQUIRE_TIMEOUT", "60"))
+        if self.acquire_timeout <= 0:
+            raise ValueError("VISUAL_TOOL_BACKEND_ACQUIRE_TIMEOUT must be positive")
         self._available: queue.Queue[Any] = queue.Queue()
         for backend in backends:
             self._available.put(backend)
@@ -254,7 +271,12 @@ class BackendPool:
         return len(self.backends)
 
     def _call(self, method: str, *args, **kwargs):
-        backend = self._available.get()
+        try:
+            backend = self._available.get(timeout=self.acquire_timeout)
+        except queue.Empty as exc:
+            raise ToolServerError(
+                f"Timed out waiting {self.acquire_timeout:.1f}s for a {method} backend replica"
+            ) from exc
         try:
             return getattr(backend, method)(*args, **kwargs)
         finally:
@@ -291,6 +313,20 @@ class ToolService:
     ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
+        if name == "grounding_detect":
+            max_words = int(os.getenv("GROUNDING_DINO_MAX_QUERY_WORDS", "0"))
+            query = arguments.get("query")
+            word_count = len(query.split()) if isinstance(query, str) else 0
+            if max_words > 0 and word_count > max_words:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"grounding_detect.query has {word_count} words; use one concrete "
+                        f"object noun phrase of at most {max_words} words, then retry"
+                    ),
+                    "word_count": word_count,
+                    "max_words": max_words,
+                }, []
         output_images: list[str] = []
 
         def collect_crop(crop: Image.Image, filename: str, target_image: int) -> str:

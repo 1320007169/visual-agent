@@ -481,6 +481,33 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             )
             log_gpu_memory_usage("After building sharding manager", logger=logger)
 
+        elif rollout_name == "perceive2reason":
+            from verl.workers.rollout.sglang_rollout.perceive2reason_rollout import Perceive2ReasonRollout
+            from verl.workers.sharding_manager.fsdp_sglang import FSDPSGLangShardingManager
+
+            local_path = copy_to_local(self.config.model.path)
+            log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
+            rollout = Perceive2ReasonRollout(
+                actor_module=local_path,
+                config=self.config.rollout,
+                tokenizer=self.tokenizer,
+                model_hf_config=self.actor_model_config,
+                trust_remote_code=trust_remote_code,
+            )
+            log_gpu_memory_usage(f"After building {rollout_name} rollout", logger=logger)
+
+            if torch.distributed.get_world_size() == 1:
+                self.config.rollout.load_format = "dummy_hf"
+            rollout_sharding_manager = FSDPSGLangShardingManager(
+                module=self.actor_module_fsdp,
+                inference_engine=rollout._engine,
+                model_config=self.actor_model_config,
+                full_params="hf" in self.config.rollout.load_format,
+                device_mesh=rollout_device_mesh,
+                offload_param=self._is_offload_param,
+            )
+            log_gpu_memory_usage("After building sharding manager", logger=logger)
+
         else:
             raise NotImplementedError(f"Rollout name: {self.config.rollout.name} is not supported")
 
@@ -697,13 +724,17 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
         data.meta_info["use_dynamic_bsz"] = self.config.rollout.log_prob_use_dynamic_bsz
         data.meta_info["temperature"] = self.config.rollout.temperature
+        calculate_entropy = self.config.actor.entropy_coeff != 0
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             with adapter_ctx:
-                output, entropys = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+                output, entropys = self.actor.compute_log_prob(data=data, calculate_entropy=calculate_entropy)
+            tensors = {"old_log_probs": output}
+            if calculate_entropy:
+                tensors["entropys"] = entropys
             output = DataProto.from_dict(
-                tensors={"old_log_probs": output, "entropys": entropys},
+                tensors=tensors,
                 meta_info={"temperature": self.config.rollout.temperature},
             )
             output = self.ulysses_sharding_manager.postprocess_data(output)

@@ -20,6 +20,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import shutil
 import time
 import uuid
 from collections import defaultdict
@@ -533,12 +534,57 @@ class RayPPOTrainer:
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
-    def _dump_generations(self, inputs, outputs, scores, reward_extra_infos_dict, dump_path, rollout_traces=None):
+    @staticmethod
+    def _generation_source_metadata(batch, dataset_split):
+        """Extract source identity from the batch in its current response order."""
+        metadata = []
+        for index in range(len(batch)):
+            row = {"dataset_split": dataset_split}
+            for key in ("source_index", "source_image", "data_source", "question"):
+                values = batch.non_tensor_batch.get(key)
+                if values is None:
+                    continue
+                value = values[index]
+                if isinstance(value, np.generic):
+                    value = value.item()
+                if key == "source_index":
+                    if isinstance(value, (str, int)) and not isinstance(value, bool):
+                        row[key] = value
+                elif isinstance(value, str):
+                    if key != "source_image" or not value.startswith(("data:", "http://", "https://")):
+                        row[key] = value
+
+            extra_infos = batch.non_tensor_batch.get("extra_info")
+            extra_info = extra_infos[index] if extra_infos is not None else None
+            if "question" not in row and isinstance(extra_info, dict):
+                question = extra_info.get("question")
+                if isinstance(question, str):
+                    row["question"] = question
+
+            reward_models = batch.non_tensor_batch.get("reward_model")
+            reward_model = reward_models[index] if reward_models is not None else None
+            ground_truth = reward_model.get("ground_truth") if isinstance(reward_model, dict) else None
+            solutions = batch.non_tensor_batch.get("solution")
+            if ground_truth is None and solutions is not None:
+                ground_truth = solutions[index]
+            if isinstance(ground_truth, np.generic):
+                ground_truth = ground_truth.item()
+            if isinstance(ground_truth, (str, int, float, bool)):
+                row["ground_truth"] = ground_truth
+            metadata.append(row)
+        return metadata
+
+    def _dump_generations(
+        self, inputs, outputs, scores, reward_extra_infos_dict, dump_path,
+        rollout_traces=None, source_metadata=None,
+    ):
         """Dump rollout/validation samples as JSONL."""
+        n = len(inputs)
+        if source_metadata is not None and len(source_metadata) != n:
+            raise ValueError(f"Generation source metadata count {len(source_metadata)} does not match inputs {n}")
         os.makedirs(dump_path, exist_ok=True)
         filename = os.path.join(dump_path, f"{self.global_steps}.jsonl")
 
-        n = len(inputs)
         base_data = {
             "input": inputs,
             "output": outputs,
@@ -551,6 +597,8 @@ class RayPPOTrainer:
         for k, v in reward_extra_infos_dict.items():
             if len(v) == n:
                 base_data[k] = v
+        if source_metadata is not None:
+            base_data["source_metadata"] = source_metadata
 
         lines = []
         for i in range(n):
@@ -594,6 +642,7 @@ class RayPPOTrainer:
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
+        sample_source_metadata = []
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -672,6 +721,7 @@ class RayPPOTrainer:
             sample_outputs.extend(output_texts)
 
             test_batch = test_batch.union(test_output_gen_batch)
+            sample_source_metadata.extend(self._generation_source_metadata(test_batch, "validation"))
 
             # evaluate using reward_function
             result = self.val_reward_fn(test_batch, return_dict=True)
@@ -697,6 +747,7 @@ class RayPPOTrainer:
                 scores=sample_scores,
                 reward_extra_infos_dict=reward_extra_infos_dict,
                 dump_path=val_data_dir,
+                source_metadata=sample_source_metadata,
             )
 
         for key_info, lst in reward_extra_infos_dict.items():
@@ -944,6 +995,28 @@ class RayPPOTrainer:
         # load checkpoint before doing anything
         self._load_checkpoint()
 
+        save_best_only = self.config.trainer.get("save_best_only", False)
+        save_best_hf_model = self.config.trainer.get("save_best_hf_model", False)
+        track_best_checkpoint = save_best_only or save_best_hf_model
+        best_metric_name = self.config.trainer.get("best_metric", None)
+        best_val_metric = None
+        best_val_step = None
+
+        def record_best_checkpoint(step, metric_value, checkpoint_path):
+            os.makedirs(self.config.trainer.default_local_dir, exist_ok=True)
+            metadata_path = os.path.join(self.config.trainer.default_local_dir, "best_checkpoint.json")
+            with open(metadata_path, "w") as f:
+                json.dump(
+                    {
+                        "step": step,
+                        "metric": best_metric_name,
+                        "value": metric_value,
+                        "checkpoint": checkpoint_path,
+                    },
+                    f,
+                    indent=4,
+                )
+
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
@@ -951,6 +1024,14 @@ class RayPPOTrainer:
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
+            if track_best_checkpoint:
+                best_val_metric = val_metrics[best_metric_name]
+                best_val_step = self.global_steps
+                record_best_checkpoint(
+                    step=best_val_step,
+                    metric_value=best_val_metric,
+                    checkpoint_path=self.config.actor_rollout_ref.model.path,
+                )
             if self.config.trainer.get("val_only", False):
                 return
 
@@ -1100,13 +1181,14 @@ class RayPPOTrainer:
                     # recompute old_log_probs
                     with marked_timer("old_log_prob", timing_raw, color="blue"):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
-                        entropys = old_log_prob.batch["entropys"]
-                        response_masks = batch.batch["response_mask"]
-                        loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                        entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
-                        old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
-                        metrics.update(old_log_prob_metrics)
-                        old_log_prob.batch.pop("entropys")
+                        if "entropys" in old_log_prob.batch:
+                            entropys = old_log_prob.batch["entropys"]
+                            response_masks = batch.batch["response_mask"]
+                            loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
+                            entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
+                            old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
+                            metrics.update(old_log_prob_metrics)
+                            old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
 
                         if "rollout_log_probs" in batch.batch.keys():
@@ -1212,9 +1294,11 @@ class RayPPOTrainer:
                                 reward_extra_infos_dict=reward_extra_infos_dict,
                                 dump_path=rollout_data_dir,
                                 rollout_traces=batch.non_tensor_batch.get("rollout_trace"),
+                                source_metadata=self._generation_source_metadata(batch, "train"),
                             )
 
                     # validate
+                    is_best_val_step = False
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
                         with marked_timer("testing", timing_raw, color="green"):
                             val_metrics: dict = self._validate()
@@ -1222,9 +1306,32 @@ class RayPPOTrainer:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+                        if track_best_checkpoint:
+                            current_val_metric = val_metrics[best_metric_name]
+                            if best_val_metric is None or current_val_metric > best_val_metric:
+                                best_val_metric = current_val_metric
+                                best_val_step = self.global_steps
+                                is_best_val_step = True
+                                pprint(f"New best validation metric: {best_metric_name}={best_val_metric} at step {best_val_step}")
+
+                    should_save = self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0)
+                    if save_best_only:
+                        should_save = is_best_val_step or is_last_step
+                    if should_save:
                         with marked_timer("save_checkpoint", timing_raw, color="green"):
                             self._save_checkpoint()
+                        if track_best_checkpoint and is_best_val_step:
+                            best_checkpoint_path = os.path.join(
+                                self.config.trainer.default_local_dir,
+                                f"global_step_{best_val_step}",
+                                "actor",
+                                "huggingface",
+                            )
+                            if save_best_hf_model:
+                                best_hf_model_dir = self.config.trainer.best_hf_model_dir
+                                shutil.copytree(best_checkpoint_path, best_hf_model_dir, dirs_exist_ok=True)
+                                best_checkpoint_path = best_hf_model_dir
+                            record_best_checkpoint(best_val_step, best_val_metric, best_checkpoint_path)
 
                 # training metrics
                 metrics.update(

@@ -1,0 +1,48 @@
+### model
+model_name_or_path: /home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/DeepEyesV2/models/Qwen3-VL-8B-Instruct
+image_max_pixels: 262144
+video_max_pixels: 16384
+trust_remote_code: true
+flash_attn: sdpa
+
+### method
+stage: sft
+do_train: true
+finetuning_type: full
+freeze_vision_tower: true
+freeze_multi_modal_projector: true
+freeze_language_model: false
+deepspeed: cold_start/examples/deepspeed/ds_z3_config.json
+disable_gradient_checkpointing: false
+
+### dataset
+dataset_dir: cold_start/data
+media_dir: .
+dataset: visual_agent_direct34644_thyme9795_slack015_44439
+template: qwen3_vl_nothink
+cutoff_len: 12288
+max_samples: 44439
+overwrite_cache: true
+preprocessing_num_workers: 8
+dataloader_num_workers: 2
+
+### output
+output_dir: saves/visual_agent_direct34644_thyme9795_slack015_lr2e6_2epoch_44439/qwen3/full/sft
+logging_steps: 10
+save_steps: 200
+save_total_limit: 3
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: none
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 4
+learning_rate: 2.0e-6
+num_train_epochs: 2.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: true
+ddp_timeout: 180000000
+resume_from_checkpoint: null

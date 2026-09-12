@@ -39,7 +39,14 @@ TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-2048}"
 MAX_TOKENS_PER_TURN="${MAX_TOKENS_PER_TURN:-}"
-MAX_TURNS="${MAX_TURNS:-9}"
+ROLLOUT_NAME="${ROLLOUT_NAME:-vllm}"
+ROLLOUT_MODE="${ROLLOUT_MODE:-async}"
+ACTOR_LR="${ACTOR_LR:-1e-6}"
+ACTOR_USE_KL_LOSS="${ACTOR_USE_KL_LOSS:-False}"
+ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.0}"
+ACTOR_KL_LOSS_TYPE="${ACTOR_KL_LOSS_TYPE:-low_var_kl}"
+ACTOR_ENTROPY_COEFF="${ACTOR_ENTROPY_COEFF:-0}"
+MAX_TURNS="${MAX_TURNS:-12}"
 TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
@@ -58,7 +65,13 @@ TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-False}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 SAVE_FREQ="${SAVE_FREQ:--1}"
 SAVE_HF_MODEL="${SAVE_HF_MODEL:-0}"
+MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-}"
 TEST_FREQ="${TEST_FREQ:--1}"
+SAVE_BEST_ONLY="${SAVE_BEST_ONLY:-False}"
+SAVE_BEST_HF_MODEL="${SAVE_BEST_HF_MODEL:-False}"
+BEST_HF_MODEL_DIR="${BEST_HF_MODEL_DIR:-}"
+BEST_METRIC="${BEST_METRIC:-}"
+VALIDATION_DATA_DIR="${VALIDATION_DATA_DIR:-}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 RESUME_MODE="${RESUME_MODE:-disable}"
 RESUME_FROM_PATH="${RESUME_FROM_PATH:-}"
@@ -87,6 +100,7 @@ VISUAL_TOOL_SERVERS_PER_NODE="${VISUAL_TOOL_SERVERS_PER_NODE:-1}"
 START_VISUAL_TOOL_SERVER="${START_VISUAL_TOOL_SERVER:-1}"
 SAM3_MODEL_PATH="${SAM3_MODEL_PATH:-$BASE/visual-tools/sam3/sam3.pt}"
 GROUNDING_DINO_MODEL_PATH="${GROUNDING_DINO_MODEL_PATH:-$BASE/visual-tools/grounding-dino-base-transformers}"
+VISUAL_TOOL_BACKEND="${VISUAL_TOOL_BACKEND:-all}"
 SAM3_REPLICAS="${SAM3_REPLICAS:-1}"
 GROUNDING_DINO_REPLICAS="${GROUNDING_DINO_REPLICAS:-1}"
 VISUAL_TOOL_STARTUP_TIMEOUT="${VISUAL_TOOL_STARTUP_TIMEOUT:-600}"
@@ -94,6 +108,7 @@ VISUAL_TOOL_STARTUP_TIMEOUT="${VISUAL_TOOL_STARTUP_TIMEOUT:-600}"
 JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
 RUN_ID="${RUN_ID:-visual_rl_2node16_${JOB_TOKEN}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/saves/visual_tool_rl_smoke_2node/$RUN_ID}"
+BEST_HF_MODEL_DIR="${BEST_HF_MODEL_DIR:-$OUTPUT_DIR/best_huggingface}"
 LOG_DIR="${LOG_DIR:-$BASE/logs/visual-tool-rl-2node}"
 SYNC_DIR="${SYNC_DIR:-$BASE/tmp/visual-tool-rl-${NNODES}node/$RUN_ID}"
 DONE_FILE="$SYNC_DIR/driver.done"
@@ -139,8 +154,19 @@ ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
 [[ -f "$MODEL_PATH/config.json" ]] || die "HF checkpoint config not found: $MODEL_PATH/config.json"
 [[ -f "$MODEL_PATH/model.safetensors.index.json" ]] || die "HF checkpoint weights not found: $MODEL_PATH"
 [[ -f "$TOOL_CONFIG_PATH" ]] || die "visual tool config not found: $TOOL_CONFIG_PATH"
-[[ -f "$SAM3_MODEL_PATH" ]] || die "SAM3 checkpoint not found: $SAM3_MODEL_PATH"
-[[ -f "$GROUNDING_DINO_MODEL_PATH/config.json" ]] || die "GroundingDINO model not found: $GROUNDING_DINO_MODEL_PATH"
+case "$VISUAL_TOOL_BACKEND" in
+  all)
+    [[ -f "$SAM3_MODEL_PATH" ]] || die "SAM3 checkpoint not found: $SAM3_MODEL_PATH"
+    [[ -f "$GROUNDING_DINO_MODEL_PATH/config.json" ]] || die "GroundingDINO model not found: $GROUNDING_DINO_MODEL_PATH"
+    ;;
+  sam3)
+    [[ -f "$SAM3_MODEL_PATH" ]] || die "SAM3 checkpoint not found: $SAM3_MODEL_PATH"
+    ;;
+  groundingdino)
+    [[ -f "$GROUNDING_DINO_MODEL_PATH/config.json" ]] || die "GroundingDINO model not found: $GROUNDING_DINO_MODEL_PATH"
+    ;;
+  *) die "VISUAL_TOOL_BACKEND must be all, sam3, or groundingdino; got $VISUAL_TOOL_BACKEND" ;;
+esac
 [[ -d "$CUDA_HOME" ]] || die "CUDA toolkit not found: $CUDA_HOME"
 [[ -d "$CUDA_LIBRARY_DIR" ]] || die "CUDA library directory not found: $CUDA_LIBRARY_DIR"
 [[ -d "$TOOL_CUDA_HOME" ]] || die "tool CUDA toolkit not found: $TOOL_CUDA_HOME"
@@ -278,11 +304,27 @@ EXPECTED_TOOL_ENDPOINTS="$((NNODES * VISUAL_TOOL_SERVERS_PER_NODE))"
   die "expected $EXPECTED_TOOL_ENDPOINTS visual-tool endpoints, got ${#VISUAL_TOOL_ENDPOINT_ARRAY[@]}: $VISUAL_TOOL_API_BASES"
 }
 
-[[ "$SAM3_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "SAM3_REPLICAS must be a positive integer"
-[[ "$GROUNDING_DINO_REPLICAS" =~ ^[1-9][0-9]*$ ]] || die "GROUNDING_DINO_REPLICAS must be a positive integer"
+[[ "$SAM3_REPLICAS" =~ ^[0-9]+$ ]] || die "SAM3_REPLICAS must be a non-negative integer"
+[[ "$GROUNDING_DINO_REPLICAS" =~ ^[0-9]+$ ]] || die "GROUNDING_DINO_REPLICAS must be a non-negative integer"
+case "$VISUAL_TOOL_BACKEND" in
+  all)
+    (( SAM3_REPLICAS > 0 && GROUNDING_DINO_REPLICAS > 0 )) || die "backend=all requires positive SAM3 and GroundingDINO replica counts"
+    ;;
+  sam3)
+    (( SAM3_REPLICAS > 0 && GROUNDING_DINO_REPLICAS == 0 )) || die "backend=sam3 requires SAM3_REPLICAS>0 and GROUNDING_DINO_REPLICAS=0"
+    ;;
+  groundingdino)
+    (( SAM3_REPLICAS == 0 && GROUNDING_DINO_REPLICAS > 0 )) || die "backend=groundingdino requires SAM3_REPLICAS=0 and GROUNDING_DINO_REPLICAS>0"
+    ;;
+esac
 [[ "$VISUAL_TOOL_STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "VISUAL_TOOL_STARTUP_TIMEOUT must be a positive integer"
 [[ "$WORKER_WAIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || die "WORKER_WAIT_TIMEOUT must be a positive integer"
 [[ "$SAVE_HF_MODEL" == "0" || "$SAVE_HF_MODEL" == "1" ]] || die "SAVE_HF_MODEL must be 0 or 1"
+if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
+  [[ "$MAX_ACTOR_CKPT_TO_KEEP" =~ ^[1-9][0-9]*$ ]] || {
+    die "MAX_ACTOR_CKPT_TO_KEEP must be a positive integer, got $MAX_ACTOR_CKPT_TO_KEEP"
+  }
+fi
 [[ "$ENABLE_CHUNKED_PREFILL" == "True" || "$ENABLE_CHUNKED_PREFILL" == "False" ]] || {
   die "ENABLE_CHUNKED_PREFILL must be True or False, got $ENABLE_CHUNKED_PREFILL"
 }
@@ -419,6 +461,7 @@ echo "Local tool GPUs: $TOOL_CUDA_VISIBLE_DEVICES ($TOOL_GPU_COUNT)"
 echo "Local tool APIs: $LOCAL_VISUAL_TOOL_API_BASES"
 echo "Rollout tool APIs: $VISUAL_TOOL_API_BASES"
 echo "Tool servers per node: $VISUAL_TOOL_SERVERS_PER_NODE"
+echo "Visual-tool backend: $VISUAL_TOOL_BACKEND"
 echo "Tool replicas per server (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
@@ -428,6 +471,8 @@ echo "Dynamic token batching / max tokens per GPU: $USE_DYNAMIC_BSZ / $PPO_MAX_T
 echo "Max tokens per model turn: ${MAX_TOKENS_PER_TURN:-rollout default}"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
 echo "Save portable HuggingFace model: $SAVE_HF_MODEL"
+echo "Actor checkpoints to keep: ${MAX_ACTOR_CKPT_TO_KEEP:-all}"
+echo "Validation frequency / best metric: $TEST_FREQ / ${BEST_METRIC:-disabled}"
 echo "Resume mode / path: $RESUME_MODE / ${RESUME_FROM_PATH:-automatic-or-none}"
 echo "Warm-start data / logical step: ${WARM_START_DATA_PATH:-disabled} / $WARM_START_GLOBAL_STEP"
 echo "Worker wait timeout: $WORKER_WAIT_TIMEOUT seconds"
@@ -533,9 +578,9 @@ if [[ "$START_VISUAL_TOOL_SERVER" == "1" ]]; then
       GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" \
       GROUNDING_DINO_DEVICE=cuda:0 \
       GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
-      VISUAL_TOOL_BACKEND=all \
+      VISUAL_TOOL_BACKEND="$VISUAL_TOOL_BACKEND" \
       "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
-        --backend all --host "$VISUAL_TOOL_HOST" --port "$server_port" \
+        --backend "$VISUAL_TOOL_BACKEND" --host "$VISUAL_TOOL_HOST" --port "$server_port" \
         >>"$server_log" 2>&1 &
     TOOL_PIDS+=("$!")
     echo "Started visual-tool server $server_index on GPU $server_tool_gpu, port $server_port; log: $server_log"
@@ -560,8 +605,8 @@ while time.time() < deadline:
             with opener.open(base + "/health", timeout=3) as response:
                 payload = json.load(response)
             if (
-                payload.get("sam3_loaded")
-                and payload.get("grounding_dino_loaded")
+                bool(payload.get("sam3_loaded")) == (expected_sam3 > 0)
+                and bool(payload.get("grounding_dino_loaded")) == (expected_grounding > 0)
                 and payload.get("sam3_replicas") == expected_sam3
                 and payload.get("grounding_dino_replicas") == expected_grounding
             ):
@@ -576,15 +621,19 @@ else:
     raise SystemExit(f"visual-tool services did not become ready: {sorted(pending)}; errors={last_errors}")
 PYHEALTH
 elif [[ "$START_VISUAL_TOOL_SERVER" == "0" && "${DRY_RUN:-0}" != "1" ]]; then
-  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASES" <<'PYHEALTH'
+  "$RL_PYTHON" - "$LOCAL_VISUAL_TOOL_API_BASES" "$SAM3_REPLICAS" "$GROUNDING_DINO_REPLICAS" <<'PYHEALTH'
 import json
 import sys
 import urllib.request
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+expected_sam3, expected_grounding = map(int, sys.argv[2:])
 for base_url in [item.strip().rstrip("/") for item in sys.argv[1].split(",") if item.strip()]:
     with opener.open(base_url + "/health", timeout=10) as response:
         payload = json.load(response)
-    assert payload.get("sam3_loaded") and payload.get("grounding_dino_loaded"), payload
+    assert bool(payload.get("sam3_loaded")) == (expected_sam3 > 0), payload
+    assert bool(payload.get("grounding_dino_loaded")) == (expected_grounding > 0), payload
+    assert payload.get("sam3_replicas") == expected_sam3, payload
+    assert payload.get("grounding_dino_replicas") == expected_grounding, payload
     print("Using existing local visual-tool service:", base_url, payload)
 PYHEALTH
 elif [[ "$START_VISUAL_TOOL_SERVER" != "0" ]]; then
@@ -739,18 +788,19 @@ TRAIN_ARGS=(
   "actor_rollout_ref.model.trust_remote_code=True"
   "actor_rollout_ref.model.use_remove_padding=False"
   "actor_rollout_ref.model.enable_gradient_checkpointing=True"
-  "actor_rollout_ref.actor.optim.lr=1e-6"
+  "actor_rollout_ref.actor.optim.lr=$ACTOR_LR"
   "actor_rollout_ref.actor.ppo_mini_batch_size=$PPO_MINI_BATCH_SIZE"
   "actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1"
   "actor_rollout_ref.actor.use_dynamic_bsz=$USE_DYNAMIC_BSZ"
   "actor_rollout_ref.actor.ppo_max_token_len_per_gpu=$PPO_MAX_TOKEN_LEN_PER_GPU"
-  "actor_rollout_ref.actor.use_kl_loss=False"
-  "actor_rollout_ref.actor.kl_loss_coef=0.0"
-  "actor_rollout_ref.actor.entropy_coeff=0"
+  "actor_rollout_ref.actor.use_kl_loss=$ACTOR_USE_KL_LOSS"
+  "actor_rollout_ref.actor.kl_loss_coef=$ACTOR_KL_LOSS_COEF"
+  "actor_rollout_ref.actor.kl_loss_type=$ACTOR_KL_LOSS_TYPE"
+  "actor_rollout_ref.actor.entropy_coeff=$ACTOR_ENTROPY_COEFF"
   "actor_rollout_ref.actor.fsdp_config.param_offload=False"
   "actor_rollout_ref.actor.fsdp_config.optimizer_offload=False"
-  "actor_rollout_ref.rollout.name=vllm"
-  "actor_rollout_ref.rollout.mode=async"
+  "actor_rollout_ref.rollout.name=$ROLLOUT_NAME"
+  "actor_rollout_ref.rollout.mode=$ROLLOUT_MODE"
   "actor_rollout_ref.rollout.tensor_model_parallel_size=1"
   "actor_rollout_ref.rollout.gpu_memory_utilization=$ROLLOUT_GPU_MEMORY_UTILIZATION"
   "actor_rollout_ref.rollout.enable_chunked_prefill=$ENABLE_CHUNKED_PREFILL"
@@ -787,6 +837,20 @@ TRAIN_ARGS=(
 )
 if [[ "$SAVE_HF_MODEL" == "1" ]]; then
   TRAIN_ARGS+=("actor_rollout_ref.actor.checkpoint.save_contents=['model','hf_model','optimizer','extra']")
+fi
+if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
+  TRAIN_ARGS+=("trainer.max_actor_ckpt_to_keep=$MAX_ACTOR_CKPT_TO_KEEP")
+fi
+if [[ "$SAVE_BEST_ONLY" == "True" || "$SAVE_BEST_HF_MODEL" == "True" ]]; then
+    TRAIN_ARGS+=(
+        "+trainer.save_best_only=$SAVE_BEST_ONLY"
+        "+trainer.save_best_hf_model=$SAVE_BEST_HF_MODEL"
+        "+trainer.best_hf_model_dir=$BEST_HF_MODEL_DIR"
+        "+trainer.best_metric=$BEST_METRIC"
+    )
+fi
+if [[ -n "$VALIDATION_DATA_DIR" ]]; then
+    TRAIN_ARGS+=("trainer.validation_data_dir=$VALIDATION_DATA_DIR")
 fi
 if [[ "$RESUME_MODE" == "resume_path" ]]; then
   TRAIN_ARGS+=("trainer.resume_from_path=$RESUME_FROM_PATH")

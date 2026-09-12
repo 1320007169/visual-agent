@@ -6,9 +6,11 @@ set -Eeuo pipefail
 # single-GPU vLLM endpoints. Models run sequentially and use separate outputs.
 
 mkdir -p /opt/huawei/explorer-env /home/ma-user/work/model
-[[ -e /opt/huawei/explorer-env/dataset ]] || ln -s /opt/huawei/dataset /opt/huawei/explorer-env/dataset
-[[ -e /home/ma-user/work/dataset ]] || ln -s /opt/huawei/dataset /home/ma-user/work/dataset
-[[ -e /home/ma-user/work/model/xiaoyi_tmpstorage ]] || \
+[[ -e /opt/huawei/explorer-env/dataset || -L /opt/huawei/explorer-env/dataset ]] || \
+  ln -s /opt/huawei/dataset /opt/huawei/explorer-env/dataset
+[[ -e /home/ma-user/work/dataset || -L /home/ma-user/work/dataset ]] || \
+  ln -s /opt/huawei/dataset /home/ma-user/work/dataset
+[[ -e /home/ma-user/work/model/xiaoyi_tmpstorage || -L /home/ma-user/work/model/xiaoyi_tmpstorage ]] || \
   ln -s /opt/huawei/quoteModel/xiaoyi_tmpstorage /home/ma-user/work/model/xiaoyi_tmpstorage
 
 BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
@@ -66,19 +68,23 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 required_paths=(
   "$ENV_DIR/bin/python"
-  "$TOOL_ENV_DIR/bin/python"
   "$REPO_ROOT/scripts/serve_visual_agent_model.sh"
-  "$REPO_ROOT/scripts/visual_tool_server.py"
   "$REPO_ROOT/evaluation/VLMEvalKit/run_visual_agent_benchmarks.sh"
-  "$SFT_MODEL_PATH/config.json"
-  "$SFT_MODEL_PATH/model.safetensors.index.json"
   "$QWEN3_MODEL_PATH/config.json"
   "$QWEN3_MODEL_PATH/model.safetensors.index.json"
-  "$SAM3_MODEL_PATH"
-  "$GROUNDING_DINO_MODEL_PATH/config.json"
   "$MODEL_CC"
   "$MODEL_CXX"
 )
+if [[ " $EVAL_MODELS " == *" sft "* ]]; then
+  required_paths+=(
+    "$TOOL_ENV_DIR/bin/python"
+    "$REPO_ROOT/scripts/visual_tool_server.py"
+    "$SFT_MODEL_PATH/config.json"
+    "$SFT_MODEL_PATH/model.safetensors.index.json"
+    "$SAM3_MODEL_PATH"
+    "$GROUNDING_DINO_MODEL_PATH/config.json"
+  )
+fi
 for required in "${required_paths[@]}"; do
   [[ -e "$required" ]] || { echo "Error: missing required path: $required"; exit 2; }
 done
@@ -88,6 +94,9 @@ MINICONDA_PATH=/opt/huawei/explorer-env/dataset/Common_wl/miniconda3
 if [[ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]]; then
   export PATH="$MINICONDA_PATH/bin:$PATH"
   source "$MINICONDA_PATH/etc/profile.d/conda.sh"
+elif command -v conda >/dev/null 2>&1; then
+  ACTIVE_CONDA_BASE="$(conda info --base)"
+  source "$ACTIVE_CONDA_BASE/etc/profile.d/conda.sh"
 elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
   source "$HOME/miniconda3/etc/profile.d/conda.sh"
 else
@@ -235,18 +244,22 @@ echo "Tool GPU: $TOOL_CUDA_VISIBLE_DEVICES"
 echo "Work root: $WORK_ROOT"
 echo "============================================================"
 
-setsid env \
-  CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" \
-  CUDA_HOME="$TOOL_CUDA_HOME" \
-  PATH="$TOOL_ENV_DIR/bin:$TOOL_CUDA_HOME/bin:$PATH" \
-  LD_LIBRARY_PATH="$TOOL_ENV_DIR/lib:$TOOL_CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}" \
-  SAM3_MODEL_PATH="$SAM3_MODEL_PATH" SAM3_DEVICE=cuda:0 SAM3_REPLICAS="$SAM3_REPLICAS" \
-  GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" GROUNDING_DINO_DEVICE=cuda:0 \
-  GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
-  "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
-    --backend all --host "$HOST" --port "$TOOL_PORT" &
-TOOL_PID=$!
-wait_http "http://127.0.0.1:$TOOL_PORT/health" "visual tool server" "$TOOL_PID"
+if [[ " $EVAL_MODELS " == *" sft "* ]]; then
+  setsid env \
+    CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" \
+    CUDA_HOME="$TOOL_CUDA_HOME" \
+    PATH="$TOOL_ENV_DIR/bin:$TOOL_CUDA_HOME/bin:$PATH" \
+    LD_LIBRARY_PATH="$TOOL_ENV_DIR/lib:$TOOL_CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}" \
+    SAM3_MODEL_PATH="$SAM3_MODEL_PATH" SAM3_DEVICE=cuda:0 SAM3_REPLICAS="$SAM3_REPLICAS" \
+    GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" GROUNDING_DINO_DEVICE=cuda:0 \
+    GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
+    "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
+      --backend all --host "$HOST" --port "$TOOL_PORT" &
+  TOOL_PID=$!
+  wait_http "http://127.0.0.1:$TOOL_PORT/health" "visual tool server" "$TOOL_PID"
+else
+  echo "Skipping visual tool server for the Qwen3 Instruct baseline"
+fi
 
 for variant in $EVAL_MODELS; do
   case "$variant" in

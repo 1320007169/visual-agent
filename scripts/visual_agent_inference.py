@@ -150,8 +150,10 @@ def _xml_tool_call(invocation: ToolInvocation) -> str:
     return f"<tool_call>{json.dumps(payload, ensure_ascii=False)}</tool_call>"
 
 
-def build_system_prompt() -> str:
-    schemas = json.dumps(get_visual_tool_schemas(), ensure_ascii=False, indent=2)
+def build_system_prompt(allowed_tool_names: set[str] | None = None) -> str:
+    schemas = json.dumps(
+        get_visual_tool_schemas(allowed_tool_names), ensure_ascii=False, indent=2
+    )
     return (
         "You are a visual agent. Answer the user's question from the supplied images. "
         "When closer inspection, grounding, segmentation, or counting is needed, call one "
@@ -323,6 +325,7 @@ class VisualAgent:
         temperature: float = 0.0,
         use_native_tools: bool = False,
         system_prompt: str | None = None,
+        allowed_tool_names: list[str] | tuple[str, ...] | set[str] | None = None,
     ) -> None:
         self.model_client = model_client
         self.tool_executor = tool_executor
@@ -330,7 +333,12 @@ class VisualAgent:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.use_native_tools = use_native_tools
-        self.system_prompt = system_prompt or build_system_prompt()
+        self.allowed_tool_names = (
+            set(allowed_tool_names) if allowed_tool_names is not None else None
+        )
+        if self.allowed_tool_names is not None:
+            get_visual_tool_schemas(self.allowed_tool_names)
+        self.system_prompt = system_prompt or build_system_prompt(self.allowed_tool_names)
 
     def run(self, image_paths: list[str | Path], question: str) -> InferenceResult:
         if not image_paths:
@@ -353,7 +361,11 @@ class VisualAgent:
         for turn in range(1, self.max_turns + 1):
             assistant = self.model_client.chat(
                 messages,
-                tools=get_visual_tool_schemas() if self.use_native_tools else None,
+                tools=(
+                    get_visual_tool_schemas(self.allowed_tool_names)
+                    if self.use_native_tools
+                    else None
+                ),
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -370,6 +382,27 @@ class VisualAgent:
                     tool_calls=trace,
                     messages=messages,
                 )
+            if (
+                self.allowed_tool_names is not None
+                and invocation.name not in self.allowed_tool_names
+            ):
+                allowed = sorted(self.allowed_tool_names)
+                error = f"Tool {invocation.name!r} is not allowed; available tools: {allowed}"
+                trace.append({
+                    "name": invocation.name,
+                    "arguments": invocation.arguments,
+                    "error": error,
+                    "returned_images": 0,
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "<tool_response>\n"
+                        f"{json.dumps({'status': 'error', 'error': error}, ensure_ascii=False)}\n"
+                        "</tool_response>"
+                    ),
+                })
+                continue
             if self.tool_executor is None:
                 raise InferenceError(
                     f"Model requested {invocation.name!r}, but no visual tool service is configured. "
@@ -421,7 +454,12 @@ class VisualAgent:
                 content = tool_text
             messages.append({"role": "user", "content": content})
 
-        raise InferenceError(f"Agent exceeded the maximum of {self.max_turns} turns")
+        return InferenceResult(
+            response=f"Agent exceeded the maximum of {self.max_turns} turns",
+            turns=self.max_turns,
+            tool_calls=trace,
+            messages=messages,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

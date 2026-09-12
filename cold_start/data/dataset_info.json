@@ -178,5 +178,80 @@
       "assistant_tag": "assistant",
       "system_tag": "system"
     }
+  },
+  "visual_agent_combined_64659": {
+    "file_name": "../../data/visual_agent_combined_64659.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  },
+  "visual_agent_groundingdino_56874": {
+    "file_name": "../../data/visual_agent_groundingdino_56874.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  },
+  "visual_agent_groundingdino_mixed_56874": {
+    "file_name": "../../data/visual_agent_groundingdino_direct34644_tool22230_56874_v2.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  },
+  "visual_agent_direct34644_thyme9795_slack015_44439": {
+    "file_name": "../../data/visual_agent_direct34644_thyme9795_slack015_44439.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
+  },
+  "visual_agent_thyme9795_slack015_v3": {
+    "file_name": "../../data/visual_agent_thyme9795_slack015_v3.jsonl",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "messages",
+      "images": "images"
+    },
+    "tags": {
+      "role_tag": "role",
+      "content_tag": "content",
+      "user_tag": "user",
+      "assistant_tag": "assistant",
+      "system_tag": "system"
+    }
   }
 }

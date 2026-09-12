@@ -101,7 +101,10 @@ def _prepare_rollout_images(
         raise ValueError(f"Unsupported VISUAL_AGENT_IMAGE_TRANSPORT={transport_mode!r}")
     if source_index not in encoded_cache:
         encoded_cache[source_index] = [_image_to_data_url(image) for image in images]
-    return encoded_cache[source_index]
+    # Cache the expensive source encoding, but isolate the mutable image list
+    # for each rollout. Tool crops are appended to this list during multi-turn
+    # generation and must not leak into sibling samples from rollout.n.
+    return list(encoded_cache[source_index])
 
 
 def _attach_images_to_messages(messages: List[Dict[str, Any]], images: List[Any]) -> None:

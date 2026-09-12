@@ -162,6 +162,12 @@ class AsyncLLMServerManager:
         self.chat_scheduler_thread.start()
         self.chat_scheduler_ready.wait()
 
+        # Async vLLM is initialized before the trainer restores a checkpoint.
+        # Start it asleep so the first wake_up() always synchronizes the current
+        # FSDP actor weights instead of reusing the base weights loaded at init.
+        self.sleep()
+        print("Async rollout engines initialized asleep; first wake_up will synchronize actor weights.")
+
     def _init_chat_scheduler(self):
         self.chat_scheduler_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.chat_scheduler_loop)

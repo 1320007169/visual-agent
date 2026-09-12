@@ -61,9 +61,10 @@ def infer_data_api(model, work_dir, model_name, dataset, index_set=None, api_npr
     res = {}
     if osp.exists(out_file):
         res = load(out_file)
-        if ignore_failed:
-            res = {k: v for k, v in res.items() if FAIL_MSG not in v}
+        if not ignore_failed:
+            res = {k: v for k, v in res.items() if FAIL_MSG not in str(v)}
 
+    struct_map = dict(zip(indices, structs))
     structs = [s for i, s in zip(indices, structs) if i not in res]
     indices = [i for i in indices if i not in res]
 
@@ -72,6 +73,31 @@ def infer_data_api(model, work_dir, model_name, dataset, index_set=None, api_npr
 
     if len(structs):
         track_progress_rich(gen_func, structs, nproc=api_nproc, chunksize=api_nproc, save=out_file, keys=indices)
+
+    failed_sample_retries = int(os.getenv('VLMEVAL_FAILED_SAMPLE_RETRIES', '0'))
+    if failed_sample_retries < 0:
+        raise ValueError('VLMEVAL_FAILED_SAMPLE_RETRIES must be non-negative')
+    for attempt in range(1, failed_sample_retries + 1):
+        res = load(out_file)
+        failed_indices = [i for i in indices if FAIL_MSG in str(res.get(i, FAIL_MSG))]
+        if not failed_indices:
+            break
+        print(
+            f'Retrying {len(failed_indices)} failed API samples for {dataset_name} '
+            f'(pass {attempt}/{failed_sample_retries})',
+            flush=True,
+        )
+        retry_structs = [
+            dict(message=struct_map[i], dataset=dataset_name) for i in failed_indices
+        ]
+        track_progress_rich(
+            gen_func,
+            retry_structs,
+            nproc=api_nproc,
+            chunksize=api_nproc,
+            save=out_file,
+            keys=failed_indices,
+        )
 
     res = load(out_file)
     if index_set is not None:

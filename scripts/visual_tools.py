@@ -46,7 +46,8 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "slack_ratio": {
                         "type": "number",
                         "minimum": 0,
-                        "description": "Optional extra context around the bounding box; defaults to 0.",
+                        "default": 0.1,
+                        "description": "Extra context around the bounding box; defaults to 0.1 (10%).",
                     },
                 },
                 "required": ["bbox_2d", "target_image"],
@@ -107,7 +108,8 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "slack_ratio": {
                         "type": "number",
-                        "description": "Extra context around the detected target box.",
+                        "default": 0.1,
+                        "description": "Extra context around the detected target box; defaults to 0.1 (10%).",
                     },
                 },
                 "required": ["query", "target_image", "slack_ratio"],
@@ -132,7 +134,8 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "slack_ratio": {
                         "type": "number",
-                        "description": "Extra context around each detected target box.",
+                        "default": 0.1,
+                        "description": "Extra context around each detected target box; defaults to 0.1 (10%).",
                     },
                 },
                 "required": ["queries", "target_image", "slack_ratio"],
@@ -142,5 +145,15 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-def get_visual_tool_schemas() -> list[dict[str, Any]]:
-    return deepcopy(VISUAL_TOOL_SCHEMAS)
+def get_visual_tool_schemas(tool_names: list[str] | tuple[str, ...] | set[str] | None = None) -> list[dict[str, Any]]:
+    if tool_names is None:
+        return deepcopy(VISUAL_TOOL_SCHEMAS)
+    requested = set(tool_names)
+    unknown = requested - VISUAL_TOOL_NAMES
+    if unknown:
+        raise ValueError(f"Unknown visual tools: {sorted(unknown)}")
+    return deepcopy([
+        schema
+        for schema in VISUAL_TOOL_SCHEMAS
+        if schema["function"]["name"] in requested
+    ])

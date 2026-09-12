@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from PIL import Image
@@ -58,6 +59,18 @@ class VisualToolServerTest(unittest.TestCase):
         self.assertEqual(result["source"], "groundingdino")
         self.assertEqual(images, [])
 
+    def test_long_grounding_query_returns_recoverable_error(self):
+        query = "one two three four five six seven eight nine ten eleven twelve thirteen"
+        with patch.dict("os.environ", {"GROUNDING_DINO_MAX_QUERY_WORDS": "12"}):
+            result, images = self.service.execute(
+                "grounding_detect", {"query": query, "target_image": 0}, [self.image]
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["word_count"], 13)
+        self.assertEqual(result["max_words"], 12)
+        self.assertEqual(images, [])
+
     def test_sam3_segment_contract(self):
         result, _ = self.service.execute(
             "sam3_segment_multi",
@@ -106,6 +119,7 @@ class VisualToolServerTest(unittest.TestCase):
         self.assertEqual(result["coordinate_space"], "relative_0_1000")
         self.assertEqual(result["crop_zoom"]["target_image"], 1)
         self.assertEqual(result["crop_zoom"]["requested_bbox_2d"], [50.0, 200.0, 150.0, 500.0])
+        self.assertEqual(result["crop_zoom"]["slack_ratio"], 0.1)
         self.assertEqual(result["crop_zoom"]["coordinate_space"], "relative_0_1000")
         self.assertEqual(
             result["crop_zoom"]["text_summary"],

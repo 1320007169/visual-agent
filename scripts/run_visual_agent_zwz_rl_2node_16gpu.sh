@@ -64,10 +64,13 @@ export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-8192}"
 export MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-16384}"
 export MAX_TOKENS_PER_TURN="${MAX_TOKENS_PER_TURN:-512}"
-export MAX_TURNS="${MAX_TURNS:-9}"
+export MAX_TURNS="${MAX_TURNS:-12}"
 export ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
 export MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
-export FILTER_OVERLONG_PROMPTS="${FILTER_OVERLONG_PROMPTS:-True}"
+# This fixed dataset has already been validated: observed prompts stay well
+# below the 8192-token limit. Rechecking every image costs roughly 30 minutes
+# on shared storage at each restart.
+export FILTER_OVERLONG_PROMPTS="${FILTER_OVERLONG_PROMPTS:-False}"
 export FILTER_OVERLONG_WORKERS="${FILTER_OVERLONG_WORKERS:-2}"
 export DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-2}"
 export TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-True}"
@@ -77,10 +80,14 @@ export SAVE_HF_MODEL="${SAVE_HF_MODEL:-1}"
 export TEST_FREQ="${TEST_FREQ:--1}"
 export TRAINER_PROJECT_NAME="${TRAINER_PROJECT_NAME:-visual-agent-zwz-original-relation-rl}"
 
-JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
-export RUN_ID="${RUN_ID:-zwz_original_relation_qwen3_2node_toolpool_crop_v2_${JOB_TOKEN}}"
+# Resume the complete two-node checkpoint by default. This run used the same
+# 14-worker FSDP topology, so model, optimizer, extra state, and dataloader can
+# all be restored instead of warm-starting from merged weights.
+export RUN_ID="${RUN_ID:-zwz_original_relation_qwen3_2node_toolpool_crop_v2_manual}"
 export OUTPUT_DIR="${RL_OUTPUT_DIR:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/$RUN_ID}"
 export ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-$BASE/rollouts/visual-agent-zwz-rl/$RUN_ID}"
+export RESUME_MODE="${RESUME_MODE:-resume_path}"
+export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$OUTPUT_DIR/global_step_40}"
 # ModelArts injects LOG_DIR=/opt/huawei/schedule-train/log, which is node-local
 # and disappears with the job. Keep RL logs on the shared model volume instead.
 export LOG_DIR="${RL_LOG_DIR:-$BASE/logs/visual-agent-zwz-rl}"

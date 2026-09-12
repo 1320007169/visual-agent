@@ -46,6 +46,14 @@ class FailingToolExecutor:
         raise InferenceError("target was not localized")
 
 
+class RepeatingToolModelClient:
+    def chat(self, messages, **kwargs):
+        return {
+            "role": "assistant",
+            "content": '<tool_call>{"name":"grounding_detect","arguments":{"query":"car","target_image":0}}</tool_call>',
+        }
+
+
 class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -108,6 +116,20 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertEqual(result.response, "<answer>2</answer>")
         self.assertIn('"status": "error"', result.messages[-2]["content"])
         self.assertEqual(result.tool_calls[0]["error"], "target was not localized")
+
+    def test_agent_returns_result_after_max_turns(self):
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"not-a-real-jpeg-but-valid-for-transport")
+            image.flush()
+            result = VisualAgent(
+                RepeatingToolModelClient(),
+                tool_executor=FakeToolExecutor(),
+                max_turns=2,
+            ).run([image.name], "Count cars")
+
+        self.assertEqual(result.response, "Agent exceeded the maximum of 2 turns")
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(len(result.tool_calls), 2)
 
     def test_http_executor_contract(self):
         session = FakeSession()

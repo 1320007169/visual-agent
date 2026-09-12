@@ -616,6 +616,9 @@ api_models = {
         max_turns=8,
         max_tokens=4096,
         temperature=0.,
+        use_tools=True,
+        system_prompt_file=None,
+        allowed_tool_names=None,
         verbose=False,
     ),
 }

@@ -17,6 +17,12 @@ GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
 MAX_IMAGES_PER_PROMPT="${MAX_IMAGES_PER_PROMPT:-16}"
 LIMIT_MM_PER_PROMPT="${LIMIT_MM_PER_PROMPT:-image=$MAX_IMAGES_PER_PROMPT}"
+VLLM_PYTHON="${VLLM_PYTHON:-python}"
+MM_PROCESSOR_CACHE_GB="${MM_PROCESSOR_CACHE_GB:-}"
+MM_PROCESSOR_CACHE_ARGS=()
+if [[ -n "$MM_PROCESSOR_CACHE_GB" ]]; then
+    MM_PROCESSOR_CACHE_ARGS=(--mm-processor-cache-gb "$MM_PROCESSOR_CACHE_GB")
+fi
 
 # Triton compiles a tiny launcher during the first multimodal profile. Prefer
 # the complete compiler from the active conda environment over the host GCC,
@@ -38,7 +44,7 @@ if [[ -n "${VISUAL_AGENT_CUDA_HOME:-}" ]]; then
   export LD_LIBRARY_PATH="$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
-exec python -m vllm.entrypoints.openai.api_server \
+exec "$VLLM_PYTHON" -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_PATH" \
   --served-model-name "$SERVED_MODEL_NAME" \
   --host "$HOST" \
@@ -47,4 +53,5 @@ exec python -m vllm.entrypoints.openai.api_server \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --max-model-len "$MAX_MODEL_LEN" \
   --limit-mm-per-prompt "$LIMIT_MM_PER_PROMPT" \
+  "${MM_PROCESSOR_CACHE_ARGS[@]}" \
   --trust-remote-code

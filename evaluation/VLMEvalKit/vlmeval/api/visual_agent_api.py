@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import threading
@@ -26,6 +27,27 @@ from visual_agent_inference import (  # noqa: E402
 
 
 ANSWER_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECASE)
+DIRECT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer the user's question directly and concisely."
+)
+
+
+def _resolve_agent_system_prompt(
+    explicit_prompt: str | None,
+    explicit_prompt_file: str | None,
+) -> str | None:
+    if explicit_prompt is not None:
+        return explicit_prompt
+    prompt_path = explicit_prompt_file or os.getenv("VISUAL_AGENT_SYSTEM_PROMPT_FILE")
+    if not prompt_path:
+        return None
+    path = Path(prompt_path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Visual-agent system prompt does not exist: {path}")
+    prompt = path.read_text(encoding="utf-8").strip()
+    if not prompt:
+        raise ValueError(f"Visual-agent system prompt is empty: {path}")
+    return prompt
 
 
 def _split_bases(value: str | list[str]) -> list[str]:
@@ -67,6 +89,9 @@ class VisualAgentAPI(BaseAPI):
         temperature: float = 0,
         use_tools: bool = True,
         use_native_tools: bool = False,
+        system_prompt: str | None = None,
+        system_prompt_file: str | None = None,
+        allowed_tool_names: list[str] | str | None = None,
         verbose: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -85,9 +110,23 @@ class VisualAgentAPI(BaseAPI):
         self.temperature = temperature
         self.use_tools = use_tools
         self.use_native_tools = use_native_tools
+        resolved_system_prompt = _resolve_agent_system_prompt(
+            system_prompt, system_prompt_file
+        )
+        if isinstance(allowed_tool_names, str):
+            allowed_tool_names = [
+                name.strip() for name in allowed_tool_names.split(",") if name.strip()
+            ]
+        self.allowed_tool_names = allowed_tool_names
         self._endpoint_index = 0
         self._endpoint_lock = threading.Lock()
-        super().__init__(retry=retry, wait=wait, verbose=verbose, **kwargs)
+        super().__init__(
+            retry=retry,
+            wait=wait,
+            system_prompt=resolved_system_prompt,
+            verbose=verbose,
+            **kwargs,
+        )
 
     def set_inference_mode(self, mode: str) -> None:
         expected_mode = "agent" if self.use_tools else "non-think"
@@ -139,7 +178,10 @@ class VisualAgentAPI(BaseAPI):
                 for path in images
             ]
             content.append({"type": "text", "text": question})
-            messages = [{"role": "user", "content": content}]
+            messages = [
+                {"role": "system", "content": DIRECT_SYSTEM_PROMPT},
+                {"role": "user", "content": content},
+            ]
             assistant = model_client.chat(
                 messages,
                 tools=None,
@@ -168,6 +210,8 @@ class VisualAgentAPI(BaseAPI):
             max_tokens=int(kwargs.pop("max_tokens", self.max_tokens)),
             temperature=float(kwargs.pop("temperature", self.temperature)),
             use_native_tools=self.use_native_tools,
+            system_prompt=self.system_prompt,
+            allowed_tool_names=self.allowed_tool_names,
         )
         result = agent.run(images, question)
         match = ANSWER_RE.search(result.response)

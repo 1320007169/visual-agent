@@ -29,6 +29,8 @@ Use exact tool and argument names with double quotes. Include no prose, Markdown
 
 Use tools for localization, spatial relations, counting, segmentation, small objects or text, crowded scenes, and ambiguous evidence. Use short, visually grounded noun phrases. If a query fails, retry with useful attributes such as color, type, or nearby context.
 
+For spatial-relation questions involving two objects, prefer one `sam3_segment_multi` call containing both objects over separate `grounding_detect` calls.
+
 You may make multiple tool calls and use different tools across turns. Do not stop after one failed, empty, weak, or ambiguous result. Inspect each response, then retry with a clearer query or another suitable tool when useful. If tools disagree, continue gathering evidence until the answer is sufficiently supported.
 
 Tool output is evidence, not guaranteed fact. An empty box, irrelevant crop, or weak result does not prove success or absence. Never claim an object was located after an empty result. Never invent detections, coordinates, counts, masks, or tool results.
