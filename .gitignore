@@ -31,6 +31,7 @@ Visual_Agent/training_trajectories_natural/images/
 # Training and evaluation outputs
 outputs/
 **/outputs/
+rollouts/
 runs/
 wandb/
 lightning_logs/
@@ -38,6 +39,14 @@ tensorboard/
 ray_results/
 multirun/
 **/.hydra/
+
+# Generated datasets and model artifacts
+*.parquet
+*.arrow
+*.pt
+*.pth
+*.ckpt
+*.safetensors
 
 # Logs and process files
 logs/
@@ -59,6 +68,22 @@ slurm-*.out
 !.env.example
 *.pem
 *.key
+secrets/
+.git-credentials
+auth.json
+*_api_key.txt
+
+# Local agent state and launchers
+.codex/
+.claude/
+start_codex.sh
+
+# Local implementation snapshots superseded by the maintained docs/code
+PERCEIVE2REASON_COMPLETE.md
+PERCEIVE2REASON_DELIVERY.md
+PERCEIVE2REASON_GAPS.md
+PERCEIVE2REASON_STATUS.md
+reinforcement_learning/verl/data/perceive2reason_dataset.py
 
 __pycache__/
 *.py[cod]
