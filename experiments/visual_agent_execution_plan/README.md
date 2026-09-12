@@ -1,0 +1,36 @@
+# Visual Agent 实验执行包
+
+这个目录把《Visual Agent 实验执行计划》的前四步落为独立、可审计的实验工具。它不修改 `reinforcement_learning/`、现有评测脚本或模型服务代码。
+
+## 包含内容
+
+- `init` 生成 B0–B4 checkpoint 登记表和冻结的评测协议模板。
+- `make-split` 按源图像稳定分组，输出训练、开发和测试清单；同一源图不会跨 split。
+- `validate-log` 校验逐题 JSONL 日志。Native 模式的工具调用会被拒绝，缺少坐标映射、结束原因或 token/耗时字段也会被报告。
+- `summarize-utility` 对同一题目的 ON/OFF 结果做配对聚合，输出 `delta_tool`、工具率、有效调用率及按题 bootstrap 置信区间。
+- `check-fairness` 比较单流 A 与双流 D 配置，阻止它们使用不同父 checkpoint、奖励、数据池、冻结范围、KL 或预算口径。
+- `dual_stream.py` 提供单独按 `(sample_id, stream_id, batch_id)` 计算 GRPO outcome advantage，以及 `L_A`/`L_N` 的等权或 alpha 加权合并函数。它是接入现有 trainer 前可单测的参考实现，不会偷偷把双流写成串行续训。
+
+## 快速开始
+
+```bash
+PLAN_ROOT=experiments/visual_agent_execution_plan
+PYTHONPATH="$PLAN_ROOT" python -m visual_agent_experiments init --output-dir "$PLAN_ROOT/runs/bootstrap"
+PYTHONPATH="$PLAN_ROOT" python -m visual_agent_experiments make-split \
+  --input data/train.jsonl --output "$PLAN_ROOT/runs/split_manifest.json"
+PYTHONPATH="$PLAN_ROOT" python -m visual_agent_experiments validate-log \
+  --input "$PLAN_ROOT/runs/dev_predictions.jsonl"
+PYTHONPATH="$PLAN_ROOT" python -m visual_agent_experiments summarize-utility \
+  --input "$PLAN_ROOT/runs/dev_on_off.jsonl" --output "$PLAN_ROOT/runs/utility.json"
+PYTHONPATH="$PLAN_ROOT" python -m visual_agent_experiments check-fairness \
+  --agent-config "$PLAN_ROOT/configs/train_A.example.json" \
+  --dual-config "$PLAN_ROOT/configs/train_D.example.json"
+```
+
+`make-split` 只检查精确的 source image 分组；近重复图像仍需通过已有数据审查流程写入同一个 `source_group_id`。`summarize-utility` 要求每个预定题都有 ON 与 OFF 结果，避免只统计成功调用子集。
+
+## 日志协议
+
+每行必须至少包含 `run_id`、`checkpoint`、`split`、`sample_id`、`source_image_id`、`mode`、`seed`、`correct`、`tool_calls`、`finish_reason`、`generated_tokens`、`visual_tokens` 与 `elapsed_seconds`。工具调用需附带 `name`、`status`、`image_id`、`bbox`、`coordinate_system`；`bbox` 可为 `null`，但此时应说明失败状态。
+
+`mode` 使用 `native` 或 `agent`。工具收益分析额外使用 `condition` 为 `on` 或 `off`；Native 模式不能有工具调用。所有输出按 `run_id` 放到本目录的 `runs/`，该目录已被忽略。

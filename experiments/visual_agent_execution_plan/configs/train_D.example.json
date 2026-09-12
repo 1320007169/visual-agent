@@ -1,0 +1,21 @@
+{
+  "stream": "dual",
+  "parent_checkpoint": "REPLACE_WITH_SELECTED_THETA_START",
+  "reference_model": "REPLACE_WITH_FROZEN_REFERENCE",
+  "kl_coefficient": 0.001,
+  "freeze_scope": "vision_tower_and_projector_frozen",
+  "train_manifest_sha256": "REPLACE_WITH_SPLIT_MANIFEST_HASH",
+  "reward_baseline": "existing_answer_correctness_reward",
+  "budget_accounting": "same_gpu_hours_including_rollout_tool_wait_and_update",
+  "rollout": {
+    "agent_group_size_k": 4,
+    "native_group_size_k": 4,
+    "max_tool_rounds": 1,
+    "sampling_policy": "freeze_before_run"
+  },
+  "loss": {
+    "aggregation": "simultaneous_stream_mean",
+    "alpha": 1.0,
+    "scheduler_progress": "generated_training_tokens"
+  }
+}
