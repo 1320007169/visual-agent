@@ -67,7 +67,12 @@ def command_make_split(args: argparse.Namespace) -> int:
     records = read_jsonl(args.input)
     if not records:
         raise ValueError("input JSONL has no records")
+    if args.train_per_10k < 0 or args.dev_per_10k < 0:
+        raise ValueError("split sizes must be non-negative")
+    if args.train_per_10k + args.dev_per_10k > 10_000:
+        raise ValueError("train-per-10k and dev-per-10k must sum to at most 10000")
     seed = str(args.seed)
+    dev_boundary = args.train_per_10k + args.dev_per_10k
     grouped: dict[str, list[str]] = defaultdict(list)
     for row_number, record in enumerate(records, start=1):
         sample_id = str(record.get("sample_id") or record.get("uid") or "")
@@ -78,7 +83,7 @@ def command_make_split(args: argparse.Namespace) -> int:
     manifest_records = []
     for source_group, sample_ids in sorted(grouped.items()):
         bucket = int(hashlib.sha256(f"{seed}:{source_group}".encode()).hexdigest(), 16) % 10_000
-        split = "train" if bucket < args.train_per_10k else "dev" if bucket < args.dev_per_10k else "test"
+        split = "train" if bucket < args.train_per_10k else "dev" if bucket < dev_boundary else "test"
         for sample_id in sorted(sample_ids):
             manifest_records.append({"sample_id": sample_id, "source_group_id": source_group, "split": split})
     manifest = {"seed": args.seed, "records": manifest_records}

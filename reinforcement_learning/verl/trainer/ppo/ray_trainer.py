@@ -33,6 +33,7 @@ from typing import Optional, Type
 import numpy as np
 import ray
 import torch
+import torch.nn.functional as F
 from omegaconf import OmegaConf, open_dict
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -78,6 +79,117 @@ class Role(Enum):
     RefPolicy = 4
     RewardModel = 5
     ActorRolloutRef = 6
+
+
+def _concat_dual_stream_rollouts(agent_output: DataProto, native_output: DataProto, pad_token_id: int) -> DataProto:
+    """Right-pad two rollout batches to common lengths before concatenation."""
+    outputs = [agent_output, native_output]
+    response_length = max(output.batch["responses"].shape[-1] for output in outputs)
+    sequence_length = max(output.batch["input_ids"].shape[-1] for output in outputs)
+
+    for output in outputs:
+        response_padding = response_length - output.batch["responses"].shape[-1]
+        sequence_padding = sequence_length - output.batch["input_ids"].shape[-1]
+        if response_padding:
+            output.batch["responses"] = F.pad(output.batch["responses"], (0, response_padding), value=pad_token_id)
+            output.batch["response_mask"] = F.pad(output.batch["response_mask"], (0, response_padding), value=0)
+        if sequence_padding:
+            output.batch["input_ids"] = F.pad(output.batch["input_ids"], (0, sequence_padding), value=pad_token_id)
+            for key in ("attention_mask", "loss_mask", "position_ids"):
+                output.batch[key] = F.pad(output.batch[key], (0, sequence_padding), value=0)
+
+    combined = DataProto.concat(outputs)
+    combined.reorder(_dual_stream_interleave_indices(len(agent_output), len(native_output)))
+    combined.meta_info["timing"] = {
+        "generate_sequences": sum(
+            output.meta_info.get("timing", {}).get("generate_sequences", 0.0) for output in outputs
+        )
+    }
+    return combined
+
+
+def _dual_stream_interleave_indices(agent_size: int, native_size: int) -> torch.Tensor:
+    if agent_size != native_size:
+        raise ValueError(
+            "equal-weight dual-stream updates require equal Agent and Native batch sizes; "
+            f"got {agent_size} and {native_size}"
+        )
+    agent_indices = torch.arange(agent_size)
+    native_indices = torch.arange(agent_size, agent_size + native_size)
+    return torch.stack((agent_indices, native_indices), dim=1).flatten()
+
+
+def _compute_dual_stream_reward_metrics(batch: DataProto) -> dict[str, float]:
+    """Summarize reward health independently for each rollout stream."""
+    if "stream_id" not in batch.non_tensor_batch:
+        raise KeyError("dual-stream batch is missing stream_id")
+
+    stream_ids = np.asarray(batch.non_tensor_batch["stream_id"])
+    uids = np.asarray(batch.non_tensor_batch["uid"])
+    scores = batch.batch["token_level_scores"].sum(dim=-1).detach().float().cpu().numpy()
+    if not (len(stream_ids) == len(uids) == len(scores)):
+        raise ValueError(
+            "dual-stream reward metadata length mismatch: "
+            f"streams={len(stream_ids)}, uids={len(uids)}, scores={len(scores)}"
+        )
+
+    metrics: dict[str, float] = {}
+    for stream in ("agent", "native"):
+        mask = stream_ids == stream
+        if not np.any(mask):
+            raise ValueError(f"dual-stream batch contains no {stream} samples")
+        stream_scores = scores[mask]
+        metrics[f"dual_stream/{stream}_score_mean"] = float(np.mean(stream_scores))
+
+        for key in ("acc", "format", "tool_used"):
+            if key in batch.non_tensor_batch:
+                values = np.asarray(batch.non_tensor_batch[key], dtype=np.float32)
+                if len(values) != len(scores):
+                    raise ValueError(
+                        f"dual-stream {key} metadata length mismatch: values={len(values)}, scores={len(scores)}"
+                    )
+                metrics[f"dual_stream/{stream}_{key}_mean"] = float(np.mean(values[mask]))
+
+        grouped_scores: dict[str, list[float]] = defaultdict(list)
+        for uid, score in zip(uids[mask], stream_scores):
+            grouped_scores[str(uid)].append(float(score))
+        metrics[f"dual_stream/{stream}_informative_group_rate"] = float(
+            np.mean([max(values) > min(values) for values in grouped_scores.values()])
+        )
+
+    return metrics
+
+
+def _validate_native_reward_signal(metrics: dict[str, float]) -> None:
+    """Reject a broken Native answer protocol before spending a full run."""
+    format_key = "dual_stream/native_format_mean"
+    if format_key in metrics and metrics[format_key] <= 0.0:
+        raise RuntimeError(
+            "Native stream produced zero valid answer formats for the entire batch. "
+            "Ensure its system prompt requires exactly <answer>relation label</answer>."
+        )
+
+
+def _prune_checkpoint_directories(checkpoint_root: str, max_to_keep: int) -> list[str]:
+    """Remove old complete checkpoint directories, including dataloader state."""
+    if max_to_keep <= 0:
+        raise ValueError(f"max_to_keep must be positive, got {max_to_keep}")
+    checkpoint_dirs = []
+    for name in os.listdir(checkpoint_root):
+        if not name.startswith("global_step_"):
+            continue
+        try:
+            step = int(name.removeprefix("global_step_"))
+        except ValueError:
+            continue
+        path = os.path.join(checkpoint_root, name)
+        if os.path.isdir(path):
+            checkpoint_dirs.append((step, path))
+    checkpoint_dirs.sort()
+    removed = [path for _, path in checkpoint_dirs[:-max_to_keep]]
+    for stale_path in removed:
+        shutil.rmtree(stale_path)
+    return removed
 
 
 @dataclass
@@ -893,6 +1005,15 @@ class RayPPOTrainer:
         with open(local_latest_checkpointed_iteration, "w") as f:
             f.write(str(self.global_steps))
 
+        max_checkpoints_to_keep = self.config.trainer.get("max_checkpoints_to_keep", None)
+        if max_checkpoints_to_keep is not None:
+            removed_paths = _prune_checkpoint_directories(
+                self.config.trainer.default_local_dir,
+                int(max_checkpoints_to_keep),
+            )
+            for stale_path in removed_paths:
+                print(f"Removed stale complete checkpoint: {stale_path}")
+
     def _load_checkpoint(self):
         if self.config.trainer.resume_mode == "disable":
             return 0
@@ -994,6 +1115,17 @@ class RayPPOTrainer:
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+
+        # A multi-stage launcher may be re-submitted after an earlier stage has
+        # already reached its target. Do not turn a completed step 100 run into
+        # an unintended step 101 update; return successfully so post-training
+        # evaluation and the next stage can proceed.
+        if self.global_steps >= self.total_training_steps:
+            pprint(
+                f"Checkpoint step {self.global_steps} already reached total training steps "
+                f"{self.total_training_steps}; skipping training."
+            )
+            return
 
         save_best_only = self.config.trainer.get("save_best_only", False)
         save_best_hf_model = self.config.trainer.get("save_best_hf_model", False)
@@ -1097,12 +1229,58 @@ class RayPPOTrainer:
                         gen_batch.non_tensor_batch["extra_info"] = batch.non_tensor_batch.get("extra_info")
                     print(f' [DEBUG trainer] {gen_batch.non_tensor_batch.keys()=}')
 
+                dual_stream_config = self.config.algorithm.get("dual_stream", {})
+                dual_stream_enabled = bool(dual_stream_config.get("enable", False))
+                agent_rollout_n = int(dual_stream_config.get("agent_rollout_n", self.config.actor_rollout_ref.rollout.n))
+                native_rollout_n = int(dual_stream_config.get("native_rollout_n", 0))
+                native_gen_batch = None
+                if dual_stream_enabled:
+                    if not self.async_rollout_mode:
+                        raise RuntimeError("dual-stream rollout currently requires rollout.mode=async")
+                    if agent_rollout_n <= 1 or native_rollout_n <= 1:
+                        raise ValueError("dual-stream GRPO requires agent_rollout_n and native_rollout_n greater than 1")
+                    native_batch_keys = ["native_input_ids", "native_attention_mask", "native_position_ids"]
+                    missing_native_keys = [key for key in native_batch_keys if key not in batch.batch]
+                    if missing_native_keys or "native_raw_prompt" not in batch.non_tensor_batch:
+                        raise KeyError(
+                            "dual-stream dataset fields are missing; set VISUAL_AGENT_DUAL_STREAM=1 "
+                            f"before dataset workers start (missing={missing_native_keys})"
+                        )
+                    native_prompt_batch = batch.pop(
+                        batch_keys=native_batch_keys,
+                        non_tensor_batch_keys=["native_raw_prompt"],
+                    )
+                    native_prompt_batch.rename(
+                        old_keys=native_batch_keys,
+                        new_keys=["input_ids", "attention_mask", "position_ids"],
+                    )
+                    native_gen_batch = deepcopy(gen_batch)
+                    native_gen_batch.batch.update(native_prompt_batch.batch)
+                    native_gen_batch.non_tensor_batch["raw_prompt"] = native_prompt_batch.non_tensor_batch[
+                        "native_raw_prompt"
+                    ]
+                    native_gen_batch.meta_info["rollout_n"] = native_rollout_n
+                    native_gen_batch.meta_info["disable_tools"] = True
+                    gen_batch.meta_info["rollout_n"] = agent_rollout_n
+
                 is_last_step = self.global_steps >= self.total_training_steps
 
                 with marked_timer("step", timing_raw):
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"):
-                        if not self.async_rollout_mode:
+                        if dual_stream_enabled:
+                            self.async_rollout_manager.wake_up()
+                            try:
+                                agent_gen_batch_output = self.async_rollout_manager.generate_sequences(gen_batch)
+                                native_gen_batch_output = self.async_rollout_manager.generate_sequences(native_gen_batch)
+                            finally:
+                                self.async_rollout_manager.sleep()
+                            gen_batch_output = _concat_dual_stream_rollouts(
+                                agent_gen_batch_output,
+                                native_gen_batch_output,
+                                pad_token_id=self.tokenizer.pad_token_id,
+                            )
+                        elif not self.async_rollout_mode:
                             gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                         else:
                             self.async_rollout_manager.wake_up()
@@ -1127,9 +1305,27 @@ class RayPPOTrainer:
 
                             del gen_baseline_batch, gen_baseline_output
 
-                    batch.non_tensor_batch["uid"] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object)
-                    # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    if dual_stream_enabled:
+                        agent_batch = deepcopy(batch)
+                        native_batch = deepcopy(batch)
+                        agent_batch.non_tensor_batch["uid"] = np.array(
+                            [f"agent:{uuid.uuid4()}" for _ in range(len(agent_batch.batch))], dtype=object
+                        )
+                        native_batch.non_tensor_batch["uid"] = np.array(
+                            [f"native:{uuid.uuid4()}" for _ in range(len(native_batch.batch))], dtype=object
+                        )
+                        agent_batch = agent_batch.repeat(repeat_times=agent_rollout_n, interleave=True)
+                        native_batch = native_batch.repeat(repeat_times=native_rollout_n, interleave=True)
+                        agent_batch.non_tensor_batch["stream_id"] = np.full(len(agent_batch), "agent", dtype=object)
+                        native_batch.non_tensor_batch["stream_id"] = np.full(len(native_batch), "native", dtype=object)
+                        batch = DataProto.concat([agent_batch, native_batch])
+                        batch.reorder(_dual_stream_interleave_indices(len(agent_batch), len(native_batch)))
+                    else:
+                        batch.non_tensor_batch["uid"] = np.array(
+                            [str(uuid.uuid4()) for _ in range(len(batch.batch))], dtype=object
+                        )
+                        # repeat to align with repeated responses in rollout
+                        batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
 
                     # Multi-turn visual tools may append crop images to the
@@ -1240,6 +1436,11 @@ class RayPPOTrainer:
 
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+
+                        if dual_stream_enabled:
+                            dual_stream_metrics = _compute_dual_stream_reward_metrics(batch)
+                            _validate_native_reward_signal(dual_stream_metrics)
+                            metrics.update(dual_stream_metrics)
 
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:

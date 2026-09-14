@@ -1,9 +1,28 @@
 import unittest
+from pathlib import Path
 
 from visual_agent_experiments.dual_stream import combine_stream_losses, grouped_outcome_advantages
 
 
 class DualStreamTest(unittest.TestCase):
+    def test_native_prompt_matches_strict_reward_contract(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        prompt = (repo_root / "prompts" / "visual_agent_native_system.txt").read_text(encoding="utf-8")
+
+        self.assertIn("<answer>", prompt)
+        self.assertIn("</answer>", prompt)
+        self.assertIn("nothing else", prompt)
+        self.assertIn("without calling tools", prompt)
+
+    def test_vision_opd_native_prompt_matches_mcq_reward_contract(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        prompt = (repo_root / "prompts" / "visual_agent_native_system_mcq.txt").read_text(encoding="utf-8")
+
+        self.assertIn("option letter", prompt)
+        self.assertIn("<answer>A</answer>", prompt)
+        self.assertIn("nothing else", prompt)
+        self.assertIn("without calling tools", prompt)
+
     def test_advantages_stay_inside_each_stream_group(self):
         advantages = grouped_outcome_advantages(
             [0.0, 2.0, 5.0, 9.0],

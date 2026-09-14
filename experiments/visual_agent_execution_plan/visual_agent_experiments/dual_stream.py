@@ -31,7 +31,9 @@ def grouped_outcome_advantages(
         mean = sum(values) / len(values)
         variance = sum((value - mean) ** 2 for value in values) / len(values)
         scale = math.sqrt(variance)
-        for index, value in zip(indices, values, strict=True):
+        # indices and values are constructed from the same group; avoid
+        # zip(strict=True), which is unavailable in the supported Python 3.9 env.
+        for index, value in zip(indices, values):
             advantages[index] = (value - mean) / scale if normalize_std and scale > 0 else value - mean
     return advantages
 

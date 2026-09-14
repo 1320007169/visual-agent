@@ -568,7 +568,8 @@ class DataProto:
         if len(new_keys) != len(old_keys):
             raise ValueError(f"new_keys and old_keys must have the same length, but got {len(new_keys)} and {len(old_keys)}")
 
-        self.batch.rename_key_(tuple(old_keys), tuple(new_keys))
+        for old_key, new_key in zip(old_keys, new_keys, strict=True):
+            self.batch.rename_key_(old_key, new_key)
 
         return self
 

@@ -32,6 +32,7 @@ from vllm.worker.worker_base import WorkerWrapperBase
 
 from verl.utils.fs import copy_to_local
 from verl.workers.rollout.async_server import AsyncServerBase
+from verl.workers.rollout.http_utils import error_response_status_code
 
 logger = logging.getLogger(__file__)
 
@@ -226,7 +227,10 @@ class AsyncvLLMServer(AsyncServerBase):
         generator = await self.openai_serving_chat.create_chat_completion(request, raw_request)
 
         if isinstance(generator, ErrorResponse):
-            return JSONResponse(content=generator.model_dump(), status_code=generator.code)
+            return JSONResponse(
+                content=generator.model_dump(),
+                status_code=error_response_status_code(generator),
+            )
         if request.stream:
             return StreamingResponse(content=generator, media_type="text/event-stream")
         else:

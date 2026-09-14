@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One-to-four-node ModelArts GRPO launcher for Visual-Agent VLMs.
+# One-to-eight-node ModelArts GRPO launcher for Visual-Agent VLMs.
 # Run the same command once on every node:
 #   bash /home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/scripts/run_visual_tool_rl_2node_16gpu.sh
 #
@@ -46,6 +46,10 @@ ACTOR_USE_KL_LOSS="${ACTOR_USE_KL_LOSS:-False}"
 ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.0}"
 ACTOR_KL_LOSS_TYPE="${ACTOR_KL_LOSS_TYPE:-low_var_kl}"
 ACTOR_ENTROPY_COEFF="${ACTOR_ENTROPY_COEFF:-0}"
+ACTOR_LOSS_AGG_MODE="${ACTOR_LOSS_AGG_MODE:-token-mean}"
+DUAL_STREAM_ENABLE="${DUAL_STREAM_ENABLE:-False}"
+AGENT_ROLLOUT_N="${AGENT_ROLLOUT_N:-$ROLLOUT_N}"
+NATIVE_ROLLOUT_N="${NATIVE_ROLLOUT_N:-0}"
 MAX_TURNS="${MAX_TURNS:-12}"
 TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
@@ -62,10 +66,12 @@ FILTER_OVERLONG_WORKERS="${FILTER_OVERLONG_WORKERS:-2}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-2}"
 FILTER_OVERLONG_PROMPTS="${FILTER_OVERLONG_PROMPTS:-True}"
 TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-False}"
+BALANCE_BATCH="${BALANCE_BATCH:-True}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 SAVE_FREQ="${SAVE_FREQ:--1}"
 SAVE_HF_MODEL="${SAVE_HF_MODEL:-0}"
 MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-}"
+MAX_CHECKPOINTS_TO_KEEP="${MAX_CHECKPOINTS_TO_KEEP:-}"
 TEST_FREQ="${TEST_FREQ:--1}"
 SAVE_BEST_ONLY="${SAVE_BEST_ONLY:-False}"
 SAVE_BEST_HF_MODEL="${SAVE_BEST_HF_MODEL:-False}"
@@ -79,6 +85,8 @@ WARM_START_DATA_PATH="${WARM_START_DATA_PATH:-}"
 WARM_START_GLOBAL_STEP="${WARM_START_GLOBAL_STEP:-0}"
 TRAINER_PROJECT_NAME="${TRAINER_PROJECT_NAME:-visual-agent-rl-smoke-2node}"
 ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-}"
+POST_TRAIN_SCRIPT="${POST_TRAIN_SCRIPT:-}"
+WAIT_FOR_POST_TRAIN_ON_WORKERS="${WAIT_FOR_POST_TRAIN_ON_WORKERS:-0}"
 
 RAY_PORT="${RAY_PORT:-6379}"
 RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
@@ -145,7 +153,9 @@ ensure_symlink "$PLATFORM_DATASET_ROOT" /home/ma-user/work/dataset
 ensure_symlink "$PLATFORM_ALGORITHM_ROOT" /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
 
-[[ "$NNODES" =~ ^[1-4]$ ]] || die "this launcher supports NNODES from 1 to 4, got $NNODES"
+[[ "$NNODES" =~ ^[1-8]$ ]] || die "this launcher supports NNODES from 1 to 8, got $NNODES"
+[[ "$WAIT_FOR_POST_TRAIN_ON_WORKERS" =~ ^[01]$ ]] || \
+  die "WAIT_FOR_POST_TRAIN_ON_WORKERS must be 0 or 1, got $WAIT_FOR_POST_TRAIN_ON_WORKERS"
 [[ -d "$REPO_ROOT" ]] || die "repository not found: $REPO_ROOT"
 [[ -d "$RL_ROOT/verl" ]] || die "VERL source not found: $RL_ROOT"
 [[ -x "$RL_PYTHON" ]] || die "RL Python not executable: $RL_PYTHON"
@@ -325,11 +335,22 @@ if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
     die "MAX_ACTOR_CKPT_TO_KEEP must be a positive integer, got $MAX_ACTOR_CKPT_TO_KEEP"
   }
 fi
+if [[ -n "$MAX_CHECKPOINTS_TO_KEEP" ]]; then
+  [[ "$MAX_CHECKPOINTS_TO_KEEP" =~ ^[1-9][0-9]*$ ]] || {
+    die "MAX_CHECKPOINTS_TO_KEEP must be a positive integer, got $MAX_CHECKPOINTS_TO_KEEP"
+  }
+fi
+if [[ -n "$POST_TRAIN_SCRIPT" ]]; then
+  [[ -x "$POST_TRAIN_SCRIPT" ]] || die "POST_TRAIN_SCRIPT is not executable: $POST_TRAIN_SCRIPT"
+fi
 [[ "$ENABLE_CHUNKED_PREFILL" == "True" || "$ENABLE_CHUNKED_PREFILL" == "False" ]] || {
   die "ENABLE_CHUNKED_PREFILL must be True or False, got $ENABLE_CHUNKED_PREFILL"
 }
 [[ "$USE_DYNAMIC_BSZ" == "True" || "$USE_DYNAMIC_BSZ" == "False" ]] || {
   die "USE_DYNAMIC_BSZ must be True or False, got $USE_DYNAMIC_BSZ"
+}
+[[ "$BALANCE_BATCH" == "True" || "$BALANCE_BATCH" == "False" ]] || {
+  die "BALANCE_BATCH must be True or False, got $BALANCE_BATCH"
 }
 [[ "$PPO_MAX_TOKEN_LEN_PER_GPU" =~ ^[1-9][0-9]*$ ]] || {
   die "PPO_MAX_TOKEN_LEN_PER_GPU must be a positive integer, got $PPO_MAX_TOKEN_LEN_PER_GPU"
@@ -389,6 +410,16 @@ done
   die "TRAIN_BATCH_SIZE ($TRAIN_BATCH_SIZE) must be divisible by total RL GPUs ($TOTAL_RL_GPUS)"
 }
 [[ "$ROLLOUT_N" =~ ^[1-9][0-9]*$ ]] || die "ROLLOUT_N must be a positive integer, got $ROLLOUT_N"
+[[ "$DUAL_STREAM_ENABLE" == "True" || "$DUAL_STREAM_ENABLE" == "False" ]] || {
+  die "DUAL_STREAM_ENABLE must be True or False, got $DUAL_STREAM_ENABLE"
+}
+[[ "$AGENT_ROLLOUT_N" =~ ^[1-9][0-9]*$ ]] || die "AGENT_ROLLOUT_N must be a positive integer"
+[[ "$NATIVE_ROLLOUT_N" =~ ^[0-9]+$ ]] || die "NATIVE_ROLLOUT_N must be a non-negative integer"
+if [[ "$DUAL_STREAM_ENABLE" == "True" ]]; then
+  (( AGENT_ROLLOUT_N > 1 && NATIVE_ROLLOUT_N > 1 )) || {
+    die "dual-stream GRPO requires AGENT_ROLLOUT_N and NATIVE_ROLLOUT_N greater than 1"
+  }
+fi
 [[ "$PPO_MINI_BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] || {
   die "PPO_MINI_BATCH_SIZE must be a positive integer, got $PPO_MINI_BATCH_SIZE"
 }
@@ -464,6 +495,7 @@ echo "Tool servers per node: $VISUAL_TOOL_SERVERS_PER_NODE"
 echo "Visual-tool backend: $VISUAL_TOOL_BACKEND"
 echo "Tool replicas per server (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
+echo "Dual stream / Agent n / Native n: $DUAL_STREAM_ENABLE / $AGENT_ROLLOUT_N / $NATIVE_ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
 echo "Max concurrent trajectories: $MAX_CONCURRENT_REQUESTS"
 echo "Chunked prefill: $ENABLE_CHUNKED_PREFILL"
@@ -472,6 +504,7 @@ echo "Max tokens per model turn: ${MAX_TOKENS_PER_TURN:-rollout default}"
 echo "Training steps: $TOTAL_TRAINING_STEPS"
 echo "Save portable HuggingFace model: $SAVE_HF_MODEL"
 echo "Actor checkpoints to keep: ${MAX_ACTOR_CKPT_TO_KEEP:-all}"
+echo "Complete checkpoints to keep: ${MAX_CHECKPOINTS_TO_KEEP:-all}"
 echo "Validation frequency / best metric: $TEST_FREQ / ${BEST_METRIC:-disabled}"
 echo "Resume mode / path: $RESUME_MODE / ${RESUME_FROM_PATH:-automatic-or-none}"
 echo "Warm-start data / logical step: ${WARM_START_DATA_PATH:-disabled} / $WARM_START_GLOBAL_STEP"
@@ -479,6 +512,7 @@ echo "Worker wait timeout: $WORKER_WAIT_TIMEOUT seconds"
 echo "Output: $OUTPUT_DIR"
 echo "Log: $LOG_FILE"
 echo "Rollout traces: ${ROLLOUT_DATA_DIR:-disabled}"
+echo "Post-train script: ${POST_TRAIN_SCRIPT:-disabled}"
 echo "============================================================"
 
 echo "Environment fingerprint before importing the RL stack"
@@ -797,6 +831,7 @@ TRAIN_ARGS=(
   "actor_rollout_ref.actor.kl_loss_coef=$ACTOR_KL_LOSS_COEF"
   "actor_rollout_ref.actor.kl_loss_type=$ACTOR_KL_LOSS_TYPE"
   "actor_rollout_ref.actor.entropy_coeff=$ACTOR_ENTROPY_COEFF"
+  "actor_rollout_ref.actor.loss_agg_mode=$ACTOR_LOSS_AGG_MODE"
   "actor_rollout_ref.actor.fsdp_config.param_offload=False"
   "actor_rollout_ref.actor.fsdp_config.optimizer_offload=False"
   "actor_rollout_ref.rollout.name=$ROLLOUT_NAME"
@@ -807,6 +842,9 @@ TRAIN_ARGS=(
   "actor_rollout_ref.rollout.enforce_eager=False"
   "actor_rollout_ref.rollout.free_cache_engine=False"
   "actor_rollout_ref.rollout.n=$ROLLOUT_N"
+  "+algorithm.dual_stream.enable=$DUAL_STREAM_ENABLE"
+  "+algorithm.dual_stream.agent_rollout_n=$AGENT_ROLLOUT_N"
+  "+algorithm.dual_stream.native_rollout_n=$NATIVE_ROLLOUT_N"
   "actor_rollout_ref.rollout.temperature=1"
   "actor_rollout_ref.rollout.max_num_batched_tokens=$MAX_NUM_BATCHED_TOKENS"
   "actor_rollout_ref.rollout.agent.activate_agent=False"
@@ -822,6 +860,7 @@ TRAIN_ARGS=(
   "actor_rollout_ref.ref.fsdp_config.param_offload=True"
   "reward_model.reward_manager=naive_async"
   "trainer.critic_warmup=0"
+  "trainer.balance_batch=$BALANCE_BATCH"
   "trainer.logger=['console']"
   "trainer.n_gpus_per_node=$N_GPUS_PER_NODE"
   "trainer.nnodes=$NNODES"
@@ -840,6 +879,9 @@ if [[ "$SAVE_HF_MODEL" == "1" ]]; then
 fi
 if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
   TRAIN_ARGS+=("trainer.max_actor_ckpt_to_keep=$MAX_ACTOR_CKPT_TO_KEEP")
+fi
+if [[ -n "$MAX_CHECKPOINTS_TO_KEEP" ]]; then
+  TRAIN_ARGS+=("+trainer.max_checkpoints_to_keep=$MAX_CHECKPOINTS_TO_KEEP")
 fi
 if [[ "$SAVE_BEST_ONLY" == "True" || "$SAVE_BEST_HF_MODEL" == "True" ]]; then
     TRAIN_ARGS+=(
@@ -882,8 +924,38 @@ if [[ -n "$CUSTOM_DATASET_PATH" || -n "$CUSTOM_DATASET_NAME" ]]; then
 fi
 
 set -x
-"$RL_PYTHON" -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "${HYDRA_ARGS[@]}"
-status=$?
+if "$RL_PYTHON" -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "${HYDRA_ARGS[@]}"; then
+  status=0
+else
+  status=$?
+fi
 set +x
+
+if [[ "$status" == "0" && -n "$POST_TRAIN_SCRIPT" && "${DRY_RUN:-0}" != "1" ]]; then
+  # Release the distributed training runtime before the node-0 post hook takes
+  # over the local GPUs. A sequential multi-stage job can keep workers waiting
+  # until the post hook finishes so every node starts the next stage together.
+  if [[ "$WAIT_FOR_POST_TRAIN_ON_WORKERS" != "1" ]]; then
+    printf '%s\n' 0 > "$DONE_FILE"
+  fi
+  for tool_pid in "${TOOL_PIDS[@]:-}"; do
+    if [[ -n "$tool_pid" ]] && kill -0 "$tool_pid" 2>/dev/null; then
+      kill "$tool_pid" 2>/dev/null || true
+      wait "$tool_pid" 2>/dev/null || true
+    fi
+  done
+  TOOL_PIDS=()
+  "$RAY_BIN" stop --force >/dev/null 2>&1 || true
+  unset CUDA_VISIBLE_DEVICES RAY_ADDRESS
+  echo "Starting post-train script on node 0: $POST_TRAIN_SCRIPT"
+  if bash "$POST_TRAIN_SCRIPT"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$WAIT_FOR_POST_TRAIN_ON_WORKERS" == "1" ]]; then
+    printf '%s\n' "$status" > "$DONE_FILE"
+  fi
+fi
 echo "$NNODES-node RL run finished with exit code $status at $(date '+%Y-%m-%d %H:%M:%S')"
 exit "$status"

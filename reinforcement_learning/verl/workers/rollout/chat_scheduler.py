@@ -235,6 +235,11 @@ class ToolCompletionCallback(CompletionCallback):
         messages.append(message)
         finish_reason = completions.choices[0].finish_reason
 
+        # A Native rollout is deliberately single-turn and must never execute
+        # either native JSON tool calls or XML tool calls emitted by the model.
+        if not info.get("tools_enabled", True):
+            return
+
         # STEP 0: check if we reach max turns
         if self.max_turns and len(messages) >= self.max_turns:
             print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Reach max turns, done!")
@@ -370,7 +375,13 @@ class ToolCompletionCallback(CompletionCallback):
             }
         return {"role": "tool", "content": tool_response, "tool_call_id": tool_call_id}
 
-    def postprocess(self, batch: DataProto, batch_conversations: List[List[Dict[str, str]]], n: int) -> DataProto:
+    def postprocess(
+        self,
+        batch: DataProto,
+        batch_conversations: List[List[Dict[str, str]]],
+        n: int,
+        tools_enabled: bool = True,
+    ) -> DataProto:
         # NOTE: consistent with batch version of generate_sequences in vllm_rollout_spmd.py
         # prompts: left pad
         # responses: right pad
@@ -379,14 +390,15 @@ class ToolCompletionCallback(CompletionCallback):
         # position_ids:   [0,0,0,0,0,1,2,3, | 4,5,6,7,8,9,10,11]
 
         # prompts: [prompt] from input dataset
+        tool_schemas = self.tool_schemas if tools_enabled else None
         prompt_texts = [
-            self.tokenizer.apply_chat_template(prompt, tools=self.tool_schemas, add_generation_prompt=True, tokenize=False)
+            self.tokenizer.apply_chat_template(prompt, tools=tool_schemas, add_generation_prompt=True, tokenize=False)
             for prompt in batch.non_tensor_batch["raw_prompt"]
         ]
         assert len(batch_conversations) == len(prompt_texts) * n
 
         sequences = [
-            self.tokenizer.apply_chat_template(conversation, tools=self.tool_schemas, add_generation_prompt=False, tokenize=False)
+            self.tokenizer.apply_chat_template(conversation, tools=tool_schemas, add_generation_prompt=False, tokenize=False)
             for conversation in batch_conversations
         ]
         response_texts = [sequence[len(prompt_texts[i // n]) :] for i, sequence in enumerate(sequences)]
@@ -561,6 +573,13 @@ class ChatCompletionScheduler:
             raise ValueError(f"max_concurrent_requests must be positive, got {max_concurrent_requests}")
         self.request_semaphore = asyncio.Semaphore(max_concurrent_requests)
         print(f"Chat scheduler max concurrent multi-turn requests: {max_concurrent_requests}", flush=True)
+        self.max_completion_retries = int(os.getenv("VISUAL_AGENT_CHAT_COMPLETION_RETRIES", "2"))
+        if self.max_completion_retries < 0:
+            raise ValueError(
+                "VISUAL_AGENT_CHAT_COMPLETION_RETRIES must be non-negative, "
+                f"got {self.max_completion_retries}"
+            )
+        print(f"Chat completion retries: {self.max_completion_retries}", flush=True)
 
         self.background_tasks = set()
         if self.config.multi_turn.completion_callback is None:
@@ -613,19 +632,36 @@ class ChatCompletionScheduler:
             "started_at_unix": time.time(),
             "server": address,
         }
+        # NOTE: OpenAI client uses httpx, which has shown performance issues at
+        # high concurrency. Retry rare parser/transport failures with a fresh
+        # request id so one malformed sample does not discard the trajectory.
+        request = {
+            "messages": messages,
+            "extra_body": self.completion_callback.extra_body,
+            **info["__sampling_params__"],
+        }
+        if info.get("tools_enabled", True):
+            request["tools"] = self.completion_callback.tool_schemas
         try:
-            # NOTE: OpenAI client uses httpx, seems to have performance issue in high concurrency requests.
-            completions = await self._chat_completions_aiohttp(
-                address,
-                messages=messages,
-                tools=self.completion_callback.tool_schemas,
-                extra_body=self.completion_callback.extra_body,
-                extra_headers={"x-request-id": request_id},
-                **info["__sampling_params__"],
-            )
-        except Exception as e:
-            # Let user handle the exception
-            exception = e
+            for attempt in range(self.max_completion_retries + 1):
+                request["extra_headers"] = {"x-request-id": request_id}
+                try:
+                    completions = await self._chat_completions_aiohttp(address, **request)
+                    exception = None
+                    break
+                except Exception as e:
+                    exception = e
+                    if attempt == self.max_completion_retries:
+                        break
+                    self.request_id_to_address.pop(request_id, None)
+                    request_id = uuid4().hex
+                    self.request_id_to_address[request_id] = address
+                    logger.warning(
+                        "chat completion attempt %d/%d failed; retrying: %s",
+                        attempt + 1,
+                        self.max_completion_retries + 1,
+                        e,
+                    )
         finally:
             model_trace["latency_ms"] = round((time.perf_counter() - model_started) * 1000, 3)
             model_trace["status"] = "error" if exception is not None else "success"
@@ -642,6 +678,7 @@ class ChatCompletionScheduler:
         info["__depth__"] -= 1
 
         if exception is not None:
+            self.request_id_to_address.pop(request_id, None)
             logger.exception(f"chat completion failed with exception: {exception}")
         else:
             try:
@@ -697,7 +734,8 @@ class ChatCompletionScheduler:
 
         # NOTE: For multi-turn rollout, repeat raw_prompt n times and process each prompt independently,
         # validation dataset has already been repeated in `PPOTrainer._validate`.
-        n = 1 if batch.meta_info.get("validate", False) else self.config.n
+        n = 1 if batch.meta_info.get("validate", False) else int(batch.meta_info.get("rollout_n", self.config.n))
+        tools_enabled = not bool(batch.meta_info.get("disable_tools", False))
         tasks, batch_conversations = [], [None] * len(batch) * n
         image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
         encoded_image_cache: Dict[int, List[str]] = {}
@@ -725,12 +763,18 @@ class ChatCompletionScheduler:
                         request_id=None,
                         sampling_params=kwargs,
                         images=images,
+                        tools_enabled=tools_enabled,
                     )
                 )
             )
 
         trajectory_traces = await asyncio.gather(*tasks)
-        output_batch = self.completion_callback.postprocess(batch, batch_conversations, n=n)
+        output_batch = self.completion_callback.postprocess(
+            batch,
+            batch_conversations,
+            n=n,
+            tools_enabled=tools_enabled,
+        )
         if self.trace_rollouts:
             output_batch.non_tensor_batch["rollout_trace"] = np.array(trajectory_traces, dtype=object)
         output_batch.meta_info["timing"] = {"generate_sequences": time.time() - t_start}
@@ -743,6 +787,7 @@ class ChatCompletionScheduler:
         request_id: str,
         sampling_params: Dict[str, Any],
         images: List[Any] | None = None,
+        tools_enabled: bool = True,
     ):
         # Hold one slot for the full trajectory, including all recursive tool
         # turns. This bounds vLLM and visual-tool load while allowing a large
@@ -766,6 +811,7 @@ class ChatCompletionScheduler:
                 "__sampling_params__": sampling_params,
                 "__trace__": trace,
                 "images": images or [],
+                "tools_enabled": tools_enabled,
             }
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)

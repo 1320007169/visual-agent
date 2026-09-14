@@ -1,12 +1,12 @@
 {
   "stream": "dual",
-  "parent_checkpoint": "REPLACE_WITH_SELECTED_THETA_START",
-  "reference_model": "REPLACE_WITH_FROZEN_REFERENCE",
+  "parent_checkpoint": "saves/visual_agent_zwz_rl/qwen3/preserved_groundingdino_kl_step130_huggingface",
+  "reference_model": "saves/visual_agent_zwz_rl/qwen3/preserved_groundingdino_kl_step130_huggingface",
   "kl_coefficient": 0.001,
-  "freeze_scope": "vision_tower_and_projector_frozen",
-  "train_manifest_sha256": "REPLACE_WITH_SPLIT_MANIFEST_HASH",
+  "freeze_scope": "full_model_as_existing_trainer",
+  "train_manifest_sha256": "a5d501796fe345f0fffd572a356114ad2bbb566e02bf665a8e5359befc6ed82c",
   "reward_baseline": "existing_answer_correctness_reward",
-  "budget_accounting": "same_gpu_hours_including_rollout_tool_wait_and_update",
+  "budget_accounting": "100_outer_step_objective_ablation_not_equal_gpu_hours",
   "rollout": {
     "agent_group_size_k": 4,
     "native_group_size_k": 4,
@@ -16,6 +16,6 @@
   "loss": {
     "aggregation": "simultaneous_stream_mean",
     "alpha": 1.0,
-    "scheduler_progress": "generated_training_tokens"
+    "scheduler_progress": "outer_training_steps"
   }
 }

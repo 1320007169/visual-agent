@@ -16,6 +16,24 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
+    def test_vision_opd_uses_exact_multiple_choice_reward(self):
+        extra_info = {
+            "source": "vision-opd/original_images",
+            "data_source": "visual-agent-vision-opd",
+        }
+        self.assertEqual(
+            reward.compute_score("<answer>D</answer>", "D", extra_info=extra_info),
+            {"score": 1.0, "acc": 1.0, "format": 1.0, "tool_used": 0.0},
+        )
+        self.assertEqual(
+            reward.compute_score("<answer>C</answer>", "D", extra_info=extra_info)["acc"],
+            0.0,
+        )
+        self.assertEqual(
+            reward.compute_score("<answer>purple</answer>", "D", extra_info=extra_info)["acc"],
+            0.0,
+        )
+
     def setUp(self):
         self.env_patch = patch.dict(os.environ, {"LLM_AS_A_JUDGE_BASE": ""})
         self.env_patch.start()

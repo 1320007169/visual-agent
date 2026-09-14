@@ -62,6 +62,19 @@ def test_tensor_dict_constructor():
         data = DataProto.from_dict(tensors={"obs": obs, "act": act}, num_batch_dims=3)
 
 
+def test_rename_multiple_tensor_keys():
+    obs = torch.randn(4, 2)
+    act = torch.randn(4, 3)
+    data = DataProto.from_dict(tensors={"obs": obs, "act": act})
+
+    returned = data.rename(old_keys=["obs", "act"], new_keys=["inputs", "actions"])
+
+    assert returned is data
+    assert set(data.batch.keys()) == {"inputs", "actions"}
+    assert torch.equal(data.batch["inputs"], obs)
+    assert torch.equal(data.batch["actions"], act)
+
+
 def test_tensor_dict_make_iterator():
     obs = torch.randn(100, 10)
     labels = [random.choice(["abc", "cde"]) for _ in range(100)]

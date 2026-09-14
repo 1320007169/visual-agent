@@ -1,6 +1,6 @@
 # Visual Agent 实验执行包
 
-这个目录把《Visual Agent 实验执行计划》的前四步落为独立、可审计的实验工具。它不修改 `reinforcement_learning/`、现有评测脚本或模型服务代码。
+这个目录把《Visual Agent 实验执行计划》的前四步落为可审计的实验工具，并通过仓库脚本接入现有训练与评测链路。
 
 ## 包含内容
 
@@ -9,7 +9,10 @@
 - `validate-log` 校验逐题 JSONL 日志。Native 模式的工具调用会被拒绝，缺少坐标映射、结束原因或 token/耗时字段也会被报告。
 - `summarize-utility` 对同一题目的 ON/OFF 结果做配对聚合，输出 `delta_tool`、工具率、有效调用率及按题 bootstrap 置信区间。
 - `check-fairness` 比较单流 A 与双流 D 配置，阻止它们使用不同父 checkpoint、奖励、数据池、冻结范围、KL 或预算口径。
-- `dual_stream.py` 提供单独按 `(sample_id, stream_id, batch_id)` 计算 GRPO outcome advantage，以及 `L_A`/`L_N` 的等权或 alpha 加权合并函数。它是接入现有 trainer 前可单测的参考实现，不会偷偷把双流写成串行续训。
+- `dual_stream.py` 提供按 `(sample_id, stream_id, batch_id)` 计算 GRPO outcome advantage，以及 `L_A`/`L_N` 的等权或 alpha 加权参考实现。
+- `scripts/run_visual_agent_step130_stream_ablation_32gpu.sh` 已接入 trainer：两路都基于同一旧策略生成，分别分组计算 advantage，并在每个 PPO mini-batch 中交错合并；Native 分支使用独立 prompt 且不会携带或执行工具调用。
+- Native prompt 必须输出严格的 `<answer>relation label</answer>`；训练器会分别记录两路 reward 指标，并在整批 Native format reward 为零时立即终止。
+- A/D 训练成功后由 0 号节点自动释放训练服务，并用最终 HuggingFace checkpoint 以 Agent/tool-on 口径评测 `VStarBench`、`HRBench4K`、`HRBench8K`。
 
 ## 快速开始
 

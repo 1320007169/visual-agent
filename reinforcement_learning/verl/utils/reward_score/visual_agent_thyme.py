@@ -103,6 +103,15 @@ def _is_zwz_relation_task(extra_info) -> bool:
     )
 
 
+def _is_vision_opd_task(extra_info) -> bool:
+    if not isinstance(extra_info, dict):
+        return False
+    return (
+        extra_info.get("source") == "vision-opd/original_images"
+        or extra_info.get("data_source") == "visual-agent-vision-opd"
+    )
+
+
 def grounding_query_penalty(text: str) -> tuple[int, float]:
     max_words = int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0"))
     penalty_per_query = float(os.environ.get("GROUNDING_QUERY_PENALTY", "0"))
@@ -227,6 +236,12 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         # Closed relation labels must not receive a semantic-judge fallback:
         # ambiguous answers such as "on" can otherwise match several labels.
         correct = relation_match(answer, ground_truth)
+    elif _is_vision_opd_task(extra_info):
+        # Vision-OPD is closed A-D multiple choice. Keep its reward exact and
+        # deterministic rather than sending malformed/free-form answers to a judge.
+        normalized_answer = normalize_answer(answer).upper()
+        normalized_ground_truth = normalize_answer(ground_truth).upper()
+        correct = normalized_answer in {"A", "B", "C", "D"} and normalized_answer == normalized_ground_truth
     else:
         question = str((extra_info or {}).get("question", ""))
         correct = rule_match(answer, ground_truth)
