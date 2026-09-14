@@ -1,0 +1,24 @@
+{
+  "prompt_tokens": [10, 11, 12, 13],
+  "segments": [
+    {
+      "kind": "generation",
+      "tokens": [101, 102, 103, 104],
+      "log_probs": [-0.1, -0.2, -0.3, -0.4]
+    },
+    {
+      "kind": "tool_observation_with_image",
+      "tokens": [201, 202, 203],
+      "log_probs": [0.0, 0.0, 0.0]
+    },
+    {
+      "kind": "generation",
+      "tokens": [301, 302],
+      "log_probs": [-0.5, -0.6]
+    }
+  ],
+  "expected_response_tokens": [101, 102, 103, 104, 201, 202, 203, 301, 302],
+  "expected_loss_mask": [1, 1, 1, 1, 0, 0, 0, 1, 1],
+  "expected_rollout_log_probs": [-0.1, -0.2, -0.3, -0.4, 0.0, 0.0, 0.0, -0.5, -0.6],
+  "group_rewards": [1.0, 0.1]
+}
