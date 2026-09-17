@@ -8,6 +8,7 @@ import base64
 import json
 import math
 import mimetypes
+import os
 import threading
 import time
 import urllib.request
@@ -67,13 +68,17 @@ def execute_request(pool: LeastPendingEndpoints, payload: bytes, timeout: float)
         request = urllib.request.Request(
             endpoint + "/execute",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": "Bearer " + os.environ["VISUAL_TOOL_API_KEY"]}
+                   if os.getenv("VISUAL_TOOL_API_KEY") else {}),
+            },
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             result = json.load(response)
         return {
-            "ok": result.get("status") == "success",
+            "ok": result.get("status") == "success" and result.get("result", {}).get("status") != "error",
             "client_ms": (time.perf_counter() - started) * 1000,
             "server_ms": float(result.get("metrics", {}).get("latency_ms", math.nan)),
         }
@@ -88,11 +93,14 @@ def execute_request(pool: LeastPendingEndpoints, payload: bytes, timeout: float)
         pool.release(endpoint_index)
 
 
-def run_level(endpoints: list[str], payload: bytes, concurrency: int, requests: int, timeout: float) -> dict:
+def run_level(endpoints: list[str], payload: bytes | list[bytes], concurrency: int, requests: int, timeout: float) -> dict:
+    if concurrency < 1 or requests < 1 or timeout <= 0 or not endpoints or not payload:
+        raise ValueError("Endpoints, payloads, concurrency, requests and timeout must be non-empty/positive")
+    payloads = [payload] if isinstance(payload, bytes) else payload
     pool = LeastPendingEndpoints(endpoints)
     started = time.perf_counter()
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(execute_request, pool, payload, timeout) for _ in range(requests)]
+        futures = [executor.submit(execute_request, pool, payloads[i % len(payloads)], timeout) for i in range(requests)]
         results = [future.result() for future in as_completed(futures)]
     elapsed = time.perf_counter() - started
     successful = [result for result in results if result["ok"]]
@@ -110,9 +118,11 @@ def run_level(endpoints: list[str], payload: bytes, concurrency: int, requests: 
         "requests": requests,
         "successful": len(successful),
         "failed": len(results) - len(successful),
+        "elapsed_s": round(elapsed, 3),
         "throughput_rps": round(len(successful) / elapsed, 3),
         "client_p50_ms": round(percentile(client_ms, 0.50), 3),
         "client_p90_ms": round(percentile(client_ms, 0.90), 3),
+        "client_p95_ms": round(percentile(client_ms, 0.95), 3),
         "client_p99_ms": round(percentile(client_ms, 0.99), 3),
         "server_p50_ms": round(percentile(server_ms, 0.50), 3),
         "server_p90_ms": round(percentile(server_ms, 0.90), 3),
