@@ -13,6 +13,7 @@
 # limitations under the License.
 import asyncio
 import base64
+import copy
 import heapq
 import importlib
 import io
@@ -757,9 +758,12 @@ class ChatCompletionScheduler:
         tasks, batch_conversations = [], [None] * len(batch) * n
         image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
         encoded_image_cache: Dict[int, List[str]] = {}
+        encoded_model_image_cache: Dict[int, List[str]] = {}
         for batch_index, conversation in enumerate(batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0)):
             # raw_prompt: [{"role": "user", "content": ""}, ["role": "assistant", "content"], ...]
-            batch_conversations[batch_index] = conversation.tolist()
+            # Repeated rollouts share the underlying dicts. Image attachment
+            # must not mutate raw_prompt or another rollout/Native stream.
+            batch_conversations[batch_index] = copy.deepcopy(conversation.tolist())
             source_index = batch_index // n
             images = []
             if "origin_multi_modal_data" in batch.non_tensor_batch:
@@ -772,7 +776,23 @@ class ChatCompletionScheduler:
                 image_transport_mode,
                 encoded_image_cache,
             )
-            _attach_images_to_messages(batch_conversations[batch_index], images)
+            # The policy sees the exact preprocessed image used for actor
+            # features, transported losslessly. Tools keep the full-resolution
+            # source in info['images'] so crops can recover fine detail.
+            model_images = []
+            if "multi_modal_data" in batch.non_tensor_batch:
+                mm_data = batch.non_tensor_batch["multi_modal_data"][source_index]
+                if isinstance(mm_data, dict):
+                    model_images = list(mm_data.get("image") or [])
+            if len(model_images) != len(images):
+                raise ValueError(
+                    "Rollout requires matching actor and source images: "
+                    f"actor={len(model_images)}, source={len(images)}"
+                )
+            model_images = _prepare_rollout_images(
+                model_images, source_index, "source_cached", encoded_model_image_cache
+            )
+            _attach_images_to_messages(batch_conversations[batch_index], model_images)
 
             tasks.append(
                 asyncio.create_task(

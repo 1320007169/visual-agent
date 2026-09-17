@@ -29,6 +29,7 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
 import verl.utils.torch_functional as verl_F
+from verl.tools.schemas import load_tool_schemas_from_config
 from verl.utils.model import compute_position_id_with_mask
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ class RLHFDataset(Dataset):
         self.tokenizer = tokenizer
         self.processor = processor
         self.config = config
+        self.tool_schemas = load_tool_schemas_from_config(config.get("tool_config_path"))
 
         self.cache_dir = os.path.expanduser(config.get("cache_dir", "~/.cache/verl/rlhf"))
         self.prompt_key = config.get("prompt_key", "prompt")
@@ -137,9 +139,7 @@ class RLHFDataset(Dataset):
 
         # filter out too long prompts
         if self.filter_overlong_prompts:
-            tokenizer = self.tokenizer
             processor = self.processor
-            prompt_key = self.prompt_key
             image_key = self.image_key
             video_key = self.video_key
 
@@ -148,7 +148,7 @@ class RLHFDataset(Dataset):
 
                 def doc2len(doc) -> int:
                     messages = self._build_messages(doc)
-                    raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+                    raw_prompt = self._apply_chat_template(messages)
                     images = [process_image(image) for image in doc.get(image_key)] if image_key in doc else None
                     videos = [process_video(video) for video in doc.get(video_key)] if video_key in doc else None
                     return len(processor(text=[raw_prompt], images=images, videos=videos)["input_ids"][0])
@@ -156,7 +156,7 @@ class RLHFDataset(Dataset):
             else:
 
                 def doc2len(doc) -> int:
-                    return len(tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True))
+                    return len(self._apply_chat_template(self._build_messages(doc), tokenize=True))
 
             self.dataframe = self.dataframe.filter(
                 lambda doc: doc2len(doc) <= self.max_prompt_length,
@@ -177,6 +177,14 @@ class RLHFDataset(Dataset):
 
     def __len__(self):
         return len(self.dataframe)
+
+    def _apply_chat_template(self, messages, *, tools_enabled=True, tokenize=False):
+        """Render actor prompts with the schemas passed to the rollout server."""
+        encoder = self.processor if self.processor is not None else self.tokenizer
+        kwargs = {"tools": self.tool_schemas} if tools_enabled and self.tool_schemas else {}
+        return encoder.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=tokenize, **kwargs
+        )
 
     def _build_messages(self, example: dict):
         messages: list = example.pop(self.prompt_key)
@@ -210,7 +218,7 @@ class RLHFDataset(Dataset):
         if self.processor is not None:
             from verl.utils.dataset.vision_utils import process_image, process_raw_image, process_video
 
-            raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            raw_prompt = self._apply_chat_template(messages)
             multi_modal_data = {}
             origin_multi_modal_data = {}
 
@@ -247,7 +255,7 @@ class RLHFDataset(Dataset):
             row_dict["multi_modal_inputs"].pop("second_per_grid_ts", None)
 
         else:
-            raw_prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            raw_prompt = self._apply_chat_template(messages)
             model_inputs = self.tokenizer(raw_prompt, return_tensors="pt", add_special_tokens=False)
             input_ids = model_inputs.pop("input_ids")
             attention_mask = model_inputs.pop("attention_mask")

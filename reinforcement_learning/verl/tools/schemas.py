@@ -50,6 +50,24 @@ class OpenAIFunctionToolSchema(BaseModel):
     function: OpenAIFunctionSchema
 
 
+def load_tool_schemas_from_config(path: str | None) -> list[dict]:
+    """Read the same schemas as the rollout without constructing tool clients."""
+    if not path:
+        return []
+    from omegaconf import OmegaConf
+
+    config = OmegaConf.load(path)
+    schemas = []
+    for tool in config.tools:
+        if tool.get("tool_schema") is None:
+            raise ValueError(f"Dataset prompt encoding requires an explicit tool_schema: {tool.class_name}")
+        schema = OpenAIFunctionToolSchema.model_validate(
+            OmegaConf.to_container(tool.tool_schema, resolve=True)
+        )
+        schemas.append(schema.model_dump(exclude_unset=True, exclude_none=True))
+    return schemas
+
+
 class OpenAIFunctionParsedSchema(BaseModel):
     """The parsed schema of a tool in OpenAI format."""
 

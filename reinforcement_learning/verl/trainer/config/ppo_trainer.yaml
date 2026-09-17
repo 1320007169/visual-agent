@@ -52,6 +52,10 @@ data:
   # Whether to return the full prompt with chat template.
   return_full_prompt: False
 
+  # Keep actor prompt encoding (including length filtering) in sync with tools
+  # supplied by the rollout. Native dual-stream prompts explicitly omit them.
+  tool_config_path: ${actor_rollout_ref.rollout.multi_turn.tool_config_path}
+
   # Whether to shuffle the data in the dataloader.
   shuffle: True
 

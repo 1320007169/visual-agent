@@ -88,11 +88,7 @@ class ZwzOriginalRelationDataset(RLHFDataset):
         else:
             native_messages.insert(0, {"role": "system", "content": NATIVE_SYSTEM_PROMPT})
 
-        native_prompt = self.processor.apply_chat_template(
-            native_messages,
-            add_generation_prompt=True,
-            tokenize=False,
-        )
+        native_prompt = self._apply_chat_template(native_messages, tools_enabled=False)
         multi_modal_data = row.get("multi_modal_data", {})
         model_inputs = self.processor(
             text=[native_prompt],
