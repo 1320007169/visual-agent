@@ -235,14 +235,19 @@ class ToolCompletionCallback(CompletionCallback):
         messages.append(message)
         finish_reason = completions.choices[0].finish_reason
 
+        info["assistant_turns"] = info.get("assistant_turns", 0) + 1
+
         # A Native rollout is deliberately single-turn and must never execute
         # either native JSON tool calls or XML tool calls emitted by the model.
         if not info.get("tools_enabled", True):
             return
 
         # STEP 0: check if we reach max turns
-        if self.max_turns and len(messages) >= self.max_turns:
-            print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Reach max turns, done!")
+        if self.max_turns and info["assistant_turns"] >= self.max_turns:
+            print(
+                f"[id={completions.id},turn={info['assistant_turns']},"
+                f"finish_reason={finish_reason}] Reach max turns, done!"
+            )
             return
 
         # STEP 1: check if the model called tools
@@ -446,9 +451,8 @@ class ToolCompletionCallback(CompletionCallback):
         input_ids = torch.cat([prompt_input_ids, responses["input_ids"]], dim=1)
         attention_mask = torch.cat([prompt_attention_mask, responses["attention_mask"]], dim=1)
         # Multi-turn GRPO and the actor update expect a full-sequence
-        # loss_mask. Prompt tokens and tool-call/tool-response tokens must not
-        # contribute to the policy loss; response_mask already excludes the
-        # latter, so prepend zeros for the prompt portion.
+        # loss_mask. Only observations and prompt tokens are excluded;
+        # assistant-generated tool calls remain trainable.
         prompt_loss_mask = torch.zeros_like(prompt_attention_mask)
         loss_mask = torch.cat([prompt_loss_mask, response_mask], dim=1)
         response_length = responses["input_ids"].size(1)
@@ -472,7 +476,16 @@ class ToolCompletionCallback(CompletionCallback):
             batch_size=len(input_ids),
         )
 
-        num_turns = np.array([len(conversation) for conversation in batch_conversations], dtype=np.int32)
+        num_turns = np.array(
+            [
+                sum(
+                    message.get("role") == "assistant"
+                    for message in conversation[len(raw_prompts[index]) :]
+                )
+                for index, conversation in enumerate(batch_conversations)
+            ],
+            dtype=np.int32,
+        )
         return DataProto(
             batch=batch,
             non_tensor_batch={
@@ -523,8 +536,11 @@ class ToolCompletionCallback(CompletionCallback):
                     for part in content
                     if isinstance(part, dict) and part.get("type") == "text"
                 )
-            if response.get("role") == "tool" or "<tool_response>" in str(content):
+            if response.get("role") == "tool":
                 return "tool"
+            if response.get("role") == "user" and "<tool_response>" in str(content):
+                # XML observations are separate user turns in the template.
+                return "xml_observation"
             return response.get("role")
 
         loss_mask = attention_mask.clone()
@@ -535,8 +551,10 @@ class ToolCompletionCallback(CompletionCallback):
             roles = deduplicate_adjacent_tool_calls([response_role(response) for response in responses])
             # Each turn should be: [BOS]...[EOS]
             eos_indices = input_ids[i].eq(self.tokenizer.eos_token_id).nonzero().squeeze(1)[: len(roles)]
+            if len(eos_indices) != len(roles):
+                raise ValueError("Cannot align response messages with chat terminators")
             for j in range(len(roles)):
-                if roles[j] == "tool":
+                if roles[j] in ("tool", "xml_observation"):
                     bos = eos_indices[j - 1] + 1 if j > 0 else 0
                     eos = eos_indices[j]
                     loss_mask[i, bos : eos + 1] = 0

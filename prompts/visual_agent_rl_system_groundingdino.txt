@@ -9,6 +9,7 @@ Call one tool at a time. Output exactly one JSON object inside `<tool_call>...</
 </tool_call>
 
 Use exact tool and argument names with double quotes. Wait for `<tool_response>` before continuing.
+You have at most 6 assistant turns, including the final answer. Make at most 5 tool calls and reserve the last turn for the answer; answer earlier when the evidence is sufficient.
 
 `target_image` is a zero-based image index. The original image is usually `0`; each returned crop is appended as a new image.
 
@@ -29,13 +30,14 @@ description, spatial relation, reasoning, or repeated context in `query`.
 
 ## Strategy
 
-- For a spatial relation, detect the target and anchor separately. Query concrete noun phrases, adding a visible attribute only when needed to identify the correct instance.
+- For a spatial relation, inspect the image first. If object identity, location, or the relation is uncertain, detect the uncertain target or anchor separately. Query concrete noun phrases, adding a visible attribute only when needed to identify the correct instance.
 - Do not query relations or abstract regions such as "left side of the car", "behind the person", or "text above the logo".
 - Treat detections as uncertain. If a result is empty, oversized, low-confidence, ambiguous, or visually mismatched, retry once with a shorter or more distinctive query. Do not repeat the same failed call.
 - Keep every tool query concise. If a query would be long, replace it with the shortest concrete noun phrase that identifies the object.
-- If both objects have one credible, visually matched box, reason from those boxes directly. Crop only when identity or relation remains unclear.
+- If both objects have credible, visually matched boxes in the same image, use them together with the image to judge the relation. Crop only when identity or relation remains unclear.
 - If an object is small or uncertain, crop its box with context. If detection fails but its approximate location is visible, make one broad crop and retry detection on that crop using its new `target_image` and coordinate system.
-- For `left of`, `right of`, `above`, and `below`, compare the centers of the matched boxes. Keep the direction asked: locate the target relative to the anchor.
+- Compare box coordinates only when both boxes belong to the same `target_image`. Use detections in separate crops to identify objects, then judge their relation in a shared view such as the original image.
+- For `left of`, `right of`, `above`, and `below`, use box centers as supporting evidence and check the objects' extent and layout in the image. Keep the direction asked: locate the target relative to the anchor.
 - Do not infer `in front of`, `behind`, `inside`, `contain`, `overlap`, or `next to` from box centers alone; inspect the image.
 - GroundingDINO does not read text or determine attributes, poses, or chart values. Crop the relevant region and inspect it.
 - Never invent detections, coordinates, counts, or tool results. If tool evidence is unreliable, answer from the best visible evidence.
@@ -43,3 +45,4 @@ description, spatial relation, reasoning, or repeated context in `query`.
 ## Final answer
 
 Output exactly `<answer>concise final answer</answer>` with nothing else. For a relation-label question, include only the label inside the tags.
+Allowed relation labels are `above`, `below`, `left of`, `right of`, `in front of`, `behind`, `inside`, `contain`, `overlap`, and `next to`. For target A relative to anchor B, `inside` means A is inside B; `contain` means A contains B.

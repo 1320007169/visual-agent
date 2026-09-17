@@ -2,7 +2,7 @@ import importlib.util
 import os
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 REWARD_PATH = (
@@ -16,18 +16,189 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
-    def test_vision_opd_uses_exact_multiple_choice_reward(self):
+    def test_initialization_failure_falls_back(self):
+        backup = Mock()
+        backup.chat.completions.create.return_value.choices = [Mock(message=Mock(content="TRUE"))]
+        before = reward.judge_stats_snapshot()
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_PRIMARY_RETRIES": "1", "LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1"}), patch.object(
+            reward, "_judge_client_and_model", side_effect=[TimeoutError(), (backup, "model")]
+        ):
+            self.assertTrue(reward.judge_match("q", "p", "g"))
+        stats = reward.judge_batch_summary(before, 1)
+        self.assertEqual(stats["primary_timeouts"], 1)
+        self.assertEqual(stats["primary_requests"], 0)
+        self.assertEqual(stats["fallbacks"], 1)
+        self.assertEqual(stats["backup_requests"], 1)
+
+    def test_initialization_failures_are_bounded(self):
+        before = reward.judge_stats_snapshot()
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_PRIMARY_RETRIES": "1", "LLM_AS_A_JUDGE_BACKUP_RETRIES": "2", "LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1"}), patch.object(
+            reward, "_judge_client_and_model", side_effect=TimeoutError()
+        ) as initialize:
+            self.assertIsNone(reward.judge_match("q", "p", "g"))
+        self.assertEqual(initialize.call_count, 3)
+        stats = reward.judge_batch_summary(before, 1)
+        self.assertEqual(stats["backup_errors"], 2)
+        self.assertEqual(stats["final_unresolved"], 1)
+
+    def test_choice_punctuation_without_judge(self):
+        for source in ("visual-agent-hrbench4k", "visual-agent-vision-opd"):
+            with patch.object(reward, "judge_match") as judge:
+                for answer in ("B", "B.", "B)", "B. text", "B) text"):
+                    self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", "B", {"data_source": source})["acc"], 1)
+                for answer in ("A.", "A)", "B or C", "blue"):
+                    self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", "B", {"data_source": source})["acc"], 0)
+                judge.assert_not_called()
+
+    def test_judge_stats_distinguish_backup_false_from_failure(self):
+        primary, backup = Mock(), Mock()
+        error = RuntimeError("limited")
+        error.status_code = 429
+        primary.chat.completions.create.side_effect = error
+        backup.chat.completions.create.return_value.choices = [Mock(message=Mock(content="FALSE"))]
+        before = reward.judge_stats_snapshot()
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1", "LLM_AS_A_JUDGE_BACKUP_RETRIES": "2"}), patch.object(
+            reward, "_judge_client_and_model", side_effect=[(primary, "primary"), (backup, "backup")]
+        ):
+            self.assertFalse(reward.judge_match("color?", "blue", "red"))
+        stats = reward.judge_batch_summary(before, 8)
+        self.assertEqual(stats["primary_requests"], 1)
+        self.assertEqual(stats["primary_rate_limited"], 1)
+        self.assertEqual(stats["backup_requests"], 1)
+        self.assertEqual(stats["backup_valid"], 1)
+        self.assertEqual(stats["backup_false"], 1)
+        self.assertEqual(stats["final_unresolved"], 0)
+        self.assertEqual(stats["judge_sample_ratio"], 1 / 8)
+
+    def test_judge_stats_track_empty_response_as_unresolved(self):
+        client = Mock()
+        client.chat.completions.create.return_value.choices = [Mock(message=Mock(content=None))]
+        before = reward.judge_stats_snapshot()
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "", "LLM_AS_A_JUDGE_PRIMARY_RETRIES": "1"}), patch.object(
+            reward, "_judge_client_and_model", return_value=(client, "model")
+        ):
+            self.assertIsNone(reward.judge_match("color?", "red", "red"))
+        stats = reward.judge_batch_summary(before, 1)
+        self.assertEqual(stats["primary_invalid"], 1)
+        self.assertEqual(stats["primary_valid"], 0)
+        self.assertEqual(stats["final_unresolved"], 1)
+        self.assertEqual(stats["final_unresolved_ratio"], 1)
+
+    def test_judge_stats_are_thread_safe_and_batch_local(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        client = Mock()
+        client.chat.completions.create.return_value.choices = [Mock(message=Mock(content="TRUE"))]
+        before = reward.judge_stats_snapshot()
+        with patch.object(reward, "_judge_client_and_model", return_value=(client, "model")):
+            with ThreadPoolExecutor(max_workers=32) as pool:
+                self.assertTrue(all(pool.map(lambda _: reward.judge_match("q", "a", "a"), range(128))))
+        stats = reward.judge_batch_summary(before, 896)
+        self.assertEqual(stats["judge_samples"], 128)
+        self.assertEqual(stats["primary_requests"], 128)
+        self.assertEqual(stats["primary_valid"], 128)
+        self.assertEqual(stats["primary_true"], 128)
+        self.assertEqual(reward.judge_batch_summary(reward.judge_stats_snapshot(), 896)["judge_samples"], 0)
+
+    def test_judge_falls_back_on_transient_failure(self):
+        for status in (None, 408, 429, 500, 503):
+            with self.subTest(status=status):
+                primary, backup = Mock(), Mock()
+                error = RuntimeError("provider failure")
+                error.status_code = status
+                primary.chat.completions.create.side_effect = error
+                backup.chat.completions.create.return_value.choices = [
+                    Mock(message=Mock(content="TRUE"))
+                ]
+                with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1", "LLM_AS_A_JUDGE_BACKUP_RETRIES": "2"}), patch.object(
+                    reward, "_judge_client_and_model", side_effect=[(primary, "primary"), (backup, "backup")]
+                ):
+                    self.assertTrue(reward.judge_match("color?", "red", "red"))
+                self.assertEqual(primary.chat.completions.create.call_count, 1)
+                self.assertEqual(backup.chat.completions.create.call_count, 1)
+
+    def test_judge_falls_back_on_invalid_response(self):
+        primary, backup = Mock(), Mock()
+        primary.chat.completions.create.return_value.choices = [Mock(message=Mock(content="maybe"))]
+        backup.chat.completions.create.return_value.choices = [Mock(message=Mock(content="TRUE"))]
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1"}), patch.object(
+            reward, "_judge_client_and_model", side_effect=[(primary, "primary"), (backup, "backup")]
+        ):
+            self.assertTrue(reward.judge_match("color?", "red", "red"))
+        self.assertEqual(primary.chat.completions.create.call_count, 1)
+        self.assertEqual(backup.chat.completions.create.call_count, 1)
+
+    def test_judge_false_does_not_fall_back(self):
+        primary = Mock()
+        primary.chat.completions.create.return_value.choices = [Mock(message=Mock(content="FALSE"))]
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1"}), patch.object(
+            reward, "_judge_client_and_model", return_value=(primary, "primary")
+        ) as get_client:
+            self.assertFalse(reward.judge_match("color?", "blue", "red"))
+            get_client.assert_called_once_with(backup=False)
+
+    def test_judge_both_fail_is_bounded(self):
+        client = Mock()
+        client.chat.completions.create.side_effect = TimeoutError()
+        with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "https://backup/v1", "LLM_AS_A_JUDGE_BACKUP_RETRIES": "2"}), patch.object(
+            reward, "_judge_client_and_model", return_value=(client, "model")
+        ):
+            self.assertIsNone(reward.judge_match("color?", "red", "red"))
+        self.assertEqual(client.chat.completions.create.call_count, 3)
+
+    def test_hrbench_uses_choice_accuracy_without_judge(self):
+        extra = {"data_source": "visual-agent-hrbench4k"}
+        with patch.object(reward, "judge_match") as judge:
+            self.assertEqual(reward.compute_score("<answer>B</answer>", "B", extra)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>B. 37B</answer>", "B", extra)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>B) 37B</answer>", "B", extra)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>A</answer>", "B", extra)["acc"], 0)
+            self.assertEqual(reward.compute_score("<answer>A. 37B</answer>", "B", extra)["acc"], 0)
+            self.assertEqual(reward.compute_score("<answer>blue</answer>", "B", extra)["acc"], 0)
+            self.assertEqual(reward.compute_score("<answer>B or C</answer>", "B", extra)["acc"], 0)
+            judge.assert_not_called()
+
+    def test_mixed_deepeyes_free_form_uses_judge_without_changing_relation_reward(self):
+        extra = {"source": "deepeyesv2/perception", "question": "What color is the car?"}
+        with patch.object(reward, "rule_match", return_value=False), patch.object(
+            reward, "judge_match", return_value=True
+        ) as judge:
+            result = reward.compute_score("<answer>red</answer>", "The car is red.", extra)
+            self.assertEqual(result["acc"], 1.0)
+            judge.assert_called_once_with("What color is the car?", "red", "The car is red.")
+            judge.reset_mock()
+            result = reward.compute_score("<answer>on</answer>", "above", {
+                "source": "zwz_rl_vqa/original_images"
+            })
+            self.assertEqual(result["acc"], 0.0)
+            judge.assert_not_called()
+
+    def test_unresolved_judge_keeps_format_reward_and_enters_grpo(self):
+        extra = {"source": "deepeyesv2/perception", "question": "What color is the car?"}
+        with patch.object(reward, "rule_match", return_value=False), patch.object(
+            reward, "judge_match", return_value=None
+        ):
+            result = reward.compute_score("<answer>red</answer>", "The car is red.", extra)
+        self.assertEqual(result["score"], 0.1)
+        self.assertEqual(result["acc"], 0.0)
+        self.assertEqual(result["reward_valid"], 1.0)
+
+    def test_vision_opd_uses_closed_multiple_choice_reward(self):
         extra_info = {
             "source": "vision-opd/original_images",
             "data_source": "visual-agent-vision-opd",
         }
         self.assertEqual(
             reward.compute_score("<answer>D</answer>", "D", extra_info=extra_info),
-            {"score": 1.0, "acc": 1.0, "format": 1.0, "tool_used": 0.0},
+            {"score": 1.0, "acc": 1.0, "format": 1.0, "tool_used": 0.0, "reward_valid": 1.0},
         )
         self.assertEqual(
             reward.compute_score("<answer>C</answer>", "D", extra_info=extra_info)["acc"],
             0.0,
+        )
+        self.assertEqual(
+            reward.compute_score("<answer>D. Purple</answer>", "D", extra_info=extra_info)["acc"],
+            1.0,
         )
         self.assertEqual(
             reward.compute_score("<answer>purple</answer>", "D", extra_info=extra_info)["acc"],
@@ -35,7 +206,10 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
         )
 
     def setUp(self):
-        self.env_patch = patch.dict(os.environ, {"LLM_AS_A_JUDGE_BASE": ""})
+        self.env_patch = patch.dict(
+            os.environ,
+            {"LLM_AS_A_JUDGE_BASE": "", "LLM_AS_A_JUDGE_BACKUP_BASE": ""},
+        )
         self.env_patch.start()
         reward._judge_client_and_model.cache_clear()
 
@@ -51,6 +225,7 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
                 "acc": 1.0,
                 "format": 1.0,
                 "tool_used": 0.0,
+                "reward_valid": 1.0,
             },
         )
 

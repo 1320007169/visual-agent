@@ -367,6 +367,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
             response_mask=grpo_calculation_mask,
             index=data.non_tensor_batch["uid"],
             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+            reward_valid_mask=data.non_tensor_batch.get("reward_valid"),
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
@@ -867,7 +868,15 @@ class RayPPOTrainer:
 
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        # Text alone is not a stable sample identity: visual benchmarks can ask
+        # the same question about different images. Group repeated validation
+        # rollouts by the dataset row instead, falling back to text for datasets
+        # that do not expose a source index.
+        sample_group_keys = [
+            f"source_index:{metadata['source_index']}" if "source_index" in metadata else sample_input
+            for sample_input, metadata in zip(sample_inputs, sample_source_metadata, strict=True)
+        ]
+        data_src2var2metric2val = process_validation_metrics(data_sources, sample_group_keys, reward_extra_infos_dict)
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
@@ -1133,6 +1142,16 @@ class RayPPOTrainer:
         best_metric_name = self.config.trainer.get("best_metric", None)
         best_val_metric = None
         best_val_step = None
+        best_metadata_path = os.path.join(self.config.trainer.default_local_dir, "best_checkpoint.json")
+        if track_best_checkpoint and self.config.trainer.resume_mode != "disable" and os.path.isfile(best_metadata_path):
+            with open(best_metadata_path) as handle:
+                saved_best = json.load(handle)
+            if saved_best.get("metric") != best_metric_name:
+                raise ValueError("Saved best checkpoint metric differs from the configured validation metric")
+            if not os.path.exists(saved_best["checkpoint"]):
+                raise FileNotFoundError(saved_best["checkpoint"])
+            best_val_metric = saved_best["value"]
+            best_val_step = saved_best["step"]
 
         def record_best_checkpoint(step, metric_value, checkpoint_path):
             os.makedirs(self.config.trainer.default_local_dir, exist_ok=True)
@@ -1149,6 +1168,16 @@ class RayPPOTrainer:
                     indent=4,
                 )
 
+        def tracked_validation_metric(val_metrics):
+            if best_metric_name in val_metrics:
+                return val_metrics[best_metric_name]
+            available = sorted(key for key in val_metrics if key.startswith("val-core/"))
+            pprint(
+                f"Warning: configured best metric {best_metric_name!r} is unavailable; "
+                f"skipping best-checkpoint update. Available core metrics: {available}"
+            )
+            return None
+
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
@@ -1156,8 +1185,9 @@ class RayPPOTrainer:
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
-            if track_best_checkpoint:
-                best_val_metric = val_metrics[best_metric_name]
+            current_val_metric = tracked_validation_metric(val_metrics) if track_best_checkpoint else None
+            if current_val_metric is not None and (best_val_metric is None or current_val_metric > best_val_metric):
+                best_val_metric = current_val_metric
                 best_val_step = self.global_steps
                 record_best_checkpoint(
                     step=best_val_step,
@@ -1350,6 +1380,22 @@ class RayPPOTrainer:
                             ],
                             dtype=object,
                         )
+                        if batch.batch["position_ids"].dim() == 3:
+                            from verl.models.transformers.qwen2_vl import get_rope_index
+
+                            # Returned images change both their own MRoPE coordinates
+                            # and the text positions that follow them.
+                            batch.batch["position_ids"] = torch.stack([
+                                get_rope_index(
+                                    self.processor,
+                                    input_ids=batch.batch["input_ids"][i],
+                                    attention_mask=batch.batch["attention_mask"][i],
+                                    image_grid_thw=mm.get("image_grid_thw"),
+                                    video_grid_thw=mm.get("video_grid_thw"),
+                                    second_per_grid_ts=mm.get("second_per_grid_ts"),
+                                )
+                                for i, mm in enumerate(batch.non_tensor_batch["multi_modal_inputs"])
+                            ])
 
                     batch.batch["response_mask"] = compute_response_mask(batch)
                     # Balance the number of valid tokens across DP ranks.
@@ -1508,14 +1554,15 @@ class RayPPOTrainer:
                         metrics.update(val_metrics)
 
                         if track_best_checkpoint:
-                            current_val_metric = val_metrics[best_metric_name]
-                            if best_val_metric is None or current_val_metric > best_val_metric:
+                            current_val_metric = tracked_validation_metric(val_metrics)
+                            if current_val_metric is not None and (best_val_metric is None or current_val_metric > best_val_metric):
                                 best_val_metric = current_val_metric
                                 best_val_step = self.global_steps
                                 is_best_val_step = True
                                 pprint(f"New best validation metric: {best_metric_name}={best_val_metric} at step {best_val_step}")
 
                     should_save = self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0)
+                    should_save = should_save or (track_best_checkpoint and is_best_val_step)
                     if save_best_only:
                         should_save = is_best_val_step or is_last_step
                     if should_save:

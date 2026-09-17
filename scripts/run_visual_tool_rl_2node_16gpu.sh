@@ -31,6 +31,7 @@ NNODES="${NNODES:-2}"
 RL_CUDA_VISIBLE_DEVICES="${RL_CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6}"
 TOOL_GPU="${TOOL_GPU:-7}"
 TOOL_CUDA_VISIBLE_DEVICES="${TOOL_CUDA_VISIBLE_DEVICES:-$TOOL_GPU}"
+VISUAL_TOOL_DEVICE="${VISUAL_TOOL_DEVICE:-cuda}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-14}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-2}"
 ROLLOUT_N="${ROLLOUT_N:-2}"
@@ -50,7 +51,7 @@ ACTOR_LOSS_AGG_MODE="${ACTOR_LOSS_AGG_MODE:-token-mean}"
 DUAL_STREAM_ENABLE="${DUAL_STREAM_ENABLE:-False}"
 AGENT_ROLLOUT_N="${AGENT_ROLLOUT_N:-$ROLLOUT_N}"
 NATIVE_ROLLOUT_N="${NATIVE_ROLLOUT_N:-0}"
-MAX_TURNS="${MAX_TURNS:-12}"
+MAX_TURNS="${MAX_TURNS:-6}"
 TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-8192}"
@@ -87,9 +88,13 @@ TRAINER_PROJECT_NAME="${TRAINER_PROJECT_NAME:-visual-agent-rl-smoke-2node}"
 ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-}"
 POST_TRAIN_SCRIPT="${POST_TRAIN_SCRIPT:-}"
 WAIT_FOR_POST_TRAIN_ON_WORKERS="${WAIT_FOR_POST_TRAIN_ON_WORKERS:-0}"
+# Optional node-0 driver used by alternate RL backends after this launcher has
+# brought up the shared Ray cluster and per-node visual-tool services.
+TRAIN_DRIVER_SCRIPT="${TRAIN_DRIVER_SCRIPT:-}"
 
 RAY_PORT="${RAY_PORT:-6379}"
 RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
+RAY_INCLUDE_DASHBOARD="${RAY_INCLUDE_DASHBOARD:-0}"
 RAY_CLUSTER_TIMEOUT="${RAY_CLUSTER_TIMEOUT:-600}"
 # Full ZWZ runs take several days. Keep worker nodes alive for one week while
 # they wait for the node-0 driver to finish.
@@ -112,6 +117,21 @@ VISUAL_TOOL_BACKEND="${VISUAL_TOOL_BACKEND:-all}"
 SAM3_REPLICAS="${SAM3_REPLICAS:-1}"
 GROUNDING_DINO_REPLICAS="${GROUNDING_DINO_REPLICAS:-1}"
 VISUAL_TOOL_STARTUP_TIMEOUT="${VISUAL_TOOL_STARTUP_TIMEOUT:-600}"
+WANDB_ENABLE="${WANDB_ENABLE:-0}"
+WANDB_UPLOAD_MODE="${WANDB_UPLOAD_MODE:-online}"
+WANDB_PROJECT="${WANDB_PROJECT:-$TRAINER_PROJECT_NAME}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_API_KEY_FILE="${WANDB_API_KEY_FILE:-$BASE/secrets/wandb_api_key.txt}"
+WANDB_SYSTEM_MONITOR_INTERVAL="${WANDB_SYSTEM_MONITOR_INTERVAL:-5}"
+WANDB_INIT_TIMEOUT="${WANDB_INIT_TIMEOUT:-120}"
+if [[ -z "${GPU_MONITOR_ENABLE+x}" ]]; then
+  if [[ "$WANDB_ENABLE" == "1" ]]; then
+    GPU_MONITOR_ENABLE=0
+  else
+    GPU_MONITOR_ENABLE=1
+  fi
+fi
+GPU_MONITOR_INTERVAL="${GPU_MONITOR_INTERVAL:-5}"
 
 JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
 RUN_ID="${RUN_ID:-visual_rl_2node16_${JOB_TOKEN}}"
@@ -125,6 +145,8 @@ RL_PYTHON="$RL_ENV_DIR/bin/python"
 RAY_BIN="$RL_ENV_DIR/bin/ray"
 TOOL_PYTHON="$TOOL_ENV_DIR/bin/python"
 TOOL_PIDS=()
+GPU_MONITOR_PID=""
+WANDB_MONITOR_PID=""
 # Do not use the generic RANK variable here: some ModelArts images set RANK=0
 # independently on every worker before the user entrypoint starts. Prefer
 # node-level platform variables, then fall back to matching the host list.
@@ -156,6 +178,20 @@ ensure_symlink "$PLATFORM_MODEL_ROOT" /home/ma-user/work/model/xiaoyi_tmpstorage
 [[ "$NNODES" =~ ^[1-8]$ ]] || die "this launcher supports NNODES from 1 to 8, got $NNODES"
 [[ "$WAIT_FOR_POST_TRAIN_ON_WORKERS" =~ ^[01]$ ]] || \
   die "WAIT_FOR_POST_TRAIN_ON_WORKERS must be 0 or 1, got $WAIT_FOR_POST_TRAIN_ON_WORKERS"
+[[ "$RAY_INCLUDE_DASHBOARD" =~ ^[01]$ ]] || \
+  die "RAY_INCLUDE_DASHBOARD must be 0 or 1, got $RAY_INCLUDE_DASHBOARD"
+[[ "$GPU_MONITOR_ENABLE" =~ ^[01]$ ]] || \
+  die "GPU_MONITOR_ENABLE must be 0 or 1, got $GPU_MONITOR_ENABLE"
+[[ "$GPU_MONITOR_INTERVAL" =~ ^[1-9][0-9]*$ ]] || \
+  die "GPU_MONITOR_INTERVAL must be a positive integer, got $GPU_MONITOR_INTERVAL"
+[[ "$WANDB_ENABLE" =~ ^[01]$ ]] || \
+  die "WANDB_ENABLE must be 0 or 1, got $WANDB_ENABLE"
+[[ "$WANDB_UPLOAD_MODE" == "online" || "$WANDB_UPLOAD_MODE" == "offline" ]] || \
+  die "WANDB_UPLOAD_MODE must be online or offline, got $WANDB_UPLOAD_MODE"
+[[ "$WANDB_SYSTEM_MONITOR_INTERVAL" =~ ^[1-9][0-9]*$ ]] || \
+  die "WANDB_SYSTEM_MONITOR_INTERVAL must be a positive integer, got $WANDB_SYSTEM_MONITOR_INTERVAL"
+[[ "$WANDB_INIT_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || \
+  die "WANDB_INIT_TIMEOUT must be a positive integer, got $WANDB_INIT_TIMEOUT"
 [[ -d "$REPO_ROOT" ]] || die "repository not found: $REPO_ROOT"
 [[ -d "$RL_ROOT/verl" ]] || die "VERL source not found: $RL_ROOT"
 [[ -x "$RL_PYTHON" ]] || die "RL Python not executable: $RL_PYTHON"
@@ -343,6 +379,9 @@ fi
 if [[ -n "$POST_TRAIN_SCRIPT" ]]; then
   [[ -x "$POST_TRAIN_SCRIPT" ]] || die "POST_TRAIN_SCRIPT is not executable: $POST_TRAIN_SCRIPT"
 fi
+if [[ -n "$TRAIN_DRIVER_SCRIPT" ]]; then
+  [[ -f "$TRAIN_DRIVER_SCRIPT" ]] || die "training driver script not found: $TRAIN_DRIVER_SCRIPT"
+fi
 [[ "$ENABLE_CHUNKED_PREFILL" == "True" || "$ENABLE_CHUNKED_PREFILL" == "False" ]] || {
   die "ENABLE_CHUNKED_PREFILL must be True or False, got $ENABLE_CHUNKED_PREFILL"
 }
@@ -389,6 +428,13 @@ TOTAL_RL_GPUS="$((NNODES * N_GPUS_PER_NODE))"
 (( N_GPUS_PER_NODE > 0 && N_GPUS_PER_NODE <= 8 )) || {
   die "expected between one and eight RL GPUs per node, got $N_GPUS_PER_NODE"
 }
+if [[ "$VISUAL_TOOL_DEVICE" == "cpu" ]]; then
+  [[ "$VISUAL_TOOL_BACKEND" == "groundingdino" ]] || die "CPU tools currently support groundingdino only"
+  [[ -n "${VISUAL_TOOL_CPU_CORES:-}" ]] || die "CPU tools require VISUAL_TOOL_CPU_CORES"
+  [[ "${VISUAL_TOOL_CPU_THREADS:-}" =~ ^[1-9][0-9]*$ ]] || die "CPU tools require positive VISUAL_TOOL_CPU_THREADS"
+elif [[ "$VISUAL_TOOL_DEVICE" != "cuda" ]]; then
+  die "VISUAL_TOOL_DEVICE must be cuda or cpu"
+fi
 IFS=',' read -r -a TOOL_GPU_ARRAY <<< "$TOOL_CUDA_VISIBLE_DEVICES"
 TOOL_GPU_COUNT="${#TOOL_GPU_ARRAY[@]}"
 (( TOOL_GPU_COUNT > 0 )) || die "TOOL_CUDA_VISIBLE_DEVICES must contain at least one GPU"
@@ -397,7 +443,7 @@ for gpu in "${RL_GPU_ARRAY[@]}" "${TOOL_GPU_ARRAY[@]}"; do
 done
 for rl_gpu in "${RL_GPU_ARRAY[@]}"; do
   for tool_gpu in "${TOOL_GPU_ARRAY[@]}"; do
-    [[ "$rl_gpu" != "$tool_gpu" ]] || die "GPU $rl_gpu is assigned to both RL and visual tools"
+    [[ "$VISUAL_TOOL_DEVICE" == "cpu" || "$rl_gpu" != "$tool_gpu" ]] || die "GPU $rl_gpu is assigned to both RL and visual tools"
   done
 done
 (( VISUAL_TOOL_SERVERS_PER_NODE >= TOOL_GPU_COUNT )) || {
@@ -438,6 +484,9 @@ mkdir -p "$LOG_DIR" "$OUTPUT_DIR" "$SMOKE_DATA_DIR" "$SYNC_DIR" \
   "$BASE/cache/huggingface" "$BASE/cache/torch" "$BASE/cache/xdg"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/$RUN_ID-node${NODE_RANK}.log}"
 TOOL_LOG_FILE="${TOOL_LOG_FILE:-$LOG_DIR/$RUN_ID-node${NODE_RANK}-tools.log}"
+GPU_MONITOR_LOG="${GPU_MONITOR_LOG:-$LOG_DIR/$RUN_ID-node${NODE_RANK}-gpu.csv}"
+GPU_PROCESS_MONITOR_LOG="${GPU_PROCESS_MONITOR_LOG:-$LOG_DIR/$RUN_ID-node${NODE_RANK}-gpu-processes.csv}"
+WANDB_DIR="${WANDB_DIR:-$OUTPUT_DIR/wandb/node${NODE_RANK}}"
 touch "$LOG_FILE" "$TOOL_LOG_FILE"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
@@ -454,14 +503,43 @@ export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 export NCCL_ASYNC_ERROR_HANDLING="${NCCL_ASYNC_ERROR_HANDLING:-1}"
 export HYDRA_FULL_ERROR=1
-export WANDB_DISABLED=true
-export WANDB_MODE=disabled
+if [[ "$WANDB_ENABLE" == "1" ]]; then
+  if [[ "$WANDB_UPLOAD_MODE" == "online" && -z "${WANDB_API_KEY:-}" ]]; then
+    if [[ -r "$WANDB_API_KEY_FILE" ]]; then
+      IFS= read -r WANDB_API_KEY < "$WANDB_API_KEY_FILE" || true
+      WANDB_API_KEY="${WANDB_API_KEY%$'\r'}"
+      [[ -n "$WANDB_API_KEY" ]] || die "W&B API key file is empty: $WANDB_API_KEY_FILE"
+      export WANDB_API_KEY
+    elif ! grep -Eq '^machine[[:space:]]+api\.wandb\.ai' "${HOME}/.netrc" 2>/dev/null; then
+      die "W&B online mode needs WANDB_API_KEY or a login entry; expected key file: $WANDB_API_KEY_FILE"
+    fi
+  fi
+  "$RL_PYTHON" -c 'import wandb; print("W&B SDK:", wandb.__version__)'
+  unset WANDB_DISABLED
+  export WANDB_MODE="$WANDB_UPLOAD_MODE"
+  export WANDB_PROJECT WANDB_ENTITY WANDB_DIR
+  export WANDB_RUN_GROUP="${WANDB_RUN_GROUP:-$RUN_ID}"
+  export WANDB_JOB_TYPE="${WANDB_JOB_TYPE:-trainer}"
+  TRAINER_LOGGERS="['console','wandb']"
+else
+  export WANDB_DISABLED=true
+  export WANDB_MODE=disabled
+  TRAINER_LOGGERS="['console']"
+fi
 export RAY_ADDRESS="$MASTER_IP:$RAY_PORT"
 
 cleanup() {
   local status=$?
   if [[ "$NODE_RANK" == "0" ]]; then
     printf '%s\n' "$status" > "$DONE_FILE" 2>/dev/null || true
+  fi
+  if [[ -n "$GPU_MONITOR_PID" ]] && kill -0 "$GPU_MONITOR_PID" 2>/dev/null; then
+    kill "$GPU_MONITOR_PID" 2>/dev/null || true
+    wait "$GPU_MONITOR_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$WANDB_MONITOR_PID" ]] && kill -0 "$WANDB_MONITOR_PID" 2>/dev/null; then
+    kill "$WANDB_MONITOR_PID" 2>/dev/null || true
+    wait "$WANDB_MONITOR_PID" 2>/dev/null || true
   fi
   for tool_pid in "${TOOL_PIDS[@]:-}"; do
     if [[ -n "$tool_pid" ]] && kill -0 "$tool_pid" 2>/dev/null; then
@@ -494,6 +572,11 @@ echo "Rollout tool APIs: $VISUAL_TOOL_API_BASES"
 echo "Tool servers per node: $VISUAL_TOOL_SERVERS_PER_NODE"
 echo "Visual-tool backend: $VISUAL_TOOL_BACKEND"
 echo "Tool replicas per server (SAM3 / GroundingDINO): $SAM3_REPLICAS / $GROUNDING_DINO_REPLICAS"
+echo "GPU monitor: enabled=$GPU_MONITOR_ENABLE interval=${GPU_MONITOR_INTERVAL}s"
+echo "GPU monitor log: $GPU_MONITOR_LOG"
+echo "GPU process log: $GPU_PROCESS_MONITOR_LOG"
+echo "W&B: enabled=$WANDB_ENABLE mode=$WANDB_UPLOAD_MODE project=$WANDB_PROJECT entity=${WANDB_ENTITY:-default}"
+echo "W&B system monitor interval: ${WANDB_SYSTEM_MONITOR_INTERVAL}s"
 echo "Train batch / rollout n: $TRAIN_BATCH_SIZE / $ROLLOUT_N"
 echo "Dual stream / Agent n / Native n: $DUAL_STREAM_ENABLE / $AGENT_ROLLOUT_N / $NATIVE_ROLLOUT_N"
 echo "PPO mini batch: $PPO_MINI_BATCH_SIZE"
@@ -513,6 +596,7 @@ echo "Output: $OUTPUT_DIR"
 echo "Log: $LOG_FILE"
 echo "Rollout traces: ${ROLLOUT_DATA_DIR:-disabled}"
 echo "Post-train script: ${POST_TRAIN_SCRIPT:-disabled}"
+echo "Training driver: ${TRAIN_DRIVER_SCRIPT:-VERL}"
 echo "============================================================"
 
 echo "Environment fingerprint before importing the RL stack"
@@ -525,6 +609,42 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi --query-gpu=index,name,driver_version --format=csv,noheader || true
 else
   echo "nvidia-smi: not found"
+fi
+
+if [[ "$GPU_MONITOR_ENABLE" == "1" && "${DRY_RUN:-0}" != "1" ]]; then
+  bash "$REPO_ROOT/scripts/monitor_gpu_load.sh" \
+    "$GPU_MONITOR_LOG" "$GPU_PROCESS_MONITOR_LOG" "$GPU_MONITOR_INTERVAL" "$NODE_RANK" &
+  GPU_MONITOR_PID="$!"
+  echo "Started GPU monitor pid=$GPU_MONITOR_PID"
+fi
+
+if [[ "$WANDB_ENABLE" == "1" && "${DRY_RUN:-0}" != "1" ]]; then
+  mkdir -p "$WANDB_DIR/system-monitor"
+  WANDB_MONITOR_READY_FILE="$SYNC_DIR/wandb-monitor-node${NODE_RANK}.ready"
+  rm -f "$WANDB_MONITOR_READY_FILE"
+  "$RL_PYTHON" "$REPO_ROOT/scripts/wandb_gpu_monitor.py" \
+    --project "$WANDB_PROJECT" \
+    --entity "$WANDB_ENTITY" \
+    --group "$WANDB_RUN_GROUP" \
+    --name "$RUN_ID-node${NODE_RANK}-gpu" \
+    --node-rank "$NODE_RANK" \
+    --node-ip "$NODE_IP" \
+    --interval "$WANDB_SYSTEM_MONITOR_INTERVAL" \
+    --mode "$WANDB_UPLOAD_MODE" \
+    --directory "$WANDB_DIR/system-monitor" \
+    --ready-file "$WANDB_MONITOR_READY_FILE" &
+  WANDB_MONITOR_PID="$!"
+  for ((attempt=1; attempt<=WANDB_INIT_TIMEOUT; attempt++)); do
+    if [[ -s "$WANDB_MONITOR_READY_FILE" ]]; then
+      break
+    fi
+    kill -0 "$WANDB_MONITOR_PID" 2>/dev/null || \
+      die "W&B GPU monitor exited before initialization; check authentication and network access"
+    sleep 1
+  done
+  [[ -s "$WANDB_MONITOR_READY_FILE" ]] || \
+    die "W&B GPU monitor did not initialize within ${WANDB_INIT_TIMEOUT}s"
+  echo "W&B GPU monitor ready: $(<"$WANDB_MONITOR_READY_FILE")"
 fi
 
 "$RL_PYTHON" - <<'PYCHECK'
@@ -545,15 +665,20 @@ if torch.cuda.is_available():
 
 import ray
 import transformers
+print("transformers:", transformers.__version__, flush=True)
+print("ray:", ray.__version__, flush=True)
+PYCHECK
+if [[ -z "$TRAIN_DRIVER_SCRIPT" ]]; then
+  "$RL_PYTHON" - <<'PYVERLCHECK'
 import verl
 import vllm
-print("transformers:", transformers.__version__, flush=True)
-print("vllm:", vllm.__version__, "ray:", ray.__version__, "verl:", verl.__version__, flush=True)
-PYCHECK
+print("vllm:", vllm.__version__, "verl:", verl.__version__, flush=True)
+PYVERLCHECK
+fi
 
 # Keep the formal run's CUDA/driver initialization identical to the successful
-# smoke path. Only after torch, vLLM, Ray and VERL have imported successfully do
-# we validate the optional external judge API.
+# smoke path. Validate the optional external judge only after the selected RL
+# stack has imported successfully.
 if [[ "${JUDGE_ENABLED:-0}" == "1" ]]; then
   if [[ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]]; then
     echo "DeepSeek egress proxy: configured"
@@ -562,6 +687,7 @@ if [[ "${JUDGE_ENABLED:-0}" == "1" ]]; then
   fi
   "$RL_PYTHON" - <<'PYJUDGECHECK'
 import os
+import importlib.util
 from openai import OpenAI
 
 base_url = os.environ["LLM_AS_A_JUDGE_BASE"].rstrip("/")
@@ -575,16 +701,24 @@ client = OpenAI(
     max_retries=0,
 )
 if os.environ.get("LLM_AS_A_JUDGE_PREFLIGHT", "1") == "1":
-    response = client.chat.completions.create(
-        model=os.environ["LLM_AS_A_JUDGE_MODEL"],
-        messages=[{"role": "user", "content": "Return exactly TRUE."}],
-        temperature=0.0,
-        max_tokens=4,
-        extra_body={"thinking": {"type": "disabled"}},
-    )
-    verdict = (response.choices[0].message.content or "").strip().upper()
-    if not verdict.startswith("TRUE"):
-        raise SystemExit(f"DeepSeek judge preflight returned an unexpected response: {verdict!r}")
+    if os.environ.get("LLM_AS_A_JUDGE_BACKUP_BASE"):
+        reward_path = os.path.join(os.environ["RL_ROOT"], "verl/utils/reward_score/visual_agent_thyme.py")
+        spec = importlib.util.spec_from_file_location("judge_preflight_reward", reward_path)
+        reward = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reward)
+        if not reward.judge_match("What color is the car?", "The car is red.", "red"):
+            raise SystemExit("Judge preflight failed, including configured fallback")
+    else:
+        response = client.chat.completions.create(
+            model=os.environ["LLM_AS_A_JUDGE_MODEL"],
+            messages=[{"role": "user", "content": "Return exactly TRUE."}],
+            temperature=0.0,
+            max_tokens=4,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        verdict = (response.choices[0].message.content or "").strip().upper()
+        if not verdict.startswith("TRUE"):
+            raise SystemExit(f"DeepSeek judge preflight returned an unexpected response: {verdict!r}")
     print("DeepSeek API judge preflight passed", flush=True)
 else:
     print("DeepSeek API judge preflight skipped", flush=True)
@@ -596,10 +730,18 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 if [[ "$START_VISUAL_TOOL_SERVER" == "1" ]]; then
-  echo "Starting $VISUAL_TOOL_SERVERS_PER_NODE local visual-tool servers on physical GPUs $TOOL_CUDA_VISIBLE_DEVICES"
+  echo "Starting $VISUAL_TOOL_SERVERS_PER_NODE local visual-tool servers: device=$VISUAL_TOOL_DEVICE"
   for server_index in "${!LOCAL_VISUAL_TOOL_ENDPOINT_ARRAY[@]}"; do
     server_port="$((VISUAL_TOOL_PORT + server_index))"
     server_tool_gpu="${TOOL_GPU_ARRAY[$((server_index % TOOL_GPU_COUNT))]}"
+    server_device=cuda:0
+    TOOL_SERVER_COMMAND=("$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py")
+    if [[ "$VISUAL_TOOL_DEVICE" == "cpu" ]]; then
+      server_tool_gpu=""
+      server_device=cpu
+      TOOL_SERVER_COMMAND=("$TOOL_PYTHON" "$REPO_ROOT/scripts/run_visual_tool_cpu_server.py"
+        --cores "$VISUAL_TOOL_CPU_CORES" --threads "$VISUAL_TOOL_CPU_THREADS" --server-index "$server_index")
+    fi
     server_log="${TOOL_LOG_FILE%.log}-server${server_index}.log"
     env \
       CUDA_VISIBLE_DEVICES="$server_tool_gpu" \
@@ -610,10 +752,10 @@ if [[ "$START_VISUAL_TOOL_SERVER" == "1" ]]; then
       SAM3_DEVICE=cuda:0 \
       SAM3_REPLICAS="$SAM3_REPLICAS" \
       GROUNDING_DINO_MODEL_PATH="$GROUNDING_DINO_MODEL_PATH" \
-      GROUNDING_DINO_DEVICE=cuda:0 \
+      GROUNDING_DINO_DEVICE="$server_device" \
       GROUNDING_DINO_REPLICAS="$GROUNDING_DINO_REPLICAS" \
       VISUAL_TOOL_BACKEND="$VISUAL_TOOL_BACKEND" \
-      "$TOOL_PYTHON" "$REPO_ROOT/scripts/visual_tool_server.py" \
+      "${TOOL_SERVER_COMMAND[@]}" \
         --backend "$VISUAL_TOOL_BACKEND" --host "$VISUAL_TOOL_HOST" --port "$server_port" \
         >>"$server_log" 2>&1 &
     TOOL_PIDS+=("$!")
@@ -678,18 +820,31 @@ if [[ "${DRY_RUN:-0}" != "1" ]]; then
 # Ray must only see GPUs 0-6. GPU 7 remains isolated for the local tool service.
 export CUDA_VISIBLE_DEVICES="$RL_CUDA_VISIBLE_DEVICES"
 "$RAY_BIN" stop --force >/dev/null 2>&1 || true
+RAY_CPU_ARGS=()
+if [[ -n "${RL_CPU_COUNT:-}" ]]; then
+  [[ "$RL_CPU_COUNT" =~ ^[1-9][0-9]*$ ]] || die "RL_CPU_COUNT must be positive"
+  RAY_CPU_ARGS=(--num-cpus="$RL_CPU_COUNT")
+fi
 
 if [[ "$NODE_RANK" == "0" ]]; then
   rm -f "$DONE_FILE"
-  "$RAY_BIN" start --head \
-    --node-ip-address="$NODE_IP" \
-    --port="$RAY_PORT" \
-    --dashboard-port="$RAY_DASHBOARD_PORT" \
-    --include-dashboard=false \
-    --num-gpus="$N_GPUS_PER_NODE" \
-    --temp-dir="$RAY_TEMP_DIR" \
-    --object-spilling-directory="$RAY_SPILL_DIR" \
+  RAY_HEAD_ARGS=(
+    --head
+    --node-ip-address="$NODE_IP"
+    --port="$RAY_PORT"
+    --dashboard-port="$RAY_DASHBOARD_PORT"
+    --num-gpus="$N_GPUS_PER_NODE"
+    "${RAY_CPU_ARGS[@]}"
+    --temp-dir="$RAY_TEMP_DIR"
+    --object-spilling-directory="$RAY_SPILL_DIR"
     --disable-usage-stats
+  )
+  if [[ "$RAY_INCLUDE_DASHBOARD" == "1" ]]; then
+    RAY_HEAD_ARGS+=(--include-dashboard=true --dashboard-host=0.0.0.0)
+  else
+    RAY_HEAD_ARGS+=(--include-dashboard=false)
+  fi
+  "$RAY_BIN" start "${RAY_HEAD_ARGS[@]}"
 else
   JOINED=0
   for ((attempt=1; attempt<=120; attempt++)); do
@@ -697,6 +852,7 @@ else
       --address="$MASTER_IP:$RAY_PORT" \
       --node-ip-address="$NODE_IP" \
       --num-gpus="$N_GPUS_PER_NODE" \
+      "${RAY_CPU_ARGS[@]}" \
       --temp-dir="$RAY_TEMP_DIR" \
       --object-spilling-directory="$RAY_SPILL_DIR" \
       --disable-usage-stats; then
@@ -861,7 +1017,7 @@ TRAIN_ARGS=(
   "reward_model.reward_manager=naive_async"
   "trainer.critic_warmup=0"
   "trainer.balance_batch=$BALANCE_BATCH"
-  "trainer.logger=['console']"
+  "trainer.logger=$TRAINER_LOGGERS"
   "trainer.n_gpus_per_node=$N_GPUS_PER_NODE"
   "trainer.nnodes=$NNODES"
   "trainer.val_before_train=$VAL_BEFORE_TRAIN"
@@ -870,7 +1026,7 @@ TRAIN_ARGS=(
   "trainer.total_epochs=$TOTAL_EPOCHS"
   "trainer.total_training_steps=$TOTAL_TRAINING_STEPS"
   "trainer.resume_mode=$RESUME_MODE"
-  "trainer.project_name=$TRAINER_PROJECT_NAME"
+  "trainer.project_name=$WANDB_PROJECT"
   "trainer.experiment_name=$RUN_ID"
   "trainer.default_local_dir=$OUTPUT_DIR"
 )
@@ -924,7 +1080,12 @@ if [[ -n "$CUSTOM_DATASET_PATH" || -n "$CUSTOM_DATASET_NAME" ]]; then
 fi
 
 set -x
-if "$RL_PYTHON" -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "${HYDRA_ARGS[@]}"; then
+if [[ -n "$TRAIN_DRIVER_SCRIPT" ]]; then
+  TRAIN_COMMAND=(bash "$TRAIN_DRIVER_SCRIPT")
+else
+  TRAIN_COMMAND=("$RL_PYTHON" -m verl.trainer.main_ppo "${TRAIN_ARGS[@]}" "${HYDRA_ARGS[@]}")
+fi
+if "${TRAIN_COMMAND[@]}"; then
   status=0
 else
   status=$?

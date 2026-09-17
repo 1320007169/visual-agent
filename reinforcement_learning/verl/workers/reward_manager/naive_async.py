@@ -18,10 +18,13 @@ import torch
 
 from verl import DataProto
 from verl.utils.reward_score import default_compute_score
+from verl.utils.reward_score.visual_agent_thyme import judge_batch_summary, judge_stats_snapshot
 from verl.workers.reward_manager import register
 
 import json
 import datetime
+import os
+import time
 
 from tqdm import tqdm
 from functools import partial
@@ -64,6 +67,7 @@ class AsyncNaiveRewardManager:
         self.reward_fn_key = reward_fn_key  # Store the key for accessing the data source
 
         self.step_cnt = 0
+        self.reward_batch_cnt = 0
 
         self.reward_kwargs = {"num_workers": 32}
 
@@ -123,9 +127,20 @@ class AsyncNaiveRewardManager:
         num_workers = self.reward_kwargs.get("num_workers", 8)
         pbar = tqdm(total=len(input_ds), desc=f'Compute reward on {num_workers} workers')
         partial_reward_func = partial(unit_compute_reward_func, reward_func=self.compute_score, pbar=pbar)
+        judge_before = judge_stats_snapshot()
+        reward_started = time.monotonic()
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             reward_result_list = list(executor.map(partial_reward_func, input_ds))
         pbar.close()
+        self.reward_batch_cnt += 1
+        judge_summary = judge_batch_summary(judge_before, len(input_ds))
+        judge_summary.update(
+            batch=self.reward_batch_cnt,
+            pid=os.getpid(),
+            timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            reward_seconds=round(time.monotonic() - reward_started, 3),
+        )
+        print("[judge batch] " + json.dumps(judge_summary, sort_keys=True), flush=True)
 
         already_print_data_sources = {}
         for i, (sample, score) in enumerate(zip(input_ds, reward_result_list)):

@@ -192,6 +192,7 @@ def compute_grpo_outcome_advantage(
     index: np.ndarray,
     epsilon: float = 1e-6,
     norm_adv_by_std_in_grpo: str = True,
+    reward_valid_mask: torch.Tensor | np.ndarray | None = None,
 ):
     """
     Compute advantage for GRPO, operating only on Outcome reward
@@ -214,6 +215,12 @@ def compute_grpo_outcome_advantage(
             shape is (bs, response_length)
     """
     scores = token_level_rewards.sum(dim=-1)
+    if reward_valid_mask is None:
+        reward_valid_mask = [True] * scores.shape[0]
+    elif isinstance(reward_valid_mask, torch.Tensor):
+        reward_valid_mask = reward_valid_mask.detach().cpu().bool().tolist()
+    else:
+        reward_valid_mask = np.asarray(reward_valid_mask, dtype=bool).tolist()
 
     id2score = defaultdict(list)
     id2mean = {}
@@ -222,17 +229,24 @@ def compute_grpo_outcome_advantage(
     with torch.no_grad():
         bsz = scores.shape[0]
         for i in range(bsz):
-            id2score[index[i]].append(scores[i])
-        for idx in id2score:
-            if len(id2score[idx]) == 1:
-                id2mean[idx] = torch.tensor(0.0)
-                id2std[idx] = torch.tensor(1.0)
-            elif len(id2score[idx]) > 1:
-                id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-                id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
+            if reward_valid_mask[i]:
+                id2score[index[i]].append(scores[i])
+        for idx in set(index):
+            valid_scores = id2score[idx]
+            if not valid_scores:
+                id2mean[idx] = scores.new_tensor(0.0)
+                id2std[idx] = scores.new_tensor(1.0)
+            elif len(valid_scores) == 1:
+                id2mean[idx] = valid_scores[0]
+                id2std[idx] = scores.new_tensor(1.0)
             else:
-                raise ValueError(f"no score in prompt index: {idx}")
+                stacked_scores = torch.stack(valid_scores)
+                id2mean[idx] = torch.mean(stacked_scores)
+                id2std[idx] = torch.std(stacked_scores)
         for i in range(bsz):
+            if not reward_valid_mask[i]:
+                scores[i] = 0.0
+                continue
             if norm_adv_by_std_in_grpo:
                 scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
             else:

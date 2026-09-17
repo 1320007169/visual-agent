@@ -5,7 +5,37 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import Counter
 from functools import lru_cache
+from threading import Lock
+
+
+_judge_stats = Counter()
+_judge_stats_lock = Lock()
+
+
+def _record_judge_stat(name):
+    with _judge_stats_lock:
+        _judge_stats[name] += 1
+
+
+def judge_stats_snapshot():
+    with _judge_stats_lock:
+        return dict(_judge_stats)
+
+
+def judge_batch_summary(before, samples):
+    after = judge_stats_snapshot()
+    counts = {key: after.get(key, 0) - before.get(key, 0) for key in after}
+    for key in ("judge_samples", "final_unresolved", "fallbacks"):
+        counts.setdefault(key, 0)
+    for endpoint in ("primary", "backup"):
+        for metric in ("requests", "valid", "true", "false", "errors", "invalid", "rate_limited", "timeouts"):
+            counts.setdefault(f"{endpoint}_{metric}", 0)
+    counts["samples"] = samples
+    counts["judge_sample_ratio"] = counts["judge_samples"] / samples if samples else 0.0
+    counts["final_unresolved_ratio"] = counts["final_unresolved"] / counts["judge_samples"] if counts["judge_samples"] else 0.0
+    return counts
 
 
 def extract_answer(text: str) -> str | None:
@@ -159,9 +189,20 @@ def rule_match(prediction: str, ground_truth: str) -> bool:
     return False
 
 
-@lru_cache(maxsize=1)
-def _judge_client_and_model():
-    base_url = os.environ.get("LLM_AS_A_JUDGE_BASE", "").rstrip("/")
+def multiple_choice_match(prediction: str, ground_truth: str) -> bool:
+    """Match a closed A-D answer, optionally followed by its option text."""
+    gold = normalize_answer(ground_truth).upper()
+    if gold not in {"A", "B", "C", "D"}:
+        return False
+    candidate = prediction.strip()
+    match = re.fullmatch(r"([A-Da-d])(?:\s*[.)：:](?:\s*\S.*)?)?", candidate, flags=re.DOTALL)
+    return match is not None and match.group(1).upper() == gold
+
+
+@lru_cache(maxsize=2)
+def _judge_client_and_model(backup=False):
+    prefix = "LLM_AS_A_JUDGE_BACKUP" if backup else "LLM_AS_A_JUDGE"
+    base_url = os.environ.get(f"{prefix}_BASE", "").rstrip("/")
     if not base_url:
         return None, None
     from openai import OpenAI
@@ -170,25 +211,87 @@ def _judge_client_and_model():
         base_url += "/v1"
     timeout = float(os.environ.get("LLM_AS_A_JUDGE_TIMEOUT", "20"))
     client = OpenAI(
-        api_key=os.environ.get("LLM_AS_A_JUDGE_KEY", "EMPTY"),
+        api_key=os.environ.get(f"{prefix}_KEY", "EMPTY"),
         base_url=base_url,
         timeout=timeout,
         # Retries are controlled below so an unavailable judge cannot multiply
         # SDK retries and stall every reward worker for a long time.
         max_retries=0,
     )
-    model = os.environ.get("LLM_AS_A_JUDGE_MODEL", "").strip()
+    model = os.environ.get(f"{prefix}_MODEL", "").strip()
     if not model:
         models = client.models.list()
         model = models.data[0].id
     return client, model
 
 
-def judge_match(question: str, prediction: str, ground_truth: str) -> bool:
-    client, model = _judge_client_and_model()
-    if client is None:
-        return False
+def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> bool | None:
+    endpoint = "backup" if backup else "primary"
+    client, model = None, None
+    for _ in range(attempts):
+        try:
+            if client is None:
+                client, model = _judge_client_and_model(backup=backup)
+            if client is None:
+                return None
+            _record_judge_stat(f"{endpoint}_requests")
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a binary answer verifier. Output exactly one token: "
+                            "TRUE or FALSE. Do not explain your decision."
+                        ),
+                    },
+                    {"role": "user", "content": question_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=8,
+                stop=["\n"],
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            content = (response.choices[0].message.content or "").strip()
+            verdict = None
+            normalized = content.strip("`\"' \t\r\n").upper()
+            if normalized == "TRUE":
+                verdict = True
+            elif normalized == "FALSE":
+                verdict = False
+            try:
+                payload = json.loads(content)
+                if isinstance(payload, dict) and isinstance(payload.get("verdict"), bool):
+                    verdict = payload["verdict"]
+            except json.JSONDecodeError:
+                pass
+            if verdict is True:
+                _record_judge_stat(f"{endpoint}_valid")
+                _record_judge_stat(f"{endpoint}_true")
+                return True
+            if verdict is False:
+                _record_judge_stat(f"{endpoint}_valid")
+                _record_judge_stat(f"{endpoint}_false")
+                return False
+            _record_judge_stat(f"{endpoint}_invalid")
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            _record_judge_stat(f"{endpoint}_errors")
+            if status == 429:
+                _record_judge_stat(f"{endpoint}_rate_limited")
+            if isinstance(exc, TimeoutError) or type(exc).__name__ == "APITimeoutError":
+                _record_judge_stat(f"{endpoint}_timeouts")
+            # Never log raw provider errors: they may contain request credentials.
+            print(
+                f"[visual-agent-thyme reward] {endpoint} judge request failed: "
+                f"{type(exc).__name__}, status={status}",
+                flush=True,
+            )
+    return None
 
+
+def judge_match(question: str, prediction: str, ground_truth: str) -> bool | None:
+    _record_judge_stat("judge_samples")
     prompt = f"""Judge whether the candidate answer is semantically equivalent to the reference answer for the question.
 Return exactly TRUE or FALSE and nothing else.
 
@@ -201,24 +304,28 @@ Reference answer:
 Candidate answer:
 {prediction}
 """
-    attempts = max(1, int(os.environ.get("LLM_AS_A_JUDGE_RETRIES", "2")))
-    for _ in range(attempts):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=8,
-                extra_body={"thinking": {"type": "disabled"}},
-            )
-            verdict = response.choices[0].message.content.strip().upper()
-            if verdict.startswith("TRUE"):
-                return True
-            if verdict.startswith("FALSE"):
-                return False
-        except Exception as exc:
-            print(f"[visual-agent-thyme reward] judge request failed: {exc}")
-    return False
+    primary_attempts = max(1, int(os.environ.get("LLM_AS_A_JUDGE_PRIMARY_RETRIES", "1")))
+    result = _judge_endpoint(prompt, backup=False, attempts=primary_attempts)
+    if result is not None:
+        return result
+
+    if os.environ.get("LLM_AS_A_JUDGE_BACKUP_BASE"):
+        _record_judge_stat("fallbacks")
+        backup_attempts = max(
+            1,
+            int(
+                os.environ.get(
+                    "LLM_AS_A_JUDGE_BACKUP_RETRIES",
+                    os.environ.get("LLM_AS_A_JUDGE_RETRIES", "2"),
+                )
+            ),
+        )
+        result = _judge_endpoint(prompt, backup=True, attempts=backup_attempts)
+        if result is not None:
+            return result
+
+    _record_judge_stat("final_unresolved")
+    return None
 
 
 def compute_score(solution_str: str, ground_truth: str, extra_info=None):
@@ -226,7 +333,13 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
     format_reward = 1.0 if has_strict_answer_format(solution_str) else 0.0
     invalid_queries, query_penalty = grounding_query_penalty(solution_str)
     if not answer:
-        result = {"score": 0.0, "acc": 0.0, "format": 0.0, "tool_used": 0.0}
+        result = {
+            "score": 0.0,
+            "acc": 0.0,
+            "format": 0.0,
+            "tool_used": 0.0,
+            "reward_valid": 1.0,
+        }
         if int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0")) > 0:
             result["invalid_grounding_queries"] = float(invalid_queries)
             result["query_penalty"] = query_penalty
@@ -236,17 +349,19 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         # Closed relation labels must not receive a semantic-judge fallback:
         # ambiguous answers such as "on" can otherwise match several labels.
         correct = relation_match(answer, ground_truth)
-    elif _is_vision_opd_task(extra_info):
-        # Vision-OPD is closed A-D multiple choice. Keep its reward exact and
-        # deterministic rather than sending malformed/free-form answers to a judge.
-        normalized_answer = normalize_answer(answer).upper()
-        normalized_ground_truth = normalize_answer(ground_truth).upper()
-        correct = normalized_answer in {"A", "B", "C", "D"} and normalized_answer == normalized_ground_truth
+    elif _is_vision_opd_task(extra_info) or (extra_info or {}).get("data_source") == "visual-agent-hrbench4k":
+        # These are closed A-D tasks. Accept the option label with its displayed
+        # text, as the benchmark evaluator does, without using a semantic judge.
+        correct = multiple_choice_match(answer, ground_truth)
     else:
         question = str((extra_info or {}).get("question", ""))
         correct = rule_match(answer, ground_truth)
         if not correct:
             correct = judge_match(question, answer, ground_truth)
+            if correct is None:
+                # Keep unresolved samples in GRPO, using the ordinary incorrect-
+                # answer reward (including format reward and query penalties).
+                correct = False
     accuracy_reward = 1.0 if correct else 0.0
     tool_used = 1.0 if "<tool_call>" in solution_str else 0.0
     result = {
@@ -254,6 +369,7 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         "acc": accuracy_reward,
         "format": format_reward,
         "tool_used": tool_used,
+        "reward_valid": 1.0,
     }
     if int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0")) > 0:
         result["invalid_grounding_queries"] = float(invalid_queries)
