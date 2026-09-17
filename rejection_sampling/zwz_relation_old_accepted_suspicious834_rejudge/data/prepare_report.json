@@ -1,0 +1,25 @@
+{
+  "input": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/rejection_sampling/zwz_relation_qwen3_kl_safe_steps001_165_success10362/outputs/deepseek_v41/accepted.jsonl",
+  "output": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/rejection_sampling/zwz_relation_old_accepted_suspicious834_rejudge/data/suspicious834_original_only.jsonl",
+  "selection": "relation phrase in grounding_detect.query or crop_zoom.label",
+  "relation_phrases": [
+    "in front of",
+    "right of",
+    "left of",
+    "next to",
+    "above",
+    "below",
+    "behind",
+    "inside",
+    "contain",
+    "overlap"
+  ],
+  "image_policy": "original_image_only",
+  "counts": {
+    "input_rows": 8755,
+    "selected_rows": 834,
+    "rows_with_final_answer_hit": 202,
+    "suspicious_tool_fields": 935,
+    "final_answer_tool_fields": 213
+  }
+}
