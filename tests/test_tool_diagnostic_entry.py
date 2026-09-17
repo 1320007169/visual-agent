@@ -121,3 +121,19 @@ def test_custom_turn_budget_updates_both_agent_prompts(setup):
         prompt = (output / f"{mode}_prompt.txt").read_text()
         assert "at most 12 assistant turns" in prompt
         assert "at most 11 tool calls" in prompt
+
+
+def test_legacy_budget_does_not_leak_into_other_modes(setup):
+    env, output, _ = setup
+    legacy = output.parent / "legacy.txt"
+    legacy.write_text("Historical tool prompt\n")
+    result = run(dict(env, DIAGNOSTIC_MODES="legacy direct auto tool_first",
+                      DIAGNOSTIC_LEGACY_PROMPT_FILE=str(legacy)))
+    assert result.returncode == 0, result.stderr
+    for mode, turns, tokens in [("legacy", "12", "512"), ("direct", "1", "6144"),
+                                ("auto", "6", "6144"), ("tool_first", "6", "6144")]:
+        receipt = json.loads((output / mode / "receipt.json").read_text())
+        assert receipt["VISUAL_AGENT_MAX_TURNS"] == turns
+        assert receipt["VISUAL_AGENT_MAX_TOKENS"] == tokens
+    assert (output / "legacy_prompt.txt").read_text() == legacy.read_text()
+    assert len((output / "status.tsv").read_text().splitlines()) == 5

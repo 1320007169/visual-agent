@@ -35,6 +35,25 @@ API 失败数依次为 VStar / HR4K / HR8K，样本总数为 191 / 800 / 800。
 
 完整历史表和结果目录见 [三项 Benchmark 评测汇总](../../docs/three_benchmark_evaluation_summary.md)。
 
+## step160 工具使用诊断（2026-09-17）
+
+同一 16 卡混合数据 RL 权重 `zwz_deepeyesv2_3k_nocount_v1_n8_2node/global_step_160`，
+三组最终退出码均为 0。准确率单位为 %；尚未逐条核验 API 失败数与空预测。
+
+| 模式 | 最大 assistant 回合 | 每回合 tokens | VStar | HR4K | HR8K | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| direct | 1 | 6144 | 84.82 | 79.63 | **75.88** | 超时判断修复后补测完成 |
+| auto | 6 | 6144 | 86.91 | 78.88 | 75.13 | 完成 |
+| tool_first | 6 | 6144 | **87.43** | **80.00** | 75.50 | 完成 |
+
+auto 的 system prompt 与 step160 保存的全部 896 条训练 rollout 文本一致。
+direct 关闭工具并使用原简洁回答提示词；tool_first 仅在 auto 提示词末尾追加首轮用工具
+的指令，实际遵从率尚未统计。本次不含 legacy（旧提示词、12 回合、512 tokens）组。
+不应将提示词实验的分数差直接解释为工具的因果收益。
+
+详细协议、补测原因及结果目录见
+[三项 Benchmark 评测汇总](../../docs/three_benchmark_evaluation_summary.md#16-卡混合数据-rl-step160工具使用诊断2026-09-17)。
+
 ## 快速开始
 
 ```bash

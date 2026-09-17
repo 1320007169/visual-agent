@@ -216,7 +216,7 @@ run_benchmarks() {
         return 0
       fi
     fi
-    if (( now - started >= EVAL_TIMEOUT_SECONDS )); then
+    if (( EVAL_TIMEOUT_SECONDS > 0 && now - started >= EVAL_TIMEOUT_SECONDS )); then
       echo "Evaluation exceeded ${EVAL_TIMEOUT_SECONDS}s"
       stop_group "$EVAL_PID"
       EVAL_PID=""

@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# One checkpoint x three modes x the same three benchmarks.
+# One checkpoint x three default modes x the same three benchmarks.
 # This wrapper only sets existing launcher parameters; it does not change the
 # shared inference loop, evaluator, or the four-checkpoint entrypoint.
 #
 # DIAGNOSTIC_CONFIG_ONLY=1 prints/validates the plan without starting services.
 # DIAGNOSTIC_MODEL_PATH and DIAGNOSTIC_STEP select another checkpoint.
-# DIAGNOSTIC_MODES can select a subset of: direct auto tool_first.
+# DIAGNOSTIC_MODES can select a subset of: legacy direct auto tool_first.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_ROOT="${REPO_ROOT:-$(dirname "$SCRIPT_DIR")}"
 export BASE="${BASE:-$(dirname "$REPO_ROOT")}"
 export CONFIG_PYTHON="${CONFIG_PYTHON:-python}"
-DIAGNOSTIC_STEP="${DIAGNOSTIC_STEP:-120}"
-DIAGNOSTIC_MODEL_PATH="${DIAGNOSTIC_MODEL_PATH:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/zwz_deepeyesv2_3k_nocount_v1_n8_2node/global_step_120/actor/huggingface}"
+DIAGNOSTIC_STEP="${DIAGNOSTIC_STEP:-160}"
+DIAGNOSTIC_MODEL_PATH="${DIAGNOSTIC_MODEL_PATH:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/zwz_deepeyesv2_3k_nocount_v1_n8_2node/global_step_${DIAGNOSTIC_STEP}/actor/huggingface}"
 DIAGNOSTIC_MODES="${DIAGNOSTIC_MODES:-direct auto tool_first}"
+export DIAGNOSTIC_LEGACY_PROMPT_FILE="${DIAGNOSTIC_LEGACY_PROMPT_FILE:-$REPO_ROOT/prompts/visual_agent_eval_groundingdino_legacy.txt}"
 DIAGNOSTIC_CONFIG_ONLY="${DIAGNOSTIC_CONFIG_ONLY:-0}"
 PROMPT_FILE="${DIAGNOSTIC_PROMPT_FILE:-$REPO_ROOT/prompts/visual_agent_rl_system_groundingdino.txt}"
 GROUP_ID="${DIAGNOSTIC_RUN_ID:-tool_diagnostic_step${DIAGNOSTIC_STEP}_$(date +%Y%m%d_%H%M%S)}"
@@ -23,6 +24,8 @@ GROUP_ROOT="${DIAGNOSTIC_OUTPUT_ROOT:-$REPO_ROOT/outputs/vlmeval/tool_diagnostic
 export EVAL_DATASETS="${EVAL_DATASETS:-VStarBench HRBench4K HRBench8K}"
 export VISUAL_AGENT_MAX_TURNS="${VISUAL_AGENT_MAX_TURNS:-6}"
 export VISUAL_AGENT_MAX_TOKENS="${VISUAL_AGENT_MAX_TOKENS:-6144}"
+AGENT_TURNS="$VISUAL_AGENT_MAX_TURNS"
+AGENT_TOKENS="$VISUAL_AGENT_MAX_TOKENS"
 export MAX_MODEL_LEN="${MAX_MODEL_LEN:-65536}"
 export MODEL_SERVER_BACKEND=vllm
 export ENV_DIR="${ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM}"
@@ -56,8 +59,8 @@ if nodes != "1" or config_only not in {"0", "1"}:
     raise SystemExit("Use one node; DIAGNOSTIC_CONFIG_ONLY must be 0 or 1")
 if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id) or not step.isdigit():
     raise SystemExit("Invalid diagnostic run ID or checkpoint step")
-if not modes or len(modes) != len(set(modes)) or set(modes) - {"direct", "auto", "tool_first"}:
-    raise SystemExit("DIAGNOSTIC_MODES must contain unique entries from direct, auto, tool_first")
+if not modes or len(modes) != len(set(modes)) or set(modes) - {"legacy", "direct", "auto", "tool_first"}:
+    raise SystemExit("DIAGNOSTIC_MODES must contain unique entries from legacy, direct, auto, tool_first")
 turns, tokens = int(os.environ["VISUAL_AGENT_MAX_TURNS"]), int(os.environ["VISUAL_AGENT_MAX_TOKENS"])
 if turns < 1 or tokens < 1 or ("tool_first" in modes and turns < 2):
     raise SystemExit("Positive budgets required; tool_first needs at least two turns")
@@ -93,6 +96,14 @@ protocol = {
     "tool_first": "Same agent prompt plus an explicit first-tool instruction; no injected tool calls",
     "note": "All modes use the same benchmark questions. Prompt and turn budget differ between direct and agent modes.",
 }
+protocol["budgets"] = {mode: {"max_turns": 12 if mode == "legacy" else 1 if mode == "direct" else turns,
+                              "max_tokens_per_turn": 512 if mode == "legacy" else tokens} for mode in modes}
+legacy_prompt = None
+if "legacy" in modes:
+    legacy_prompt = Path(os.environ["DIAGNOSTIC_LEGACY_PROMPT_FILE"]).read_text(encoding="utf-8")
+    if not legacy_prompt.strip():
+        raise SystemExit("Empty legacy prompt")
+    protocol["legacy"] = "Historical prompt snapshot, 12 assistant turns, 512 tokens per turn"
 print(json.dumps(protocol, ensure_ascii=False, indent=2))
 print(f"Results: {output}")
 if config_only == "0":
@@ -102,6 +113,8 @@ if config_only == "0":
     (root / "protocol.json").write_text(json.dumps(protocol, indent=2) + "\n")
     (root / "auto_prompt.txt").write_text(prompt + "\n")
     (root / "tool_first_prompt.txt").write_text(required)
+    if legacy_prompt is not None:
+        (root / "legacy_prompt.txt").write_text(legacy_prompt)
 PY
 
 [[ "$DIAGNOSTIC_CONFIG_ONLY" == 1 ]] && exit 0
@@ -110,6 +123,12 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 failed=0
 for mode in $DIAGNOSTIC_MODES; do
+  export VISUAL_AGENT_MAX_TURNS="$AGENT_TURNS" VISUAL_AGENT_MAX_TOKENS="$AGENT_TOKENS"
+  if [[ "$mode" == legacy ]]; then
+    export VISUAL_AGENT_MAX_TURNS=12 VISUAL_AGENT_MAX_TOKENS=512
+  elif [[ "$mode" == direct ]]; then
+    export VISUAL_AGENT_MAX_TURNS=1
+  fi
   export RUN_ID="${GROUP_ID}_${mode}"
   export VLMEVAL_EVAL_ID="T_${RUN_ID}"
   export WORK_ROOT="$GROUP_ROOT/$mode"

@@ -136,9 +136,42 @@ D 的 VStar 已无 API 失败，HR4K、HR8K 仍有 50/800、22/800 条失败；�
 以及默认 6 轮设置后的结果。历史补测需保持原配置；使用 6 轮比较时应全量重评，不能混用
 旧 12 轮成功预测和新 6 轮失败补测。
 
+## 16 卡混合数据 RL step160：工具使用诊断（2026-09-17）
+
+三组均使用 `zwz_deepeyesv2_3k_nocount_v1_n8_2node/global_step_160/actor/huggingface`。
+分数来自各组评分 CSV；三组最终进程退出码均为 0，但尚未逐条核验 API 失败及空预测，
+因此不将正常退出等同于 `0/0/0` API 失败。
+
+| 模式 | 最大 assistant 回合 | 每回合 tokens | VStar | HR4K | HR8K | API 失败数 | 状态 |
+|---|---:|---:|---:|---:|---:|---|---|
+| direct | 1 | 6144 | 84.82 | 79.63 | **75.88** | 待逐条核验 | 补测完成，退出码 0 |
+| auto | 6 | 6144 | 86.91 | 78.88 | 75.13 | 待逐条核验 | 完成，退出码 0 |
+| tool_first | 6 | 6144 | **87.43** | **80.00** | 75.50 | 待逐条核验 | 完成，退出码 0 |
+
+direct 使用原无工具简洁回答提示词，只请求一次回答。auto 使用
+`prompts/visual_agent_rl_system_groundingdino.txt`；与训练 step160 保存的 896 条 rollout
+中的 system prompt 逐条比较，文本全部一致。tool_first 在 auto 提示词末尾追加首轮先调用
+`grounding_detect` 或 `crop_zoom` 的指令，没有在代码中强制插入调用。
+本次未运行旧提示词、12 回合、每回合 512 tokens 的 legacy 组。
+
+direct 首次启动因 `EVAL_TIMEOUT_SECONDS=0` 被错误判断为立即超时而失败，修复后单独
+补测，2026-09-17 20:59:33 正常结束，耗时 1465 秒。表中只使用补测结果。
+
+结果目录（相对于仓库根目录）：
+
+- direct：`outputs/vlmeval/tool_diagnostic/tool_diagnostic_step160_20260917_203508/direct/qwen3_base/`
+- auto：`outputs/vlmeval/tool_diagnostic/tool_diagnostic_step160_20260917_172929/auto/dino_latest/`
+- tool_first：`outputs/vlmeval/tool_diagnostic/tool_diagnostic_step160_20260917_172929/tool_first/dino_latest/`
+
+tool_first 相比 auto 的三榜提升约为 0.52 / 1.12 / 0.38 个百分点（按未舍入分数计算）。
+尚未核验首轮工具调用率及工具成功率，不能据此认定收益来自实际工具调用。
+direct 与两组 agent 的提示词及回合预算不同；这些结果也不能与历史 KL-step130 旧口径
+直接作为严格控制变量的比较。
+
 ## 当前结论
 
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
+- step160 三组诊断评测已完成，分数见上表；API 失败数及工具调用遵从率尚待核验。
 - 旧 D step100 的 Native 奖励链路失效，不能作为双流方案的有效 A/B 结果。
 - 最新 Vision-OPD A step54 评测无效，D step54 补测后仍有 72 条 HRBench API 失败。
 - 若继续验证双流方案，应先全量重跑 step130 起始权重，再补齐 A 的 step100 结果。
