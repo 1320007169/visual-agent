@@ -105,13 +105,42 @@ advantage 也全为 0。该运行实际相当于 Agent RL 加 Native 文本上�
 过拟合影响。并且 step130 对照是“旧成功结果 + 失败样本补测”的合并结果；若要做严格 A/B
 结论，应使用当前代码对 step130 起始权重进行一次全量三榜重跑。
 
-实验 A（Agent-only）在 5 小时时限内训练到 step 77 后退出，没有 step100 或最终三榜结果，
+上述旧关系数据实验 A（Agent-only）在 5 小时时限内训练到 step 77 后退出，没有 step100 或最终三榜结果，
 暂不写入结果表。
+
+## Vision-OPD 续训（截至 2026-09-15）
+
+以下 A/D 从 step130 出发，均训练到 step54，并使用 Agent/tool-on 口径评测。
+
+| 权重 | 评测时间 | VStar | HR4K | HR8K | API 失败数 |
+|---|---:|---:|---:|---:|---:|
+| DINO + KL step130（对照，失败样本补测） | 2026-09-12 | 91.10 | 83.00 | 79.88 | 0/0/0 |
+| D：Agent4 + Native4，Vision-OPD step54（补测后） | 2026-09-15 | 87.96 | 79.13 | 78.88 | 0/50/22 |
+| A：Agent-only，Vision-OPD step54 | 2026-09-15 | 无效 | 无效 | 无效 | 189/796/792 |
+
+D 的 VStar 已无 API 失败，HR4K、HR8K 仍有 50/800、22/800 条失败；分数包含这些失败行，
+不能视作无故障评测。A 的结果文件虽为全零，但几乎所有预测都是 API failed，且日志中有
+视觉编码阶段的 vLLM CUDA OOM，因此不将全零当作模型准确率。D 原评测也出现过 OOM，
+不能把故障解释为 Agent-only 训练特有的问题。两组尚不足以支持有效的 A/D 优劣结论。
+
+另外，`nativefmtfix_100step_16gpu_from_64gpu_step80` 的 step100 仅生成 VStar 结果：
+3.14%，其中 183/191 条 API failed；未获得完整三榜结果，不作为模型退化证据。
+
+结果目录（相对于仓库根目录）：
+
+- D 补测：`outputs/vlmeval/visual_agent_execution_plan/step130_D_vision_opd_step54_failed_retry_20260915_102235/`
+- A 原评测：`outputs/vlmeval/visual_agent_execution_plan/step130_agent4_vision_opd_54step_64gpu_final_step54_A_3bench/`
+- nativefmtfix：`outputs/vlmeval/visual_agent_execution_plan/step130_dual_agent4_native4_nativefmtfix_100step_16gpu_from_64gpu_step80_final_step100_D_3bench/`
+
+这批 Vision-OPD A/D 成绩来自旧 12 轮协议，不是本次工具返回 loss mask、图片位置编码修复
+以及默认 6 轮设置后的结果。历史补测需保持原配置；使用 6 轮比较时应全量重评，不能混用
+旧 12 轮成功预测和新 6 轮失败补测。
 
 ## 当前结论
 
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
 - 旧 D step100 的 Native 奖励链路失效，不能作为双流方案的有效 A/B 结果。
+- 最新 Vision-OPD A step54 评测无效，D step54 补测后仍有 72 条 HRBench API 失败。
 - 若继续验证双流方案，应先全量重跑 step130 起始权重，再补齐 A 的 step100 结果。
 - 不应把包含大量 API 失败的准确率直接当作模型能力上限或下限。
 

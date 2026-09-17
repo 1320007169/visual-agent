@@ -14,6 +14,27 @@
 - Native prompt 必须输出严格的 `<answer>relation label</answer>`；训练器会分别记录两路 reward 指标，并在整批 Native format reward 为零时立即终止。
 - A/D 训练成功后由 0 号节点自动释放训练服务，并用最终 HuggingFace checkpoint 以 Agent/tool-on 口径评测 `VStarBench`、`HRBench4K`、`HRBench8K`。
 
+## 实验结果（截至 2026-09-15）
+
+以下均为 Agent/tool-on 评测；分数单位为 %，HRBench 取 `Average / all`。
+API 失败数依次为 VStar / HR4K / HR8K，样本总数为 191 / 800 / 800。
+
+| 权重 / 实验 | VStar | HR4K | HR8K | API 失败数 | 状态 |
+|---|---:|---:|---:|---:|---|
+| 起点 DINO + KL step130（补测后） | 91.10 | 83.00 | 79.88 | 0/0/0 | 旧成功预测与失败补测合并 |
+| D：Agent4 + Native4，100 step | 90.58 | 81.75 | 78.13 | 0/0/0 | Native 奖励链路失效的异常运行，不作为有效双流对照 |
+| D：Vision-OPD，54 step（9 月 15 日补测后） | 87.96 | 79.13 | 78.88 | 0/50/22 | HRBench 仍有失败，比较尚不完整 |
+| A：Agent-only Vision-OPD，54 step | 无效 | 无效 | 无效 | 189/796/792 | 几乎全部 API failed，日志有 vLLM OOM |
+
+`nativefmtfix` 续训到 step100 的运行仅有 VStar 结果文件：3.14%，其中
+183/191 条 API failed，HRBench 无完整成绩，暂不纳入三榜比较。
+
+最新 Vision-OPD A/D 评测使用旧 12 轮配置；这些成绩不是本次 loss mask、图片位置编码
+修复及默认 6 轮设置后的结果。历史失败样本补测应保留原运行参数；若改用 6 轮，需要
+全量重评对应权重，不能只替换失败行。当前没有有效结果证明 A 或 D 更优。
+
+完整历史表和结果目录见 [三项 Benchmark 评测汇总](../../docs/three_benchmark_evaluation_summary.md)。
+
 ## 快速开始
 
 ```bash

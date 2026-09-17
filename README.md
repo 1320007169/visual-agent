@@ -1,3 +1,18 @@
+# Visual Agent 工作区
+
+当前工作包含 Qwen3-VL SFT、GroundingDINO 工具、VERL RL、A/D 双流实验与评测。
+下方保留原 DeepEyesV2 项目介绍及来源；当前工作请从以下入口开始。
+
+| 任务 | 入口 |
+|---|---|
+| 文档导航与代码位置 | [文档索引](docs/README.md) |
+| 实验配置与执行 | [实验执行包](experiments/visual_agent_execution_plan/README.md) |
+| 历史成绩与失败数 | [三项 Benchmark 汇总](docs/three_benchmark_evaluation_summary.md) |
+| 旧文档整理建议 | [旧文档审查](docs/archive/README.md) |
+| 数据、权重、缓存保留建议 | [产物清单](docs/artifact_inventory.md) |
+
+## 原始项目介绍
+
 <div align="center">
   <img src="assets/logo-deepeyes.jpg" alt="logo" height="100">
   <h1 style="font-size: 32px; font-weight: bold;"> DeepEyesV2: Toward Agentic Multimodal Model </h1>

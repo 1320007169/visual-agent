@@ -1,5 +1,8 @@
 # Qwen3 GroundingDINO SFT 简要统计
 
+> 历史阶段记录：以下分数和“当前”状态保留原统计语境，不代表最新评测。
+> 最新成绩、补测情况和统计口径见[三项 Benchmark 汇总](three_benchmark_evaluation_summary.md)。
+
 统计范围：Qwen3-VL-8B base、旧版 56874 SFT、mixed 56874 SFT，以及基于 mixed SFT 的 RL step60。评测统一采用 VStarBench，共 191 题。
 
 ## 数据量
