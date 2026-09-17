@@ -149,6 +149,9 @@ def _tool_error_output(name: str, error: Exception) -> str:
 def _remaining_budget(args: Any, sampling_params: dict[str, Any], sample: Sample, response_tokens: list[int]) -> int:
     response_budget = int(sampling_params.get("max_new_tokens") or args.rollout_max_response_len)
     remaining = response_budget - len(response_tokens)
+    turn_limit = getattr(args, "max_tokens_per_turn", None)
+    if turn_limit is not None:
+        remaining = min(remaining, int(turn_limit))
     context_limit = getattr(args, "rollout_max_context_len", None)
     if context_limit is not None:
         remaining = min(remaining, int(context_limit) - len(sample.tokens))

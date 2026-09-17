@@ -105,3 +105,23 @@ def test_reward_matches_existing_verl_zwz_reward(response, label):
         {"source": "zwz_rl_vqa/original_images"},
     )
     assert score_response(response, label) == reference
+
+
+@pytest.mark.parametrize(
+    ("response", "label", "metadata"),
+    [
+        (
+            "<answer>The cushion is brown.</answer>",
+            "The cushion is brown.",
+            {"data_source": "visual-agent-deepeyesv2", "question": "What color is it?"},
+        ),
+        (
+            "<answer>C</answer>",
+            "C",
+            {"data_source": "visual-agent-hrbench4k", "question": "Choose one."},
+        ),
+    ],
+)
+def test_reward_matches_existing_verl_source_routing(response, label, metadata):
+    reference = _load_verl_reward_module().compute_score(response, label, metadata)
+    assert score_response(response, label, metadata) == reference

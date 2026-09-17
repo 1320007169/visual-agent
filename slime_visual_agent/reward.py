@@ -1,8 +1,11 @@
-"""SLIME reward adapter matching the deterministic ZWZ VERL reward."""
+"""SLIME reward adapter matching Visual-Agent's source-routed VERL reward."""
 
 from __future__ import annotations
 
+import asyncio
 import re
+import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -82,28 +85,47 @@ def has_strict_answer_format(text: str) -> bool:
     ) is not None
 
 
-def score_response(response: str, ground_truth: str) -> dict[str, float]:
-    """Score a closed-label spatial-relation response without an API judge."""
-    answer = extract_answer(response)
-    format_reward = 1.0 if has_strict_answer_format(response) else 0.0
-    if not answer:
-        return {"score": 0.0, "acc": 0.0, "format": 0.0, "tool_used": 0.0}
-    prediction = _normalize_relation(answer)
-    expected = _normalize_relation(str(ground_truth))
-    accuracy = 1.0 if prediction is not None and prediction == expected else 0.0
-    return {
-        "score": 0.9 * accuracy + 0.1 * format_reward,
-        "acc": accuracy,
-        "format": format_reward,
-        "tool_used": 1.0 if "<tool_call>" in response else 0.0,
-    }
+def _verl_score_response(
+    response: str,
+    ground_truth: str,
+    metadata: dict[str, Any],
+) -> dict[str, float]:
+    reinforcement_learning = Path(__file__).resolve().parents[1] / "reinforcement_learning"
+    if str(reinforcement_learning) not in sys.path:
+        sys.path.insert(0, str(reinforcement_learning))
+    from verl.utils.reward_score.visual_agent_thyme import compute_score
+
+    return compute_score(response, ground_truth, metadata)
+
+
+def score_response(
+    response: str,
+    ground_truth: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    """Route relation, free-form, and benchmark samples like the VERL run."""
+    metadata = dict(metadata or {})
+    metadata.setdefault("data_source", "visual-agent-zwz-relation")
+    if metadata["data_source"] == "visual-agent-zwz-relation":
+        metadata.setdefault("source", "zwz_rl_vqa/original_images")
+    return _verl_score_response(response, str(ground_truth), metadata)
 
 
 async def compute_reward(args: Any, sample: Any) -> dict[str, float]:
     """SLIME ``--custom-rm-path`` entry point."""
     del args
-    result = score_response(sample.response, str(sample.label or ""))
     metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
+    if metadata.get("data_source") == "visual-agent-deepeyesv2":
+        # This branch may call an external semantic judge. Keep that blocking
+        # SDK request outside SLIME's rollout event loop.
+        result = await asyncio.to_thread(
+            score_response,
+            sample.response,
+            str(sample.label or ""),
+            metadata,
+        )
+    else:
+        result = score_response(sample.response, str(sample.label or ""), metadata)
     metadata["visual_agent_reward"] = result
     sample.metadata = metadata
     return result

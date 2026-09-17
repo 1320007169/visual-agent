@@ -11,6 +11,14 @@ from typing import Any
 import aiohttp
 
 
+_PENDING_BY_ENDPOINT: dict[str, int] = {}
+
+
+def _least_busy_endpoint(urls: tuple[str, ...], failed_url: str | None = None) -> str:
+    candidates = tuple(url for url in urls if url != failed_url) or urls
+    return min(candidates, key=lambda url: _PENDING_BY_ENDPOINT.get(url, 0))
+
+
 @dataclass(frozen=True)
 class ToolResult:
     output: str
@@ -48,8 +56,10 @@ async def execute_visual_tool(
     }
 
     last_error: Exception | None = None
+    failed_url: str | None = None
     for attempt in range(retries + 1):
-        base_url = urls[attempt % len(urls)]
+        base_url = _least_busy_endpoint(urls, failed_url)
+        _PENDING_BY_ENDPOINT[base_url] = _PENDING_BY_ENDPOINT.get(base_url, 0) + 1
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(f"{base_url}/execute", json=payload, headers=headers) as response:
@@ -69,6 +79,9 @@ async def execute_visual_tool(
             return ToolResult(output=output_text, images=returned_images, metrics=metrics)
         except (aiohttp.ClientError, asyncio.TimeoutError, json.JSONDecodeError, RuntimeError) as exc:
             last_error = exc
+            failed_url = base_url
             if attempt < retries:
                 await asyncio.sleep(min(2**attempt, 5))
+        finally:
+            _PENDING_BY_ENDPOINT[base_url] -= 1
     raise RuntimeError(f"visual tool {name} failed after {retries + 1} attempts: {last_error}")

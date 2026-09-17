@@ -70,9 +70,40 @@ All topology values are parameters. `ACTOR_GPUS_PER_NODE`,
 `ROLLOUT_NUM_GPUS`, `ROLLOUT_GPUS_PER_ENGINE`, and `COLOCATE` are intentionally
 not fixed for the later layout comparison.
 
+## Two-node GroundingDINO + KL experiment
+
+The full ModelArts entrypoint matching the existing VERL ablation is:
+
+```bash
+SLIME_ROOT=/path/to/slime-at-0104a9e \
+SLIME_ENV_DIR=/path/to/slime-env \
+bash scripts/run_visual_agent_zwz_rl_groundingdino_slime_2node_16gpu.sh
+```
+
+Submit the same entrypoint on both eight-GPU nodes. It reserves GPUs 0-6 on
+each node for colocated FSDP/SGLang and GPU 7 for two GroundingDINO HTTP
+servers with three replicas each. The launcher starts and owns the Ray cluster
+and tool services, then submits the SLIME driver from node 0.
+
+The important VERL-to-SLIME mappings are:
+
+| Experiment setting | SLIME setting |
+| --- | --- |
+| 112 prompts, rollout n=16 | `rollout_batch_size=112`, `n_samples_per_prompt=16` |
+| PPO mini batch 28 prompts | `global_batch_size=448`, `num_steps_per_rollout=4` |
+| 14 RL GPUs | `actor_num_nodes=2`, `actor_num_gpus_per_node=7` |
+| Actor KL 0.001 | `use_kl_loss`, `ref_load=MODEL_PATH`, `kl_loss_coef=0.001` |
+| Token-mean actor loss | `calculate_per_token_loss` |
+| 224 cluster-wide requests | 16 requests per each of 14 one-GPU SGLang engines |
+
+`SLIME_ENV_DIR` must contain the dependencies of the pinned SLIME checkout,
+including the matching Ray CLI used to build the two-node cluster. Start with
+`DRY_RUN=1` and check the expanded command before allocating a formal run.
+
 ## CPU alignment tests
 
 ```bash
 pytest -q tests/test_slime_visual_agent_fixed_trajectory.py \
-  tests/test_prepare_visual_agent_slime_poc.py
+  tests/test_prepare_visual_agent_slime_poc.py \
+  tests/test_slime_visual_agent_tool_client.py
 ```
