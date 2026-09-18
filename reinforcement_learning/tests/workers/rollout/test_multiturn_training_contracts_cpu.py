@@ -3,6 +3,8 @@
 import ast
 import asyncio
 import itertools
+import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -27,7 +29,7 @@ def load_function(path, name, namespace):
 class MultiturnTrainingContracts(unittest.TestCase):
     def test_observation_masks(self):
         mask_fn = load_function(ROOT / "workers/rollout/chat_scheduler.py", "_mask_out_tools_calling_tokens", {"itertools": itertools})
-        assistant = {"role": "assistant", "content": "<tool_call>CALL</tool_call>"}
+        assistant = {"role": "assistant", "content": "<think>Inspect the object.</think><tool_call>CALL</tool_call>"}
         xml = {"role": "user", "content": "<tool_response>RESULT</tool_response>"}
         image = {"role": "user", "content": [{"type": "text", "text": xml["content"]}, {"type": "image_url", "image_url": "crop"}]}
         native = {"role": "tool", "content": "RESULT"}
@@ -58,6 +60,28 @@ class MultiturnTrainingContracts(unittest.TestCase):
             asyncio.run(callback(obj, messages, completion, info))
         self.assertEqual(info["assistant_turns"], 6)
         self.assertEqual(len(submissions), 5)
+
+    def test_think_tool_observation_answer_trajectory(self):
+        namespace = {"asyncio": asyncio, "json": json, "re": re,
+                     "TOOL_CALL_RE": re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)}
+        callback = load_function(ROOT / "workers/rollout/chat_scheduler.py", "__call__", namespace)
+        calls, submissions = [], []
+        async def tool(call, *args, **kwargs):
+            calls.append(call)
+            return {"role": "user", "content": "<tool_response>crop</tool_response>"}
+        obj = SimpleNamespace(max_turns=6, _call_tool=tool, scheduler=SimpleNamespace(submit_chat_completions=lambda **kw: submissions.append(kw)))
+        messages, info = [], {}
+        texts = ['<think>Inspect the target.</think><tool_call>{"name":"crop_zoom","arguments":{}}</tool_call>',
+                 '<think>The target is visible.</think><answer>below</answer>']
+        for text in texts:
+            completion = SimpleNamespace(id='test', choices=[SimpleNamespace(finish_reason='stop', message=SimpleNamespace(
+                tool_calls=[], model_dump=lambda **kw: {"role": "assistant", "content": text}))])
+            asyncio.run(callback(obj, messages, completion, info))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(submissions), 1)
+        self.assertEqual(messages[0]['content'], texts[0])
+        self.assertEqual(messages[2]['content'], texts[1])
+        self.assertEqual(info['assistant_turns'], 2)
 
     def test_recompute_image_and_following_text_positions(self):
         rope = load_function(ROOT / "models/transformers/qwen2_vl.py", "get_rope_index", {"torch": torch})

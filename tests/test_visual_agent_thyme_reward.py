@@ -16,6 +16,22 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
+    def test_think_action_protocol(self):
+        final = '<think>The target is below the anchor.</think><answer>below</answer>'
+        call = '<think>Inspect the target.</think><tool_call>{"name":"crop_zoom","arguments":{"target_image":0}}</tool_call>'
+        transcript = call + '<|im_end|>\n<|im_start|>user\n<tool_response>observation</tool_response><|im_end|>\n<|im_start|>assistant\n' + final + '<|im_end|>'
+        with patch.dict(os.environ, {"VISUAL_AGENT_REQUIRE_THINK": "1"}):
+            for valid in [final, transcript]:
+                self.assertTrue(reward.has_strict_answer_format(valid))
+                result = reward.compute_score(valid, "below")
+                self.assertEqual(result['format'], 1.0)
+                self.assertEqual(result['score'], 1.0)
+            for invalid in ['<answer>below</answer>', '<think>only thinking</think>',
+                            '<think></think><answer>below</answer>', final + 'extra',
+                            final + final, call, transcript.replace('<think>Inspect the target.</think>', ''),
+                            final.replace('The target is below the anchor.', '<tool_call>{}</tool_call>')]:
+                self.assertFalse(reward.has_strict_answer_format(invalid), invalid)
+
     def test_initialization_failure_falls_back(self):
         backup = Mock()
         backup.chat.completions.create.return_value.choices = [Mock(message=Mock(content="TRUE"))]

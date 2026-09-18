@@ -255,10 +255,15 @@ class ToolCompletionCallback(CompletionCallback):
         native_tool_calls = completions.choices[0].message.tool_calls or []
         xml_tool_calls = []
         if not native_tool_calls and message.get("content"):
-            for raw_call in TOOL_CALL_RE.findall(message["content"]):
+            # Thoughts remain in the trajectory and loss, but quoted actions
+            # inside them must never execute as real tool calls.
+            action_content = re.sub(r"<think>.*?</think>", "", message["content"], flags=re.DOTALL)
+            if "<think>" in action_content:  # Unclosed thought, no executable action.
+                action_content = ""
+            for raw_call in TOOL_CALL_RE.findall(action_content):
                 try:
                     call = json.loads(raw_call)
-                    if isinstance(call.get("name"), str) and isinstance(call.get("arguments", {}), dict):
+                    if isinstance(call, dict) and isinstance(call.get("name"), str) and isinstance(call.get("arguments", {}), dict):
                         xml_tool_calls.append(call)
                 except json.JSONDecodeError:
                     logger.warning("Ignoring malformed XML tool call: %s", raw_call[:500])
@@ -502,7 +507,7 @@ class ToolCompletionCallback(CompletionCallback):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        """Mask out tools calling tokens in the responses.
+        """Mask observations, retaining assistant think, tool_call and answer tokens.
 
         Args:
             raw_prompts: [prompt] from input dataset

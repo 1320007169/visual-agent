@@ -43,8 +43,53 @@ def extract_answer(text: str) -> str | None:
     return matches[-1].strip() if matches else None
 
 
+def has_think_action_format(text: str) -> bool:
+    """Validate assistant turns only; observations never earn format credit.
+
+    Qwen response IDs retain im_start/im_end delimiters; the first assistant
+    header is already part of the prompt and may be absent here.
+    """
+    turns = []
+    for chunk in text.split("<|im_end|>"):
+        chunk = chunk.strip()
+        if not chunk or chunk == "<|endoftext|>":
+            continue
+        match = re.match(r"<\|im_start\|>(assistant|user|tool)\n", chunk)
+        if match:
+            if match[1] != "assistant":
+                continue
+            chunk = chunk[match.end():]
+        turns.append(chunk.strip())
+    if not turns:
+        return False
+    for index, turn in enumerate(turns):
+        match = re.fullmatch(
+            r"<think>\s*(.+?)\s*</think>\s*<(tool_call|answer)>\s*(.+?)\s*</\2>",
+            turn, re.DOTALL,
+        )
+        if not match or not match[1].strip() or not match[3].strip():
+            return False
+        if re.search(r"</?(?:think|tool_call|answer|tool_response)\b", match[1]):
+            return False
+        if match[2] == "answer":
+            if index != len(turns) - 1 or re.search(r"[<>]", match[3]):
+                return False
+        else:
+            if index == len(turns) - 1:
+                return False
+            try:
+                call = json.loads(match[3])
+            except (ValueError, TypeError):
+                return False
+            if not isinstance(call, dict) or call.get("name") not in {"grounding_detect", "crop_zoom"} or not isinstance(call.get("arguments"), dict):
+                return False
+    return True
+
+
 def has_strict_answer_format(text: str) -> bool:
     """Require exactly one non-empty answer tag at the end of the final turn."""
+    if os.environ.get("VISUAL_AGENT_REQUIRE_THINK", "0") == "1":
+        return has_think_action_format(text)
     if len(re.findall(r"<answer>", text, flags=re.IGNORECASE)) != 1:
         return False
     if len(re.findall(r"</answer>", text, flags=re.IGNORECASE)) != 1:

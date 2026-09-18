@@ -113,7 +113,10 @@ def parse_tool_invocation(message: dict[str, Any]) -> ToolInvocation | None:
         arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
         return _validate_tool_invocation(name, arguments)
 
-    matches = TOOL_CALL_RE.findall(_message_text(message))
+    action_text = re.sub(r"<think>.*?</think>", "", _message_text(message), flags=re.DOTALL)
+    if "<think>" in action_text:
+        return None
+    matches = TOOL_CALL_RE.findall(action_text)
     if matches:
         try:
             payload = json.loads(matches[-1])
@@ -121,7 +124,7 @@ def parse_tool_invocation(message: dict[str, Any]) -> ToolInvocation | None:
             raise InferenceError(f"Model returned invalid <tool_call> JSON: {exc}") from exc
         return _validate_tool_invocation(payload.get("name"), payload.get("arguments", {}))
 
-    attribute_calls = TOOL_CALL_ATTR_RE.findall(_message_text(message))
+    attribute_calls = TOOL_CALL_ATTR_RE.findall(action_text)
     if not attribute_calls:
         return None
     name, raw_arguments = attribute_calls[-1]
