@@ -9,6 +9,7 @@ import base64
 import importlib
 import inspect
 import io
+import math
 import os
 import queue
 import sys
@@ -25,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from sft_tool_call_logic import execute_tool_call
+from vts_tool_bridge import VtsBridgeError, VtsRemoteBridge
 
 
 SUPPORTED_TOOLS = {
@@ -33,6 +35,10 @@ SUPPORTED_TOOLS = {
     "grounding_detect",
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
+    "ocr_read",
+    "depth_measure",
+    "ground_depth",
+    "object_count",
 }
 
 
@@ -296,12 +302,257 @@ def _replica_count(env_name: str) -> int:
     return value
 
 
+def _target_image(arguments: dict[str, Any], images: list[Image.Image]) -> int:
+    try:
+        index = int(arguments.get("target_image", 0))
+    except (TypeError, ValueError) as exc:
+        raise ToolServerError("target_image must be an integer") from exc
+    if not 0 <= index < len(images):
+        raise ToolServerError(f"target_image {index} is outside the image list")
+    return index
+
+
+def _relative_box_to_pixels(box: Any, size: tuple[int, int]) -> list[float]:
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        raise ToolServerError("bbox_2d must contain four relative coordinates")
+    try:
+        x1, y1, x2, y2 = (float(value) for value in box)
+    except (TypeError, ValueError) as exc:
+        raise ToolServerError("bbox_2d coordinates must be numeric") from exc
+    if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+        raise ToolServerError("bbox_2d coordinates must be finite")
+    x1, y1, x2, y2 = (min(1000.0, max(0.0, value)) for value in (x1, y1, x2, y2))
+    if x2 <= x1 or y2 <= y1:
+        raise ToolServerError("bbox_2d must describe a positive-area region")
+    width, height = size
+    return [x1 * width / 1000.0, y1 * height / 1000.0, x2 * width / 1000.0, y2 * height / 1000.0]
+
+
+def _pixel_box_to_relative(box: Any, size: tuple[int, int]) -> list[float]:
+    if not isinstance(box, (list, tuple)) or len(box) != 4:
+        raise ToolServerError("tool backend returned an invalid bbox")
+    width, height = size
+    x1, y1, x2, y2 = (float(value) for value in box)
+    return [
+        round(min(1000.0, max(0.0, x1 * 1000.0 / width)), 4),
+        round(min(1000.0, max(0.0, y1 * 1000.0 / height)), 4),
+        round(min(1000.0, max(0.0, x2 * 1000.0 / width)), 4),
+        round(min(1000.0, max(0.0, y2 * 1000.0 / height)), 4),
+    ]
+
+
+def _ocr_bbox_to_relative(box: Any, size: tuple[int, int]) -> list[float] | None:
+    if not isinstance(box, (list, tuple)):
+        return None
+    if len(box) == 4 and all(isinstance(value, (int, float)) for value in box):
+        return _pixel_box_to_relative(box, size)
+    points = []
+    for point in box:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            return None
+        try:
+            points.append((float(point[0]), float(point[1])))
+        except (TypeError, ValueError):
+            return None
+    if not points:
+        return None
+    xs, ys = zip(*points)
+    return _pixel_box_to_relative([min(xs), min(ys), max(xs), max(ys)], size)
+
+
+def _remote_error(body: dict[str, Any], tool: str) -> dict[str, Any] | None:
+    if body.get("status") == "success" or body.get("success") is True:
+        return None
+    return {
+        "status": "error",
+        "tool": tool,
+        "code": str(body.get("error_code") or "tool_failed"),
+        "message": str(body.get("error_message") or body.get("text") or "tool execution failed"),
+        "recoverable": True,
+    }
+
+
 @dataclass
 class ToolService:
     sam3: Any | None
     grounding_dino: Any | None
+    ocr_bridge: VtsRemoteBridge | None = None
+    depth_bridge: VtsRemoteBridge | None = None
+    count_bridge: VtsRemoteBridge | None = None
     crop_size: int = 336
     minimum_crop_size: int = 96
+
+    def _execute_ocr(
+        self,
+        arguments: dict[str, Any],
+        images: list[Image.Image],
+        instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.ocr_bridge is None:
+            raise ToolServerError("ocr_read service is not configured")
+        target = _target_image(arguments, images)
+        threshold = 0.0
+        max_results = 50
+        response = self.ocr_bridge.execute(
+            images=images,
+            arguments={"image_id": target, "minimum_confidence": threshold},
+            instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, "ocr_read"):
+            return error, []
+        structured = dict(response.result.get("structured") or {})
+        regions = []
+        for item in (structured.get("results") or [])[:max_results]:
+            if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+                continue
+            region = {"text": str(item["text"])}
+            bbox = _ocr_bbox_to_relative(item.get("bbox"), images[target].size)
+            if bbox is not None:
+                region["bbox_2d"] = bbox
+            if item.get("confidence") is not None:
+                region["confidence"] = round(float(item["confidence"]), 4)
+            regions.append(region)
+        returned_images = response.images
+        result = {
+            "text": str(structured.get("text") or "\n".join(item["text"] for item in regions)),
+            "regions": regions,
+            "count": len(regions),
+            "target_image": target,
+            "coordinate_space": "relative_0_1000",
+            "source": "ocr",
+        }
+        if returned_images:
+            result["annotated_image"] = len(images)
+        return result, returned_images
+
+    def _execute_count(
+        self,
+        arguments: dict[str, Any],
+        images: list[Image.Image],
+        instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.count_bridge is None:
+            raise ToolServerError("object_count service is not configured")
+        target = _target_image(arguments, images)
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            raise ToolServerError("object_count.query must be non-empty")
+        response = self.count_bridge.execute(
+            images=images,
+            arguments={"image_id": target, "query": query},
+            instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, "object_count"):
+            return error, []
+        structured = dict(response.result.get("structured") or {})
+        points = []
+        for point in structured.get("points") or []:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                width, height = images[target].size
+                points.append([
+                    round(min(1000.0, max(0.0, float(point[0]) * 1000.0 / width)), 4),
+                    round(min(1000.0, max(0.0, float(point[1]) * 1000.0 / height)), 4),
+                ])
+        boxes = [
+            _pixel_box_to_relative(box, images[target].size)
+            for box in structured.get("boxes") or []
+        ]
+        returned_images = response.images
+        result = {
+            "query": query,
+            "count": int(structured.get("count", len(points) or len(boxes))),
+            "points_2d": points,
+            "boxes": boxes,
+            "target_image": target,
+            "coordinate_space": "relative_0_1000",
+            "source": "object_count",
+        }
+        if returned_images:
+            result["annotated_image"] = len(images)
+        return result, returned_images
+
+    def _execute_depth(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        images: list[Image.Image],
+        instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.depth_bridge is None:
+            raise ToolServerError(f"{name} service is not configured")
+        target = _target_image(arguments, images)
+        query = None
+        if name == "depth_measure":
+            relative_box = arguments.get("bbox_2d")
+            pixel_box = _relative_box_to_pixels(relative_box, images[target].size)
+            relative_box = _pixel_box_to_relative(pixel_box, images[target].size)
+        elif name == "ground_depth":
+            query = str(arguments.get("query") or "").strip()
+            if not query:
+                raise ToolServerError("ground_depth.query must be non-empty")
+            if self.grounding_dino is None:
+                return {
+                    "status": "error",
+                    "tool": name,
+                    "message": "GroundingDINO is unavailable for query-based depth measurement.",
+                    "recoverable": True,
+                }, []
+            detected = self.grounding_dino.detect(images[target], query)
+            boxes = detected.get("boxes") or []
+            confidence = detected.get("confidence") or []
+            if not boxes:
+                return {
+                    "status": "error",
+                    "tool": name,
+                    "message": f"No object was found for {query!r}; retry with a more concrete query.",
+                    "recoverable": True,
+                }, []
+            selected = max(
+                range(len(boxes)),
+                key=lambda index: float(confidence[index]) if index < len(confidence) else 0.0,
+            )
+            pixel_box = [float(value) for value in boxes[selected]]
+            relative_box = _pixel_box_to_relative(pixel_box, images[target].size)
+        else:  # pragma: no cover - only called from the checked dispatch below
+            raise ToolServerError(f"Unsupported depth tool: {name}")
+
+        response = self.depth_bridge.execute(
+            images=images,
+            arguments={"image_id": target, "bboxes": [pixel_box]},
+            instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, name):
+            return error, []
+        structured = dict(response.result.get("structured") or {})
+        statistics = dict(structured.get("statistics") or {})
+        metric = bool((response.result.get("provenance") or {}).get("metric_depth") or statistics.get("metric_depth"))
+        regions = list(structured.get("region_depths") or [])
+        if not metric:
+            return {
+                "status": "error",
+                "tool": name,
+                "message": "The configured backend does not provide metric depth.",
+                "recoverable": False,
+            }, []
+        if not regions or regions[0].get("median_depth_m") is None:
+            return {
+                "status": "error",
+                "tool": name,
+                "message": "No valid depth pixels were found inside the target region.",
+                "recoverable": True,
+            }, []
+        returned_images = response.images
+        result = {
+            "depth_m": round(float(regions[0]["median_depth_m"]), 4),
+            "bbox_2d": relative_box,
+            "target_image": target,
+            "coordinate_space": "relative_0_1000",
+        }
+        if query is not None:
+            result["query"] = query
+        if returned_images:
+            result["depth_image"] = len(images)
+        return result, returned_images
 
     def execute(
         self,
@@ -313,6 +564,21 @@ class ToolService:
     ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
+        if name == "ocr_read":
+            try:
+                return self._execute_ocr(arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
+        if name == "object_count":
+            try:
+                return self._execute_count(arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
+        if name in {"depth_measure", "ground_depth"}:
+            try:
+                return self._execute_depth(name, arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
         if name == "grounding_detect":
             max_words = int(os.getenv("GROUNDING_DINO_MAX_QUERY_WORDS", "0"))
             query = arguments.get("query")
@@ -375,7 +641,15 @@ def load_service(backend: str) -> ToolService:
                 for _ in range(_replica_count("GROUNDING_DINO_REPLICAS"))
             ]
         )
-    return ToolService(sam3=sam3, grounding_dino=grounding_dino)
+    return ToolService(
+        sam3=sam3,
+        grounding_dino=grounding_dino,
+        ocr_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_OCR_ENDPOINT", tool_name="ocr_read"),
+        depth_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_DEPTH_ENDPOINT", tool_name="depth_estimate"),
+        count_bridge=VtsRemoteBridge.from_env(
+            endpoint_env="VTS_COUNT_ENDPOINT", tool_name="countgd_plusplus_count"
+        ),
+    )
 
 
 def create_app(service: ToolService):
@@ -399,6 +673,9 @@ def create_app(service: ToolService):
             "grounding_dino_loaded": service.grounding_dino is not None,
             "sam3_replicas": getattr(service.sam3, "replica_count", 0),
             "grounding_dino_replicas": getattr(service.grounding_dino, "replica_count", 0),
+            "ocr_service": service.ocr_bridge is not None,
+            "depth_service": service.depth_bridge is not None,
+            "count_service": service.count_bridge is not None,
         }
 
     @app.post("/execute")

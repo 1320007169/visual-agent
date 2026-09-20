@@ -99,6 +99,10 @@ def _to_train_messages(raw_messages: list[dict[str, Any]], image_count: int) -> 
 def convert_item(item: dict[str, Any], task_type: str, uid: str | None = None) -> dict[str, Any]:
     images = _normalize_images(item)
     raw_messages = [{"role": str(m.get("role")), "content": str(m.get("content") or "")} for m in item.get("messages") or []]
+    required_tools = item.get("required_tools") or []
+    default_tool_names = {
+        schema["function"]["name"] for schema in get_visual_tool_schemas()
+    }
     converted = {
         "uid": uid or item.get("uid"),
         "source_uid": item.get("uid"),
@@ -107,10 +111,10 @@ def convert_item(item: dict[str, Any], task_type: str, uid: str | None = None) -
         "images": images,
         "question": item.get("question"),
         "answer": item.get("answer"),
-        "required_tools": item.get("required_tools") or [],
+        "required_tools": required_tools,
         "messages": _to_train_messages(raw_messages, len(images)),
         "messages_raw": raw_messages,
-        "tools": get_visual_tool_schemas(),
+        "tools": get_visual_tool_schemas(default_tool_names | set(required_tools)),
     }
     converted["image_meta"] = json.dumps(_normalize_image_meta(item), ensure_ascii=False)
     if "data_type" in item:

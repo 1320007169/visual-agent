@@ -36,6 +36,19 @@ class FakeGroundingDino:
         }
 
 
+class FakeBridge:
+    def __init__(self, result, images=None):
+        self.result = result
+        self.images = images or []
+        self.calls = []
+
+    def execute(self, **kwargs):
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        return SimpleNamespace(result=self.result, images=self.images)
+
+
 class VisualToolServerTest(unittest.TestCase):
     def setUp(self):
         self.image = Image.new("RGB", (200, 100), "white")
@@ -166,6 +179,128 @@ class VisualToolServerTest(unittest.TestCase):
             result["queries"][0]["crop_zoom"]["crop_path"],
             "tool://images/1/rollout-7_crop_zoom_t1.jpg",
         )
+
+    def test_ocr_contract_is_compact_and_relative(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "text": "EXIT",
+                    "results": [
+                        {
+                            "text": "EXIT",
+                            "confidence": 0.96,
+                            "bbox": [[20, 10], [100, 10], [100, 30], [20, 30]],
+                        }
+                    ],
+                },
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, ocr_bridge=bridge)
+        result, images = service.execute(
+            "ocr_read",
+            {"target_image": 0},
+            [self.image],
+        )
+
+        self.assertEqual(result["text"], "EXIT")
+        self.assertEqual(result["regions"][0]["bbox_2d"], [100.0, 100.0, 500.0, 300.0])
+        self.assertEqual(result["annotated_image"], 1)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(bridge.calls[0]["arguments"], {"image_id": 0, "minimum_confidence": 0.0})
+
+    def test_count_contract_converts_points_and_hides_backend_name(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {"count": 2, "points": [[20, 10], [100, 50]]},
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, count_bridge=bridge)
+        result, images = service.execute(
+            "object_count",
+            {"query": "apples", "target_image": 0},
+            [self.image],
+        )
+
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["points_2d"], [[100.0, 100.0], [500.0, 500.0]])
+        self.assertEqual(result["source"], "object_count")
+        self.assertNotIn("countgd", str(result).lower())
+        self.assertEqual(len(images), 1)
+        self.assertEqual(bridge.calls[0]["arguments"], {"image_id": 0, "query": "apples"})
+
+    def test_depth_measure_contract_uses_one_bbox(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "statistics": {"metric_depth": True, "unit": "meter"},
+                    "region_depths": [{"median_depth_m": 1.4, "mean_depth_m": 1.5}],
+                },
+                "provenance": {"metric_depth": True},
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, depth_bridge=bridge)
+        result, images = service.execute(
+            "depth_measure",
+            {"target_image": 0, "bbox_2d": [500, 100, 900, 800]},
+            [self.image],
+        )
+
+        self.assertEqual(result["depth_m"], 1.4)
+        self.assertEqual(result["bbox_2d"], [500.0, 100.0, 900.0, 800.0])
+        self.assertEqual(result["depth_image"], 1)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(
+            bridge.calls[0]["arguments"]["bboxes"],
+            [[100.0, 10.0, 180.0, 80.0]],
+        )
+
+    def test_ground_depth_contract_localizes_one_query(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "statistics": {"metric_depth": True},
+                    "region_depths": [{"median_depth_m": 2.7}],
+                },
+                "provenance": {"metric_depth": True},
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, FakeGroundingDino(), depth_bridge=bridge)
+        result, _ = service.execute(
+            "ground_depth", {"target_image": 0, "query": "person"}, [self.image]
+        )
+
+        self.assertEqual(result["query"], "person")
+        self.assertEqual(result["depth_m"], 2.7)
+        self.assertEqual(result["bbox_2d"], [5.0, 20.0, 100.0, 300.0])
+        self.assertEqual(bridge.calls[0]["arguments"]["bboxes"], [[1.0, 2.0, 20.0, 30.0]])
+
+    def test_remote_tool_failure_becomes_recoverable_observation(self):
+        bridge = FakeBridge(
+            {
+                "status": "failed",
+                "success": False,
+                "error_code": "no_text",
+                "error_message": "No readable text was found.",
+            }
+        )
+        service = ToolService(None, None, ocr_bridge=bridge)
+        result, images = service.execute("ocr_read", {"target_image": 0}, [self.image])
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["code"], "no_text")
+        self.assertTrue(result["recoverable"])
+        self.assertEqual(images, [])
 
 
 if __name__ == "__main__":

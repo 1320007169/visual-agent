@@ -16,6 +16,18 @@ VISUAL_TOOL_NAMES = {
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
     "grounding_detect",
+    "ocr_read",
+    "depth_measure",
+    "ground_depth",
+    "object_count",
+}
+
+DEFAULT_VISUAL_TOOL_NAMES = {
+    "crop_zoom",
+    "sam3_segment_multi",
+    "sam3_crop_zoom",
+    "sam3_crop_zoom_multi",
+    "grounding_detect",
 }
 
 
@@ -142,12 +154,89 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "ocr_read",
+            "description": "Read visible text and return text regions in relative 0-1000 coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {
+                        "type": "integer",
+                        "description": "Zero-based index into the sample images array.",
+                    },
+                },
+                "required": ["target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "depth_measure",
+            "description": "Return the median metric depth inside one relative 0-1000 bbox.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {
+                        "type": "integer",
+                        "description": "Zero-based index into the sample images array.",
+                    },
+                    "bbox_2d": {
+                        "type": "array",
+                        "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "description": "Relative xyxy region whose median depth should be measured.",
+                    },
+                },
+                "required": ["bbox_2d", "target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ground_depth",
+            "description": "Ground one concrete object and return its median metric depth.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Short concrete object noun phrase."},
+                    "target_image": {
+                        "type": "integer",
+                        "description": "Zero-based index into the sample images array.",
+                    },
+                },
+                "required": ["query", "target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "object_count",
+            "description": "Count instances of a concrete object and return spatial evidence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Concrete object category to count."},
+                    "target_image": {
+                        "type": "integer",
+                        "description": "Zero-based index into the sample images array.",
+                    },
+                },
+                "required": ["query", "target_image"],
+            },
+        },
+    },
 ]
 
 
 def get_visual_tool_schemas(tool_names: list[str] | tuple[str, ...] | set[str] | None = None) -> list[dict[str, Any]]:
     if tool_names is None:
-        return deepcopy(VISUAL_TOOL_SCHEMAS)
+        tool_names = DEFAULT_VISUAL_TOOL_NAMES
     requested = set(tool_names)
     unknown = requested - VISUAL_TOOL_NAMES
     if unknown:

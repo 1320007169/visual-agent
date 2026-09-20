@@ -5,6 +5,7 @@ import pytest
 
 from scripts.convert_visual_tool_sft import convert_files, convert_item
 from scripts.validate_visual_tool_sft import validate_item
+from scripts.visual_tools import get_visual_tool_schemas
 
 
 def _write_image(path: Path) -> str:
@@ -167,3 +168,47 @@ def test_convert_files_makes_duplicate_uids_unique(tmp_path: Path):
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert [row["uid"] for row in rows] == ["dupe", "attribute:dupe"]
     assert [row["source_uid"] for row in rows] == ["dupe", "dupe"]
+
+
+def test_extended_tools_are_opt_in_and_follow_required_tools(tmp_path: Path):
+    default_names = {schema["function"]["name"] for schema in get_visual_tool_schemas()}
+    assert "ocr_read" not in default_names
+    assert "depth_measure" not in default_names
+    assert "ground_depth" not in default_names
+    assert "object_count" not in default_names
+
+    image = _write_image(tmp_path / "image.jpg")
+    item = {
+        "uid": "ocr_sample",
+        "image": image,
+        "images": [image],
+        "question": "What does the sign say?",
+        "answer": "EXIT",
+        "required_tools": ["ocr_read"],
+        "messages": [
+            {"role": "user", "content": "<image>\nWhat does the sign say?"},
+            {
+                "role": "assistant",
+                "content": '<tool_call>{"name":"ocr_read","arguments":{"target_image":0}}</tool_call>',
+            },
+            {"role": "tool", "content": '{"text":"EXIT"}'},
+            {"role": "assistant", "content": "<answer>EXIT</answer>"},
+        ],
+    }
+    converted = convert_item(item, task_type="ocr")
+    names = {schema["function"]["name"] for schema in converted["tools"]}
+    assert default_names < names
+    assert "ocr_read" in names
+
+
+def test_extended_tool_inputs_are_minimal():
+    schemas = {
+        schema["function"]["name"]: schema["function"]["parameters"]
+        for schema in get_visual_tool_schemas(
+            {"ocr_read", "depth_measure", "ground_depth", "object_count"}
+        )
+    }
+    assert set(schemas["ocr_read"]["properties"]) == {"target_image"}
+    assert set(schemas["object_count"]["properties"]) == {"query", "target_image"}
+    assert set(schemas["depth_measure"]["properties"]) == {"bbox_2d", "target_image"}
+    assert set(schemas["ground_depth"]["properties"]) == {"query", "target_image"}

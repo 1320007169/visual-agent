@@ -24,9 +24,9 @@ from typing import Any, Protocol
 import requests
 
 try:
-    from .visual_tools import get_visual_tool_schemas
+    from .visual_tools import VISUAL_TOOL_NAMES, get_visual_tool_schemas
 except ImportError:
-    from visual_tools import get_visual_tool_schemas
+    from visual_tools import VISUAL_TOOL_NAMES, get_visual_tool_schemas
 
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -140,9 +140,7 @@ def _validate_tool_invocation(name: Any, arguments: Any) -> ToolInvocation:
         raise InferenceError("Tool call is missing a non-empty name")
     if not isinstance(arguments, dict):
         raise InferenceError(f"Tool arguments for {name!r} must be a JSON object")
-    known_names = {
-        schema["function"]["name"] for schema in get_visual_tool_schemas()
-    }
+    known_names = VISUAL_TOOL_NAMES
     if name not in known_names:
         raise InferenceError(f"Model requested unsupported tool {name!r}")
     return ToolInvocation(name=name, arguments=arguments)
