@@ -92,6 +92,33 @@ step 130 就是此前表现突出的 KL 权重。补测后 VStar、HR4K、HR8K �
 step 150 的补测只比原结果少 `1/1/2` 条 API 失败，仍不完整。step 165 是该系列目前唯一
 三榜零失败的结果，也在 HR4K、HR8K 上明显优于 step 150。
 
+## RFT-SFT 1:1 Mixed + RL（2026-09-20）
+
+从 RFT-SFT 工具/直答 1:1 Mixed 21,906 权重继续进行 GroundingDINO + KL RL。以下为
+当前 6 回合、每回合最多 6,144 tokens 的 Agent/tool-on 全量评测。
+
+| 权重 | 评测时间 | VStar | HR4K | HR8K | API 失败数 |
+|---|---:|---:|---:|---:|---:|
+| Mixed-21906 + RL best step40 | 2026-09-20 | 89.53 | **82.88** | 78.50 | 0/0/0 |
+| Mixed-21906 + RL final step96 | 2026-09-20 | **90.05** | 82.50 | **79.38** | 0/0/0 |
+
+step96 相比 step40 的 VStar、HR4K、HR8K 分别变化 `+0.52 / -0.38 / +0.88` 个百分点。
+两份结果均包含完整的 191/800/800 条样本，最终预测中未发现 API 失败标记。
+
+同一任务还在 Qwen3 base 上评测四个扩展 benchmark，当前已完成结果如下。这里的 base
+同样使用 Agent/tool-on 协议，不等同于“基线与 SFT”表中的直答 base。
+
+| 权重 | OCRBench | ChartQA_TEST | MME-RealWorld-Lite | MME-RealWorld-CN |
+|---|---:|---:|---:|---:|
+| Qwen3 base（Agent/tool-on） | 83.70 | 预测完成，评分待补 | 41.53 | 运行中，失败样本重试 |
+
+ChartQA 已生成完整预测文件，但本次评分因缺少 Judge API key 未生成 `_acc.csv`；不将其
+记作零分。MME-RealWorld-CN 完成并生成正式 rating 后再补入最终分数。
+
+结果目录：
+
+- `outputs/vlmeval/mixedsft_rl_best40_step96/mixedsft_rl_3bench_qwen3base_new4_20260920_174347/`
+
 ## Step130 双流续训
 
 实验 D 从保留的 DINO + KL step130 权重继续训练 100 个 outer step。每个输入分别生成
@@ -186,6 +213,10 @@ direct 与两组 agent 的提示词及回合预算不同；这些结果也不能
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
 - RFT-SFT 纯工具版为 85.34 / 79.13 / 75.00，1:1 Mixed 版为
   86.91 / 78.50 / 74.13；二者 HRBench 均有少量 API 失败，且与 base 的评测模式不同。
+- 最新 Mixed-21906 + RL 的 best step40 为 89.53 / 82.88 / 78.50，final step96 为
+  90.05 / 82.50 / 79.38；两组本次评测均为 `0/0/0` API 失败。
+- Qwen3 base 扩展榜当前已得到 OCRBench 83.70、MME-RealWorld-Lite 41.53；ChartQA
+  待补评分，MME-RealWorld-CN 仍在重试失败样本。
 - step160 三组诊断评测已完成，分数见上表；API 失败数及工具调用遵从率尚待核验。
 - 旧 D step100 的 Native 奖励链路失效，不能作为双流方案的有效 A/B 结果。
 - 最新 Vision-OPD A step54 评测无效，D step54 补测后仍有 72 条 HRBench API 失败。

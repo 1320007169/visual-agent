@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# ModelArts: one dedicated 8-GPU node, four checkpoints evaluated sequentially.
+# ModelArts: one dedicated 8-GPU node, multiple checkpoints evaluated sequentially.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export REPO_ROOT="${REPO_ROOT:-$(dirname "$SCRIPT_DIR")}"
 export BASE="${BASE:-$(dirname "$REPO_ROOT")}"
@@ -24,10 +24,21 @@ fi
 (( ${#LABELS[@]} > 0 && ${#LABELS[@]} == ${#STEPS[@]} && ${#LABELS[@]} == ${#MODELS[@]} )) || {
   echo 'LABELS, STEPS and MODELS must be nonempty and have equal lengths' >&2; exit 2;
 }
+DEFAULT_EVAL_DATASETS="${EVAL_DATASETS:-VStarBench HRBench4K HRBench8K}"
+if declare -p DATASETS >/dev/null 2>&1; then
+  (( ${#DATASETS[@]} == ${#LABELS[@]} )) || {
+    echo 'DATASETS must have the same length as LABELS when provided' >&2; exit 2;
+  }
+else
+  DATASETS=()
+  for _ in "${LABELS[@]}"; do
+    DATASETS+=("$DEFAULT_EVAL_DATASETS")
+  done
+fi
 declare -A seen_labels=()
 for index in "${!LABELS[@]}"; do
   label="${LABELS[$index]}"
-  [[ "$label" =~ ^[A-Za-z0-9_-]+$ && "${STEPS[$index]}" =~ ^[0-9]+$ && -z "${seen_labels[$label]:-}" ]] || {
+  [[ "$label" =~ ^[A-Za-z0-9_-]+$ && "${STEPS[$index]}" =~ ^[0-9]+$ && -n "${DATASETS[$index]}" && -z "${seen_labels[$label]:-}" ]] || {
     echo 'Invalid or duplicate checkpoint label/step' >&2; exit 2;
   }
   seen_labels[$label]=1
@@ -54,7 +65,7 @@ for expected, value in zip(sys.argv[2:2+count], sys.argv[2+count:]):
 PY
 
 export EVAL_MODELS=dino_latest
-export EVAL_DATASETS="${EVAL_DATASETS:-VStarBench HRBench4K HRBench8K}"
+export EVAL_DATASETS="$DEFAULT_EVAL_DATASETS"
 export VISUAL_TOOL_BACKEND=groundingdino SAM3_REPLICAS=0 GROUNDING_DINO_REPLICAS="${GROUNDING_DINO_REPLICAS:-2}"
 export TOOL_CUDA_VISIBLE_DEVICES="${TOOL_CUDA_VISIBLE_DEVICES:-0}" MODEL_CUDA_VISIBLE_DEVICES="${MODEL_CUDA_VISIBLE_DEVICES:-1,2,3,4,5,6,7}"
 export VISUAL_AGENT_SYSTEM_PROMPT_FILE="${VISUAL_AGENT_SYSTEM_PROMPT_FILE:-$REPO_ROOT/prompts/visual_agent_rl_system_groundingdino.txt}"
@@ -69,9 +80,9 @@ GROUP_ROOT="${CHECKPOINT_EVAL_OUTPUT_ROOT:-$REPO_ROOT/outputs/vlmeval/mixed_chec
 export LOG_DIR="$GROUP_ROOT/logs"
 
 for index in "${!LABELS[@]}"; do
-  printf '%s: %s\n' "${LABELS[$index]}" "${MODELS[$index]}"
+  printf '%s: %s; datasets=%s\n' "${LABELS[$index]}" "${MODELS[$index]}" "${DATASETS[$index]}"
 done
-printf 'Protocol: %s; turns=%s tokens=%s backend=%s\n' "$EVAL_DATASETS" "$VISUAL_AGENT_MAX_TURNS" "$VISUAL_AGENT_MAX_TOKENS" "$MODEL_SERVER_BACKEND"
+printf 'Protocol: per-checkpoint datasets; turns=%s tokens=%s backend=%s\n' "$VISUAL_AGENT_MAX_TURNS" "$VISUAL_AGENT_MAX_TOKENS" "$MODEL_SERVER_BACKEND"
 echo "Results: $GROUP_ROOT"
 if [[ "$CONFIG_ONLY" == 1 ]]; then
   echo 'Configuration only: no evaluation or model server started.'
@@ -92,10 +103,11 @@ for index in "${!LABELS[@]}"; do
   label="${LABELS[$index]}"
   export RL_DINO_LATEST_STEP="${STEPS[$index]}"
   export RL_DINO_LATEST_MODEL_PATH="${MODELS[$index]}"
+  export EVAL_DATASETS="${DATASETS[$index]}"
   export RUN_ID="${GROUP_ID}_${label}"
   export VLMEVAL_EVAL_ID="T_${RUN_ID}"
   export WORK_ROOT="$GROUP_ROOT/$label"
-  echo "Starting $label"
+  echo "Starting $label: $EVAL_DATASETS"
   started=$SECONDS
   status=0
   bash "${CHECKPOINT_EVAL_ENTRY:-$SCRIPT_DIR/run_visual_agent_eval_qwen3.sh}" || status=$?

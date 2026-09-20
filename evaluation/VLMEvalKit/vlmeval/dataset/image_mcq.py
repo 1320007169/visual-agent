@@ -864,6 +864,11 @@ class MMERealWorld(ImageMCQDataset):
         'MME-RealWorld-Lite': '4c17057d7d3b6c4a0d4397c3dae0881c',
         'MME-RealWorld-CN': 'daaa763d52a760a38606d5dedb3fe444',
     }
+    GENERATED_DATASET_MD5 = {
+        # Deterministic output produced from the two cached JSON shards with
+        # the current pandas TSV serializer.
+        'MME-RealWorld-CN': '554d292a7da934c47decf1ce8f5e0588',
+    }
     SYS = {
         'MME-RealWorld': (
             'Select the best answer to the above multiple-choice question based on the image. '
@@ -895,7 +900,12 @@ class MMERealWorld(ImageMCQDataset):
             if not os.path.exists(data_file):
                 return False
 
-            if md5(data_file) != self.DATASET_MD5[dataset]:
+            checksum = md5(data_file)
+            valid_checksums = {
+                self.DATASET_MD5[dataset],
+                self.GENERATED_DATASET_MD5.get(dataset),
+            }
+            if checksum not in valid_checksums:
                 return False
             return True
 
@@ -907,7 +917,7 @@ class MMERealWorld(ImageMCQDataset):
                 return
 
             json_dir = os.path.join(pth, dataset)
-            json_files = [f for f in os.listdir(json_dir) if f.endswith(".json")]
+            json_files = sorted(f for f in os.listdir(json_dir) if f.endswith(".json"))
 
             data_list = []
             for json_file in json_files:
