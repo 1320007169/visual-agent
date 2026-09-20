@@ -110,10 +110,13 @@ step96 相比 step40 的 VStar、HR4K、HR8K 分别变化 `+0.52 / -0.38 / +0.88
 
 | 权重 | OCRBench | ChartQA_TEST | MME-RealWorld-Lite | MME-RealWorld-CN |
 |---|---:|---:|---:|---:|
-| Qwen3 base（Agent/tool-on） | 83.70 | 预测完成，评分待补 | 41.53 | 运行中，失败样本重试 |
+| Qwen3 base（Agent/tool-on） | 83.70 | 预测完成，评分待补 | 41.53 | 57.34 |
 
 ChartQA 已生成完整预测文件，但本次评分因缺少 Judge API key 未生成 `_acc.csv`；不将其
-记作零分。MME-RealWorld-CN 完成并生成正式 rating 后再补入最终分数。
+记作零分。最终预测中，OCRBench 残留 4 条 API failed；ChartQA 没有 API failed，但有
+2 条空预测；MME-RealWorld-Lite 没有 API failed，但有 1 条无法评分并按 0 计；
+MME-RealWorld-CN 残留 8 条 API failed，另有 1 条无法评分并按 0 计。因此这些扩展榜分数
+是当前故障口径结果，补测前应视为略低估。
 
 结果目录：
 
@@ -215,8 +218,8 @@ direct 与两组 agent 的提示词及回合预算不同；这些结果也不能
   86.91 / 78.50 / 74.13；二者 HRBench 均有少量 API 失败，且与 base 的评测模式不同。
 - 最新 Mixed-21906 + RL 的 best step40 为 89.53 / 82.88 / 78.50，final step96 为
   90.05 / 82.50 / 79.38；两组本次评测均为 `0/0/0` API 失败。
-- Qwen3 base 扩展榜当前已得到 OCRBench 83.70、MME-RealWorld-Lite 41.53；ChartQA
-  待补评分，MME-RealWorld-CN 仍在重试失败样本。
+- Qwen3 base 扩展榜当前为 OCRBench 83.70、MME-RealWorld-Lite 41.53、
+  MME-RealWorld-CN 57.34；OCR/CN 分别残留 4/8 条 API failed，ChartQA 待补评分。
 - step160 三组诊断评测已完成，分数见上表；API 失败数及工具调用遵从率尚待核验。
 - 旧 D step100 的 Native 奖励链路失效，不能作为双流方案的有效 A/B 结果。
 - 最新 Vision-OPD A step54 评测无效，D step54 补测后仍有 72 条 HRBench API 失败。
