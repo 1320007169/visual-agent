@@ -44,7 +44,7 @@ def extract_answer(text: str) -> str | None:
 
 
 def has_think_action_format(text: str) -> bool:
-    """Validate assistant turns only; observations never earn format credit.
+    """Validate Reason-Act syntax, with optional think tags or plain analysis.
 
     Qwen response IDs retain im_start/im_end delimiters; the first assistant
     header is already part of the prompt and may be absent here.
@@ -64,12 +64,18 @@ def has_think_action_format(text: str) -> bool:
         return False
     for index, turn in enumerate(turns):
         match = re.fullmatch(
-            r"<think>\s*(.+?)\s*</think>\s*<(tool_call|answer)>\s*(.+?)\s*</\2>",
+            r"(.*?)<(tool_call|answer)>\s*(.+?)\s*</\2>",
             turn, re.DOTALL,
         )
-        if not match or not match[1].strip() or not match[3].strip():
+        if not match or not match[3].strip():
             return False
-        if re.search(r"</?(?:think|tool_call|answer|tool_response)\b", match[1]):
+        analysis = match[1].strip()
+        if "<think>" in analysis or "</think>" in analysis:
+            thought = re.fullmatch(r"<think>(.*?)</think>", analysis, re.DOTALL)
+            if not thought or not thought[1].strip():
+                return False
+            analysis = thought[1]
+        if re.search(r"</?(?:think|tool_call|answer|tool_response)\b", analysis, re.IGNORECASE):
             return False
         if match[2] == "answer":
             if index != len(turns) - 1 or re.search(r"[<>]", match[3]):
@@ -88,7 +94,10 @@ def has_think_action_format(text: str) -> bool:
 
 def has_strict_answer_format(text: str) -> bool:
     """Require exactly one non-empty answer tag at the end of the final turn."""
-    if os.environ.get("VISUAL_AGENT_REQUIRE_THINK", "0") == "1":
+    # Accept the old switch for existing launchers, but no longer require tags:
+    # reasoning content/length must not be a prerequisite for format credit.
+    if (os.environ.get("VISUAL_AGENT_FORMAT_PROTOCOL") == "reason_act"
+            or os.environ.get("VISUAL_AGENT_REQUIRE_THINK", "0") == "1"):
         return has_think_action_format(text)
     if len(re.findall(r"<answer>", text, flags=re.IGNORECASE)) != 1:
         return False

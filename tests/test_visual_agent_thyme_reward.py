@@ -21,16 +21,34 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
         call = '<think>Inspect the target.</think><tool_call>{"name":"crop_zoom","arguments":{"target_image":0}}</tool_call>'
         transcript = call + '<|im_end|>\n<|im_start|>user\n<tool_response>observation</tool_response><|im_end|>\n<|im_start|>assistant\n' + final + '<|im_end|>'
         with patch.dict(os.environ, {"VISUAL_AGENT_REQUIRE_THINK": "1"}):
-            for valid in [final, transcript]:
+            for valid in [final, transcript, '<answer>below</answer>',
+                          'The target is lower. <answer>below</answer>',
+                          transcript.replace('<think>Inspect the target.</think>', 'Inspect the target.'),
+                          transcript.replace('<think>Inspect the target.</think>', '')]:
                 self.assertTrue(reward.has_strict_answer_format(valid))
                 result = reward.compute_score(valid, "below")
                 self.assertEqual(result['format'], 1.0)
                 self.assertEqual(result['score'], 1.0)
-            for invalid in ['<answer>below</answer>', '<think>only thinking</think>',
+            for invalid in ['<think>only thinking</think>',
                             '<think></think><answer>below</answer>', final + 'extra',
-                            final + final, call, transcript.replace('<think>Inspect the target.</think>', ''),
+                            final + final, call,
                             final.replace('The target is below the anchor.', '<tool_call>{}</tool_call>')]:
                 self.assertFalse(reward.has_strict_answer_format(invalid), invalid)
+
+    def test_reason_act_rejects_malformed_actions_without_rewarding_prose(self):
+        with patch.dict(os.environ, {"VISUAL_AGENT_FORMAT_PROTOCOL": "reason_act"}):
+            for prefix in ['', 'The object is lower. ', '<think>The object is lower.</think>']:
+                result = reward.compute_score(prefix + '<answer>below</answer>', 'below')
+                self.assertEqual(result['score'], 1.0)
+            final = '<answer>below</answer><|im_end|>'
+            observation = '<|im_end|>\n<|im_start|>user\n<tool_response>ok</tool_response><|im_end|>\n<|im_start|>assistant\n'
+            for payload in ['not json', '[]', '{"name":"unknown","arguments":{}}',
+                            '{"name":"crop_zoom","arguments":"bad"}']:
+                self.assertFalse(reward.has_strict_answer_format('<tool_call>' + payload + '</tool_call>' + observation + final))
+            for malformed in ['<think>unclosed<answer>below</answer>',
+                              '<answer>below</answer><answer>below</answer>',
+                              '<tool_call>{}</tool_call><answer>below</answer>']:
+                self.assertFalse(reward.has_strict_answer_format(malformed))
 
     def test_initialization_failure_falls_back(self):
         backup = Mock()
