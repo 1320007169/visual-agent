@@ -1,0 +1,78 @@
+tools:
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: &online_visual_tool
+      base_url: ${oc.env:VISUAL_TOOL_API_BASES,http://127.0.0.1:9000}
+      api_key: ${oc.env:VISUAL_TOOL_API_KEY,''}
+      timeout: ${oc.env:VISUAL_TOOL_TIMEOUT,300}
+      max_retries: ${oc.env:VISUAL_TOOL_MAX_RETRIES,2}
+    tool_schema:
+      type: function
+      function:
+        name: crop_zoom
+        description: Crop a relative 0-1000 image region for closer inspection.
+        parameters:
+          type: object
+          properties:
+            bbox_2d:
+              type: array
+              items: {type: number, minimum: 0, maximum: 1000}
+              minItems: 4
+              maxItems: 4
+            target_image: {type: integer, description: Zero-based image index.}
+            slack_ratio: {type: number, minimum: 0, default: 0.1}
+          required: [bbox_2d, target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: grounding_detect
+        description: Detect one concrete object and return relative 0-1000 boxes.
+        parameters:
+          type: object
+          properties:
+            query: {type: string, description: Short concrete object noun phrase.}
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [query, target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: object_count
+        description: Count instances of a concrete object and return spatial evidence.
+        parameters:
+          type: object
+          properties:
+            query: {type: string, description: Concrete object category to count.}
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [query, target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: ocr_read
+        description: Read visible text and return text regions in relative 0-1000 coordinates.
+        parameters:
+          type: object
+          properties:
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: ground_depth
+        description: Ground one concrete object and return its median metric depth.
+        parameters:
+          type: object
+          properties:
+            query: {type: string, description: Short concrete object noun phrase.}
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [query, target_image]

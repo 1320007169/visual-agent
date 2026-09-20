@@ -182,9 +182,14 @@ PY
 }
 
 results_ready() {
-  local work_dir="$1" dataset
+  local work_dir="$1" dataset result_name
   for dataset in $EVAL_DATASETS; do
-    find "$work_dir" -type f -name "VisualAgent-vllm_${dataset}_acc.csv" -size +0c -print -quit | grep -q . || return 1
+    case "$dataset" in
+      OCRBench*) result_name="VisualAgent-vllm_${dataset}_score.json" ;;
+      MME-RealWorld*) result_name="VisualAgent-vllm_${dataset}_rating.json" ;;
+      *) result_name="VisualAgent-vllm_${dataset}_acc.csv" ;;
+    esac
+    find "$work_dir" -type f -name "$result_name" -size +0c -print -quit | grep -q . || return 1
   done
 }
 
