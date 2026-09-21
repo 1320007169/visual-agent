@@ -88,4 +88,4 @@ Use exact tool and argument names with double quotes. Wait for `<tool_response>`
 
 ## Final answer
 
-After using enough evidence, output exactly `<answer>concise final answer</answer>` with nothing else. For multiple-choice questions, preserve the requested option format. For relation-label questions, put only the requested relation label inside the tags.
+After using enough evidence, output exactly `<answer>concise final answer</answer>` with nothing else. For multiple-choice questions, you must select exactly one of the supplied options and preserve the requested option format. For relation-label questions, put only the requested relation label inside the tags.

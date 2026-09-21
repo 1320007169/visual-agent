@@ -45,14 +45,21 @@ export PYTHONPATH="$PIPELINE_ROOT/src:$VLLM_SOURCE:$OPENAI_OVERLAY${PYTHONPATH:+
 export LD_LIBRARY_PATH="$VTS_QWEN_ENV/lib:$VTS_TORCH_LIB:$CUDA_HOME/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export ENV_DIR="${ENV_DIR:-$VTS_QWEN_ENV}"
 export VLLM_PYTHON="${VLLM_PYTHON:-$ENV_DIR/bin/python}"
+export VLMEVAL_ENV_DIR="${VLMEVAL_ENV_DIR:-$BASE/conda_envs/visual-agent-eval}"
+export VLMEVAL_PYTHON="${VLMEVAL_PYTHON:-$VLMEVAL_ENV_DIR/bin/python}"
+export VLMEVAL_LD_LIBRARY_PATH="${VLMEVAL_LD_LIBRARY_PATH:-$VLMEVAL_ENV_DIR/lib}"
+export VLMEVAL_PYTHONPATH="${VLMEVAL_PYTHONPATH-}"
+export VLMEVAL_IMPORT_PREFLIGHT=1
 default_config_python="$MINICONDA_PATH/bin/python3"
 [[ -x "$default_config_python" ]] || default_config_python="$VTS_QWEN_ENV/bin/python3"
 export CONFIG_PYTHON="${CONFIG_PYTHON:-$default_config_python}"
 export TOOL_ENV_DIR="${TOOL_ENV_DIR:-$BASE/conda_envs/visual-tools}"
 export TOOL_CUDA_HOME="${TOOL_CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
+export PADDLEX_MODEL_ROOT="${PADDLEX_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models}"
 export MODEL_CUDA_HOME="$CUDA_HOME"
 export MODEL_CC="${MODEL_CC:-$CUDA_HOME/bin/x86_64-conda-linux-gnu-gcc}"
 export MODEL_CXX="${MODEL_CXX:-$CUDA_HOME/bin/x86_64-conda-linux-gnu-g++}"
+export SKIP_CONDA_ACTIVATION=1
 
 # Reuse the converted local benchmark data and model cache.
 export LMUData="${LMUData:-$BASE/DeepEyesV2/evaluation/VLMEvalKit/evaluation/VLMEvalKit/LMUData}"
@@ -90,12 +97,17 @@ export VTS_TOOL_TIMEOUT="${VTS_TOOL_TIMEOUT:-300}"
 export LOG_DIR="$GROUP_ROOT/logs"
 export VTS_SERVICE_DIR="$GROUP_ROOT/tool_services"
 
+OCR_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/paddlex_ocrv5.yaml"
+OCR_PIPELINE_CONFIG="$PIPELINE_ROOT/configs/tools/paddlex_ocrv5_server.yaml"
+OCR_MODEL_PREPARE="$PIPELINE_ROOT/scripts/prepare_paddlex_ocrv5_models.sh"
+
 case "$CONFIG_ONLY" in 0|1) ;; *) echo "FIVE_TOOL_CONFIG_ONLY must be 0 or 1" >&2; exit 2 ;; esac
 [[ "$GROUP_ID" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Invalid FIVE_TOOL_RUN_ID: $GROUP_ID" >&2; exit 2; }
 
 required_paths=(
   "$CONFIG_PYTHON"
   "$ENV_DIR/bin/python"
+  "$VLMEVAL_PYTHON"
   "$TOOL_ENV_DIR/bin/python"
   "$MODEL_PATH/config.json"
   "$MODEL_PATH/model.safetensors.index.json"
@@ -107,7 +119,9 @@ required_paths=(
 )
 if [[ "$CONFIG_ONLY" == 0 ]]; then
   required_paths+=(
-    "$PIPELINE_ROOT/configs/services/paddleocr_vl.yaml"
+    "$OCR_SERVICE_CONFIG"
+    "$OCR_PIPELINE_CONFIG"
+    "$OCR_MODEL_PREPARE"
     "$PIPELINE_ROOT/configs/services/depth_anything_3.yaml"
     "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
     "$VTS_OCR_ENV/bin/python3"
@@ -120,6 +134,16 @@ fi
 for required in "${required_paths[@]}"; do
   [[ -e "$required" ]] || { echo "Error: missing required path: $required" >&2; exit 2; }
 done
+
+if [[ "$CONFIG_ONLY" == 0 ]]; then
+  bash "$OCR_MODEL_PREPARE"
+  for model in PP-OCRv5_server_det PP-OCRv5_server_rec PP-LCNet_x1_0_textline_ori; do
+    for artifact in inference.json inference.pdiparams inference.yml; do
+      required="$PADDLEX_MODEL_ROOT/$model/$artifact"
+      [[ -s "$required" ]] || { echo "Error: incomplete OCR model artifact: $required" >&2; exit 2; }
+    done
+  done
+fi
 
 "$CONFIG_PYTHON" - "$MODEL_PATH" "$PROMPT_FILE" "$EVAL_DATASETS" "$GROUP_ROOT" \
   "$GROUP_ID" "$CONFIG_ONLY" "$VISUAL_AGENT_MAX_TURNS" "$VISUAL_AGENT_MAX_TOKENS" \
@@ -243,10 +267,72 @@ PY
   echo "VTS $name service ready: $endpoint"
 }
 
-start_vts_service ocr "$VTS_OCR_ENV" "$VTS_OCR_GPU" "$PIPELINE_ROOT/configs/services/paddleocr_vl.yaml"
+warmup_ocr_service() {
+  local endpoint="$1" warmup_root="$VTS_TOOL_BRIDGE_ROOT/ocr_warmup"
+  mkdir -p "$warmup_root/artifacts"
+  "$CONFIG_PYTHON" - "$endpoint" "$warmup_root" <<'PY'
+import json
+import os
+from pathlib import Path
+import struct
+import sys
+import urllib.request
+
+endpoint, root_text = sys.argv[1:]
+root = Path(root_text)
+image = root / "warmup.bmp"
+width, height = 640, 160
+pixels = bytearray([255]) * (width * height * 3)
+for top, bottom, left, right in ((35, 125, 55, 95), (35, 70, 95, 175),
+                                 (90, 125, 95, 175), (35, 125, 205, 245),
+                                 (35, 70, 245, 325), (90, 125, 245, 325),
+                                 (35, 125, 355, 395), (35, 70, 395, 475),
+                                 (90, 125, 395, 475)):
+    for y in range(top, bottom):
+        start = (y * width + left) * 3
+        end = (y * width + right) * 3
+        pixels[start:end] = bytes(end - start)
+pixel_size = len(pixels)
+bitmap_header = (
+    b"BM"
+    + struct.pack("<IHHI", 54 + pixel_size, 0, 0, 54)
+    + struct.pack("<IIIHHIIIIII", 40, width, height, 1, 24, 0, pixel_size, 2835, 2835, 0, 0)
+)
+image.write_bytes(bitmap_header + pixels)
+
+payload = {
+    "tool": "ocr_read",
+    "args": {"image_id": 0, "minimum_confidence": 0.0},
+    "context": {
+        "uid": "ocr-model-warmup",
+        "images": [{"image_id": 0, "path": str(image)}],
+        "artifact_dir": str(root / "artifacts"),
+        "branch_id": "preflight",
+    },
+}
+headers = {"Content-Type": "application/json"}
+token = os.environ.get("VTS_TOOL_SERVICE_TOKEN")
+if token:
+    headers["Authorization"] = f"Bearer {token}"
+request = urllib.request.Request(
+    endpoint.rstrip("/") + "/execute",
+    data=json.dumps(payload).encode(),
+    headers=headers,
+    method="POST",
+)
+with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=900) as response:
+    result = json.load(response)
+if result.get("status") != "success" and result.get("error_code") != "no_text":
+    raise SystemExit(f"OCR warmup failed: {json.dumps(result, ensure_ascii=False)}")
+print(f"OCR model warmup passed: status={result.get('status')} error_code={result.get('error_code')}")
+PY
+}
+
+start_vts_service ocr "$VTS_OCR_ENV" "$VTS_OCR_GPU" "$OCR_SERVICE_CONFIG"
 start_vts_service depth "$VTS_DEPTH_ENV" "$VTS_DEPTH_GPU" "$PIPELINE_ROOT/configs/services/depth_anything_3.yaml"
 start_vts_service count "$VTS_COUNT_ENV" "$VTS_COUNT_GPU" "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
 wait_vts_service ocr "$VTS_OCR_ENDPOINT" "${VTS_SERVICE_PIDS[0]}"
+warmup_ocr_service "$VTS_OCR_ENDPOINT"
 wait_vts_service depth "$VTS_DEPTH_ENDPOINT" "${VTS_SERVICE_PIDS[1]}"
 wait_vts_service count "$VTS_COUNT_ENDPOINT" "${VTS_SERVICE_PIDS[2]}"
 
@@ -267,7 +353,8 @@ printf 'mode\texit_code\tseconds\tresult_dir\n' >"$GROUP_ROOT/status.tsv"
 printf 'five_tools\t%s\t%s\t%s\n' "$status" "$((SECONDS - started))" "$WORK_ROOT/dino_latest" >>"$GROUP_ROOT/status.tsv"
 
 if [[ -f "$REPO_ROOT/scripts/summarize_four_tool_prompt_eval.py" ]]; then
-  "$VLLM_PYTHON" "$REPO_ROOT/scripts/summarize_four_tool_prompt_eval.py" \
+  env PYTHONPATH="$VLMEVAL_PYTHONPATH" LD_LIBRARY_PATH="$VLMEVAL_LD_LIBRARY_PATH" \
+    "$VLMEVAL_PYTHON" "$REPO_ROOT/scripts/summarize_four_tool_prompt_eval.py" \
     "$GROUP_ROOT" --output "$GROUP_ROOT/behavior_summary.json" || {
       echo "Warning: behavior summary generation failed" >&2
       [[ "$status" -ne 0 ]] || status=1

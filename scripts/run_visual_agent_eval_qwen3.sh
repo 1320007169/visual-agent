@@ -24,6 +24,10 @@ fi
 BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
 ENV_DIR="${ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM}"
+VLMEVAL_ENV_DIR="${VLMEVAL_ENV_DIR:-$ENV_DIR}"
+VLMEVAL_PYTHON="${VLMEVAL_PYTHON:-$VLMEVAL_ENV_DIR/bin/python}"
+VLMEVAL_LD_LIBRARY_PATH="${VLMEVAL_LD_LIBRARY_PATH:-$VLMEVAL_ENV_DIR/lib}"
+VLMEVAL_PYTHONPATH="${VLMEVAL_PYTHONPATH-}"
 TOOL_ENV_DIR="${TOOL_ENV_DIR:-$BASE/conda_envs/visual-tools}"
 CUDA_HOME="${CUDA_HOME:-$BASE/conda_envs/spacetools-rl}"
 TOOL_CUDA_HOME="${TOOL_CUDA_HOME-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
@@ -82,10 +86,20 @@ EVAL_EXIT_GRACE_SECONDS="${EVAL_EXIT_GRACE_SECONDS:-120}"
 EVAL_PREFLIGHT_ONLY="${EVAL_PREFLIGHT_ONLY:-0}"
 MODEL_SERVER_BACKEND="${MODEL_SERVER_BACKEND:-auto}"
 REQUESTED_MODEL_SERVER_BACKEND="$MODEL_SERVER_BACKEND"
+SKIP_CONDA_ACTIVATION="${SKIP_CONDA_ACTIVATION:-0}"
+VLMEVAL_IMPORT_PREFLIGHT="${VLMEVAL_IMPORT_PREFLIGHT:-0}"
 
 case "$EVAL_PREFLIGHT_ONLY" in
   0|1) ;;
   *) echo "Error: EVAL_PREFLIGHT_ONLY must be 0 or 1, got: $EVAL_PREFLIGHT_ONLY" >&2; exit 2 ;;
+esac
+case "$SKIP_CONDA_ACTIVATION" in
+  0|1) ;;
+  *) echo "Error: SKIP_CONDA_ACTIVATION must be 0 or 1, got: $SKIP_CONDA_ACTIVATION" >&2; exit 2 ;;
+esac
+case "$VLMEVAL_IMPORT_PREFLIGHT" in
+  0|1) ;;
+  *) echo "Error: VLMEVAL_IMPORT_PREFLIGHT must be 0 or 1, got: $VLMEVAL_IMPORT_PREFLIGHT" >&2; exit 2 ;;
 esac
 
 if [[ -z "${RUN_ID:-}" ]]; then
@@ -110,7 +124,7 @@ XDG_CACHE_HOME="${XDG_CACHE_HOME:-$BASE/cache/xdg}"
 TORCH_HOME="${TORCH_HOME:-$BASE/cache/torch}"
 TRITON_CACHE_ROOT="${TRITON_CACHE_ROOT:-$BASE/cache/triton/$RUN_ID}"
 
-export BASE REPO_ROOT ENV_DIR TOOL_ENV_DIR CUDA_HOME TOOL_CUDA_HOME MODEL_CUDA_HOME
+export BASE REPO_ROOT ENV_DIR VLMEVAL_ENV_DIR VLMEVAL_PYTHON TOOL_ENV_DIR CUDA_HOME TOOL_CUDA_HOME MODEL_CUDA_HOME
 export MODEL_CC MODEL_CXX CUDAHOSTCXX="$MODEL_CXX"
 export LMUData HF_HOME XDG_CACHE_HOME TORCH_HOME
 export TMPDIR="${TMPDIR:-/tmp}" TOKENIZERS_PARALLELISM=false
@@ -123,6 +137,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 required_paths=(
   "$ENV_DIR/bin/python"
+  "$VLMEVAL_PYTHON"
   "$TOOL_ENV_DIR/bin/python"
   "$REPO_ROOT/scripts/serve_visual_agent_model.sh"
   "$REPO_ROOT/scripts/serve_visual_agent_transformers.py"
@@ -211,7 +226,13 @@ command -v setsid >/dev/null || { echo "Error: setsid is required for bounded pr
 
 MINICONDA_PATH=/opt/huawei/explorer-env/dataset/Common_wl/miniconda3
 CONDA_ACTIVATION_AVAILABLE=0
-if [[ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]]; then
+if [[ "$SKIP_CONDA_ACTIVATION" == "1" ]]; then
+  [[ -x "$ENV_DIR/bin/python" ]] || {
+    echo "Error: direct Conda-prefix mode requires an executable Python: $ENV_DIR/bin/python"
+    exit 2
+  }
+  echo "Using Conda prefix directly without activation: $ENV_DIR"
+elif [[ -f "$MINICONDA_PATH/etc/profile.d/conda.sh" ]]; then
   export PATH="$MINICONDA_PATH/bin:$PATH"
   source "$MINICONDA_PATH/etc/profile.d/conda.sh"
   CONDA_ACTIVATION_AVAILABLE=1
@@ -236,6 +257,7 @@ fi
 export PATH="$ENV_DIR/bin:$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$ENV_DIR/lib:${LD_LIBRARY_PATH:-}"
 PYTHON_BIN="$ENV_DIR/bin/python"
+EVAL_PYTHON="$VLMEVAL_PYTHON"
 TOOL_PYTHON="$TOOL_ENV_DIR/bin/python"
 
 case "$MODEL_SERVER_BACKEND" in
@@ -266,11 +288,24 @@ IFS=',' read -r -a MODEL_GPUS <<< "$MODEL_CUDA_VISIBLE_DEVICES"
 VLMEVAL_API_NPROC="${VLMEVAL_API_NPROC:-${#MODEL_GPUS[@]}}"
 export VLMEVAL_API_NPROC
 
-if [[ "$EVAL_PREFLIGHT_ONLY" == "1" ]]; then
+validate_vlmeval_imports() {
+  (
+    cd "$REPO_ROOT/evaluation/VLMEvalKit"
+    env PYTHONPATH="$VLMEVAL_PYTHONPATH" LD_LIBRARY_PATH="$VLMEVAL_LD_LIBRARY_PATH" \
+      "$EVAL_PYTHON" -c 'from vlmeval.config import supported_VLM; from vlmeval.dataset import SUPPORTED_DATASETS; print(f"VLMEvalKit imports ready: models={len(supported_VLM)} datasets={len(SUPPORTED_DATASETS)}")'
+  )
+}
+
+if [[ "$EVAL_PREFLIGHT_ONLY" == "1" || "$VLMEVAL_IMPORT_PREFLIGHT" == "1" ]]; then
   "$PYTHON_BIN" -c 'import pandas, torch, transformers'
   "$TOOL_PYTHON" -c 'import PIL, torch, transformers'
+  validate_vlmeval_imports
+fi
+
+if [[ "$EVAL_PREFLIGHT_ONLY" == "1" ]]; then
   echo "Evaluation preflight passed"
   echo "Model environment: $ENV_DIR"
+  echo "VLMEval environment: $VLMEVAL_ENV_DIR"
   echo "Model CUDA: $MODEL_CUDA_HOME"
   echo "Tool environment: $TOOL_ENV_DIR"
   echo "Tool CUDA: $TOOL_CUDA_HOME"
@@ -401,10 +436,11 @@ run_benchmarks() {
   export VISUAL_AGENT_MAX_TURNS VISUAL_AGENT_MAX_TOKENS
   export VISUAL_AGENT_USE_TOOLS VISUAL_AGENT_INFERENCE_MODE
   export VISUAL_AGENT_SYSTEM_PROMPT_FILE VISUAL_AGENT_ALLOWED_TOOL_NAMES
-  export VLMEVAL_PYTHON="$PYTHON_BIN"
+  export VLMEVAL_PYTHON="$EVAL_PYTHON"
 
   cd "$REPO_ROOT/evaluation/VLMEvalKit"
-  setsid bash ./run_visual_agent_benchmarks.sh "${dataset_args[@]}" &
+  setsid env PYTHONPATH="$VLMEVAL_PYTHONPATH" LD_LIBRARY_PATH="$VLMEVAL_LD_LIBRARY_PATH" \
+    bash ./run_visual_agent_benchmarks.sh "${dataset_args[@]}" &
   EVAL_PID=$!
   started=$(date +%s)
   while kill -0 "$EVAL_PID" 2>/dev/null; do
