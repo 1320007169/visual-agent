@@ -23,11 +23,14 @@ The ModelArts wrapper starts every service on one eight-GPU node:
 | GPU | Service |
 |---:|---|
 | 0 | GroundingDINO and the Visual-Agent bridge |
-| 1 | PaddleOCR-VL and Depth Anything 3 |
+| 1 | PaddleX PP-OCRv5 Server and Depth Anything 3 |
 | 2 | CountGD++ |
 | 3-7 | Five Qwen3-VL-8B vLLM replicas |
 
 The wrapper reads environment and model locations from `groundingdino_offline_pipeline/.env`, starts the three isolated VTS services, waits for their health endpoints, then starts the existing Visual-Agent evaluator. The bridge directory is shared locally through `VTS_TOOL_BRIDGE_ROOT`.
+OCR uses `PP-OCRv5_server_det`, `PP-OCRv5_server_rec`, and
+`PP-LCNet_x1_0_textline_ori` as configured in
+`groundingdino_offline_pipeline/configs/tools/paddlex_ocrv5_server.yaml`.
 
 ## Run
 
@@ -56,3 +59,37 @@ VLMEval writes each benchmark's normal score artifact. The wrapper additionally 
 - `tool_services/`: VTS logs and PID records for diagnosis; these remain under ignored experiment outputs.
 
 Compare benchmark scores with the recorded direct baseline only after confirming equal sample counts and reporting API failures and empty predictions. Interpret score changes with tool behavior: near-zero tool use indicates prompt/context effects, while frequent calls with low success indicate a service or routing problem.
+
+## Results (2026-09-21)
+
+The completed run is
+`outputs/vlmeval/five_tool_prompt/qwen3_vl_8b_five_tool_prompt_20260921_200256/`.
+Its `status.tsv` reports exit code 0 after 9,897 seconds; `protocol.json` records
+the Qwen3-VL-8B-Instruct checkpoint, prompt hash, six datasets, and six-turn
+budget. Scores are from the run's own score CSV/JSON files. VStar uses `Overall`,
+HRBench uses `Average / all`, and OCRBench reports the score out of 1,000.
+
+| Benchmark | Five-tool prompt | Samples | API failed | Tool-use rate |
+|---|---:|---:|---:|---:|
+| VStarBench | 73.30% | 191 | 0 | 40.8% |
+| HRBench4K | 76.88% | 800 | 0 | 54.4% |
+| HRBench8K | 70.00% | 800 | 0 | 51.9% |
+| OCRBench | 835/1000 (83.50%) | 1,000 | 0 | 19.5% |
+| MME-RealWorld-Lite | 44.29% | 1,919 | 0 | 12.0% |
+| MME-RealWorld-CN | 58.68% | 5,917 | 1 | 61.0% |
+
+The six distinct workbooks contain 2,489 `grounding_detect`, 2,403
+`crop_zoom`, 2,205 `ocr_read`, 582 `object_count`, and 12 `ground_depth` calls.
+There were 60 recoverable OCR `no_text` responses. Another 42 tool requests
+failed, all on MME-RealWorld-CN: 41 out-of-range `target_image` references and
+one unsupported `slack_ratio` argument to `grounding_detect`. The one CN
+`api_failed` prediction is separate from those tool errors. The generated
+`behavior_summary.json` counts duplicate copies of some workbooks (including
+`_score` variants), so its `mode_totals` should not be treated as a count of
+distinct calls or samples; the counts above use one workbook per dataset.
+
+For context, the previously recorded direct-answer Qwen3 base scored
+84.29% / 76.38% / 70.62% on VStar / HR4K / HR8K. The five-tool prompt is
+10.99 percentage points lower on VStar, 0.50 higher on HR4K, and 0.62 lower
+on HR8K. This is an indicative prompt-and-tool comparison, not an isolated
+measurement of tool utility: the prompt, turns, and evaluator run differ.

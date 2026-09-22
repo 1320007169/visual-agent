@@ -122,6 +122,21 @@ MME-RealWorld-CN 残留 8 条 API failed，另有 1 条无法评分并按 0 计�
 
 - `outputs/vlmeval/mixedsft_rl_best40_step96/mixedsft_rl_3bench_qwen3base_new4_20260920_174347/`
 
+### Qwen3 base 五工具提示词（2026-09-21）
+
+同一 Qwen3-VL-8B-Instruct 起点，以五工具提示词运行 6 回合 Agent 评测。VStar、HR4K、
+HR8K 分别为 **73.30 / 76.88 / 70.00**；按同一顺序 API 失败数为 `0/0/0`。
+OCRBench 为 **835/1000**（0 条 API 失败），MME-RealWorld-Lite 为 **44.29%**
+（0 条），MME-RealWorld-CN 为 **58.68%**（1 条）。这不是表中 Qwen3 base
+`use_tools=false` 的直答协议；与 84.29 / 76.38 / 70.62 的直答三榜对照仅作参考，
+不能将分差直接归因于工具本身。
+
+OCR 使用 PP-OCRv5 Server，而非 PaddleOCR-VL。唯一六榜工作簿记录了 60 次可恢复
+`ocr_read` 的 `no_text` 返回，另有 42 次工具请求错误（全部在 CN：41 次图片索引越界、
+1 次错误传递 `slack_ratio` 给检测工具）；CN 的 1 条 `api_failed` 与工具错误分开计数。
+详细的样本数、工具调用率和结果路径见
+`docs/qwen3_vl_8b_four_tool_prompt_experiment.md`。
+
 ### SFT/RL 轨迹与 query 临时诊断（2026-09-21）
 
 对 RFT-SFT 工具/直答 1:1 Mixed 21,906 起点及其 RL final step96 的三榜轨迹使用同一
