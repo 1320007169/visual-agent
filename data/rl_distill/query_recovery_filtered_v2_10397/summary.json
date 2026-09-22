@@ -1,0 +1,35 @@
+{
+  "status": "exported",
+  "source": "/Users/xuangan/cs-projects/machine-learning-repo/visual-agent/data/rl_distill/qwen3_rl_rejection_sampled_clean_10953_sft_train_only.jsonl",
+  "source_sha256": "3072f8b2b76e1b2b0747bfc8702d526caee3ba271f1e0c63f6b7858704103302",
+  "source_rows": 10953,
+  "train_rows": 10397,
+  "quarantine_rows": 556,
+  "counts": {
+    "accept": 10295,
+    "not_applicable": 141,
+    "reject": 517,
+    "quarantined_empty_redetection": 39
+  },
+  "source_order_preserved": true,
+  "source_rows_byte_preserved": true,
+  "scope": "Query-semantic filtering experiment, not a visually verified whitelist.",
+  "policy": {
+    "accept": "keep unless separately excluded by recovery policy",
+    "not_applicable": "keep; no additional review requested",
+    "reject": "quarantine",
+    "review": "quarantine",
+    "empty_redetection": "quarantine by user-selected structural policy; not a visual error verdict"
+  },
+  "audit_input_hashes": {
+    "summary.json": "f8444e11598ef5eab1a585739ad35a8626cbe7bc742a3c625a53b291886ca403",
+    "combined_decisions.jsonl": "46fe744b88fbdced3c609b10402e96206cdac7a8619e9c9ffef686f528d17e9f",
+    "not_applicable.json": "246be3216df93297009980f5455ccd23760565cc9a26ff9a2a449256c7025323"
+  },
+  "output_hashes": {
+    "train.jsonl": "f38539c34759e487bb5bd124c2bca2184957ed5719167abc2bff15d83dd994db",
+    "quarantine.jsonl": "2a39ebe4ea2e5f5314d72ae2ed457e42b73d36a0b770c426727c0938f4ff5bc8",
+    "query_quarantine.jsonl": "ae4434e306781299fc2b15ddc4f69a99f1aabe2988a876d6fd6c8853603ee9c7",
+    "recovery_quarantine.jsonl": "cd49ce012abd464d0093caf1a8b7f834b8aac8cce594020e49e33692841544c4"
+  }
+}
