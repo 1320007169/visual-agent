@@ -122,6 +122,29 @@ MME-RealWorld-CN 残留 8 条 API failed，另有 1 条无法评分并按 0 计�
 
 - `outputs/vlmeval/mixedsft_rl_best40_step96/mixedsft_rl_3bench_qwen3base_new4_20260920_174347/`
 
+### Mixed-21906 + RL：16 卡与 64 卡对比（2026-09-22）
+
+两轮均从 Mixed-21906 SFT 出发。VStar/HR8K 使用同一套 6 回合、每回合最多
+6,144 tokens 的 GroundingDINO Agent 独立评测；16 卡的 HR4K 来自训练内验证，
+64 卡的 HR4K 来自独立评测，不应将 HR4K 的小幅分差视为严格同口径比较。
+
+| 训练任务 / 权重 | VStar | HR4K | HR8K | API 失败数（VStar/HR4K/HR8K） |
+|---|---:|---:|---:|---|
+| 64 卡 best step40 | 89.53 | 82.88 | 78.50 | 0/0/0 |
+| 64 卡 final step96 | 90.05 | 82.50 | **79.38** | 0/0/0 |
+| 16 卡 step160 | 89.53 | **83.13（训练内）** | 78.00 | 0/不适用/0 |
+| 16 卡 final step192 | **92.15** | 82.75（训练内） | 77.38 | 0/不适用/0 |
+
+16 卡两次独立评测分别包含完整的 191 条 VStar 和 800 条 HR8K 样本，均无 API
+失败或空预测。step192 相比 step160，VStar 提升 2.62 个百分点，HR8K 下降
+0.63 个百分点；相比 64 卡 final step96，VStar 高 2.09 个百分点，HR8K 低
+2.00 个百分点。16 卡 HR4K 若要与 64 卡严格比较，仍需按同一独立评测流程补测。
+
+16 卡结果目录：
+
+- step160：`outputs/vlmeval/deepeyesv2_n8_2node_step160_other2/deepeyesv2_n8_2node_step160_other2_20260921_225614/`
+- step192：`outputs/vlmeval/deepeyesv2_n8_2node_step192_other2/deepeyesv2_n8_2node_step192_other2_20260922_140054/`
+
 ### Qwen3 base 五工具提示词（2026-09-21）
 
 同一 Qwen3-VL-8B-Instruct 起点，以五工具提示词运行 6 回合 Agent 评测。VStar、HR4K、
@@ -267,8 +290,10 @@ direct 与两组 agent 的提示词及回合预算不同；这些结果也不能
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
 - RFT-SFT 纯工具版为 85.34 / 79.13 / 75.00，1:1 Mixed 版为
   86.91 / 78.50 / 74.13；二者 HRBench 均有少量 API 失败，且与 base 的评测模式不同。
-- 最新 Mixed-21906 + RL 的 best step40 为 89.53 / 82.88 / 78.50，final step96 为
-  90.05 / 82.50 / 79.38；两组本次评测均为 `0/0/0` API 失败。
+- 64 卡 Mixed-21906 + RL 的 best step40 为 89.53 / 82.88 / 78.50，final step96 为
+  90.05 / 82.50 / 79.38；两组均为 `0/0/0` API 失败。16 卡 final step192 的
+  VStar/HR8K 为 92.15/77.38；其 HR4K 为训练内验证 82.75，不与 64 卡独立评测
+  直接比较。
 - Qwen3 base 扩展榜当前为 OCRBench 83.70、MME-RealWorld-Lite 41.53、
   MME-RealWorld-CN 57.34；OCR/CN 分别残留 4/8 条 API failed，ChartQA 待补评分。
 - step160 三组诊断评测已完成，分数见上表；API 失败数及工具调用遵从率尚待核验。
