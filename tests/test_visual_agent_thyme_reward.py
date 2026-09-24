@@ -192,6 +192,28 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
             self.assertEqual(reward.compute_score("<answer>B or C</answer>", "B", extra)["acc"], 0)
             judge.assert_not_called()
 
+    def test_raw_depth_and_tallyqa_use_closed_rule_rewards(self):
+        with patch.object(reward, "judge_match") as judge:
+            depth = {"data_source": "visual-agent-depth-raw", "original_source": "ca_vqa_multichoice"}
+            depth_open = {"data_source": "visual-agent-depth-raw", "original_source": "gqa_depth"}
+            count = {"data_source": "visual-agent-tallyqa"}
+            self.assertEqual(reward.compute_score("<answer>B. glass</answer>", "B", depth)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>A</answer>", "B", depth)["acc"], 0)
+            self.assertEqual(reward.compute_score("<answer>bird</answer>", "bird", depth_open)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>A. glass</answer>", "A", depth_open)["acc"], 0)
+            self.assertEqual(reward.compute_score("<answer>4</answer>", "4", count)["acc"], 1)
+            self.assertEqual(reward.compute_score("<answer>40</answer>", "4", count)["acc"], 0)
+            judge.assert_not_called()
+
+    def test_multitool_actions_are_valid_in_reason_act_format(self):
+        prefix = '<tool_call>{"name":"depth_measure","arguments":{"target_image":0,"bbox_2d":[1,2,3,4]}}</tool_call>'
+        observation = '<|im_end|>\n<|im_start|>user\n<tool_response>ok</tool_response><|im_end|>\n<|im_start|>assistant\n'
+        with patch.dict(os.environ, {"VISUAL_AGENT_FORMAT_PROTOCOL": "reason_act"}):
+            self.assertTrue(reward.has_strict_answer_format(prefix + observation + '<answer>B</answer>'))
+            self.assertTrue(reward.has_strict_answer_format(
+                prefix.replace("depth_measure", "object_count") + observation + '<answer>4</answer>'
+            ))
+
     def test_mixed_deepeyes_free_form_uses_judge_without_changing_relation_reward(self):
         extra = {"source": "deepeyesv2/perception", "question": "What color is the car?"}
         with patch.object(reward, "rule_match", return_value=False), patch.object(

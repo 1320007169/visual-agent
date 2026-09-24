@@ -467,6 +467,19 @@ class ToolService:
             "coordinate_space": "relative_0_1000",
             "source": "object_count",
         }
+        if structured.get("count_mode") == "pseudo_exemplar":
+            result["count_mode"] = "pseudo_exemplar"
+            if structured.get("confidence") is not None:
+                result["confidence"] = [round(float(value), 6) for value in structured["confidence"]]
+            if structured.get("first_pass_count") is not None:
+                result["first_pass_count"] = int(structured["first_pass_count"])
+            if structured.get("pseudo_exemplar_count") is not None:
+                result["pseudo_exemplar_count"] = int(structured["pseudo_exemplar_count"])
+            if structured.get("pseudo_exemplar_boxes") is not None:
+                result["pseudo_exemplar_boxes"] = [
+                    _pixel_box_to_relative(box, images[target].size)
+                    for box in structured["pseudo_exemplar_boxes"]
+                ]
         if returned_images:
             result["annotated_image"] = len(images)
         return result, returned_images

@@ -98,6 +98,7 @@ export LOG_DIR="$GROUP_ROOT/logs"
 export VTS_SERVICE_DIR="$GROUP_ROOT/tool_services"
 
 OCR_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/paddlex_ocrv5.yaml"
+COUNT_SERVICE_CONFIG="${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml}"
 OCR_PIPELINE_CONFIG="$PIPELINE_ROOT/configs/tools/paddlex_ocrv5_server.yaml"
 OCR_MODEL_PREPARE="$PIPELINE_ROOT/scripts/prepare_paddlex_ocrv5_models.sh"
 
@@ -123,7 +124,7 @@ if [[ "$CONFIG_ONLY" == 0 ]]; then
     "$OCR_PIPELINE_CONFIG"
     "$OCR_MODEL_PREPARE"
     "$PIPELINE_ROOT/configs/services/depth_anything_3.yaml"
-    "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
+    "$COUNT_SERVICE_CONFIG"
     "$VTS_OCR_ENV/bin/python3"
     "$VTS_DEPTH_ENV/bin/python3"
     "$VTS_COUNT_ENV/bin/python3"
@@ -330,7 +331,7 @@ PY
 
 start_vts_service ocr "$VTS_OCR_ENV" "$VTS_OCR_GPU" "$OCR_SERVICE_CONFIG"
 start_vts_service depth "$VTS_DEPTH_ENV" "$VTS_DEPTH_GPU" "$PIPELINE_ROOT/configs/services/depth_anything_3.yaml"
-start_vts_service count "$VTS_COUNT_ENV" "$VTS_COUNT_GPU" "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
+start_vts_service count "$VTS_COUNT_ENV" "$VTS_COUNT_GPU" "$COUNT_SERVICE_CONFIG"
 wait_vts_service ocr "$VTS_OCR_ENDPOINT" "${VTS_SERVICE_PIDS[0]}"
 warmup_ocr_service "$VTS_OCR_ENDPOINT"
 wait_vts_service depth "$VTS_DEPTH_ENDPOINT" "${VTS_SERVICE_PIDS[1]}"

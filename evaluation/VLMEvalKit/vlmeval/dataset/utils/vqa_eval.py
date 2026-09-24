@@ -350,7 +350,10 @@ def process_line(line, method='vqa_score', model=None):
         ret['gt'] = answers
         ret['pred'] = line['prediction'].strip()
         ret['question'] = line['question'].strip()
-        ret['match'] = [relaxed_correctness_judge(ret['pred'], x, ret['question'], model) for x in ret['gt']]
+        if model is None:
+            ret['match'] = [relaxed_correctness(x, ret['pred']) for x in ret['gt']]
+        else:
+            ret['match'] = [relaxed_correctness_judge(ret['pred'], x, ret['question'], model) for x in ret['gt']]
     elif method == 'accuracy':
         ret['gt'] = answers
         ret['pred'] = line['prediction'].strip()

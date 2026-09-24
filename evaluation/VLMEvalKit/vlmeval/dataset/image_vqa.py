@@ -71,10 +71,16 @@ class ImageVQADataset(ImageBaseDataset):
 
         dump(data.to_dict(orient='records'), eval_file.replace('.xlsx', '.jsonl'))
 
-        model = judge_kwargs['model']
-        model = build_judge(**judge_kwargs)
-
         dataset = self.dataset_name
+        rule_only = (
+            'ChartQA' in dataset
+            and os.environ.get('VLMEVAL_CHARTQA_RULE_ONLY') == '1'
+        )
+        if rule_only:
+            model = None
+        else:
+            model = judge_kwargs['model']
+            model = build_judge(**judge_kwargs)
         assert 'answer' in data and 'prediction' in data
         data['prediction'] = [str(x) for x in data['prediction']]
         data['answer'] = [str(x) for x in data['answer']]

@@ -234,6 +234,51 @@ class VisualToolServerTest(unittest.TestCase):
         self.assertEqual(len(images), 1)
         self.assertEqual(bridge.calls[0]["arguments"], {"image_id": 0, "query": "apples"})
 
+    def test_count_contract_keeps_pseudo_exemplar_fields(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "count": 4,
+                    "points": [[20, 10]],
+                    "count_mode": "pseudo_exemplar",
+                    "confidence": [0.91, 0.8],
+                    "first_pass_count": 3,
+                    "pseudo_exemplar_count": 3,
+                    "pseudo_exemplar_boxes": [[1, 2, 3, 4]],
+                },
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, count_bridge=bridge)
+        result, _ = service.execute(
+            "object_count",
+            {"query": "apples", "target_image": 0},
+            [self.image],
+        )
+
+        self.assertEqual(result["count_mode"], "pseudo_exemplar")
+        self.assertEqual(result["first_pass_count"], 3)
+        self.assertEqual(result["pseudo_exemplar_count"], 3)
+        self.assertEqual(result["pseudo_exemplar_boxes"], [[5.0, 20.0, 15.0, 40.0]])
+        self.assertEqual(result["confidence"], [0.91, 0.8])
+
+    def test_count_contract_omits_pseudo_fields_for_legacy_backend(self):
+        bridge = FakeBridge(
+            {"status": "success", "success": True, "structured": {"count": 1, "points": [[20, 10]]}},
+        )
+        service = ToolService(None, None, count_bridge=bridge)
+        result, _ = service.execute(
+            "object_count",
+            {"query": "apples", "target_image": 0},
+            [self.image],
+        )
+
+        self.assertNotIn("count_mode", result)
+        self.assertNotIn("first_pass_count", result)
+        self.assertNotIn("pseudo_exemplar_boxes", result)
+
     def test_depth_measure_contract_uses_one_bbox(self):
         bridge = FakeBridge(
             {

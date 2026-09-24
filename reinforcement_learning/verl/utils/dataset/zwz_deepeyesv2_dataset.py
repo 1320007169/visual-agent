@@ -7,7 +7,10 @@ class ZwzDeepEyesV2Dataset(ZwzOriginalRelationDataset):
     def __getitem__(self, item):
         source = self.dataframe[item]
         source_name = source.get("data_source")
-        if source_name not in {"visual-agent-zwz-relation", "visual-agent-deepeyesv2", "visual-agent-hrbench4k"}:
+        if source_name not in {
+            "visual-agent-zwz-relation", "visual-agent-deepeyesv2", "visual-agent-hrbench4k",
+            "visual-agent-depth-raw", "visual-agent-tallyqa",
+        }:
             raise ValueError(f"Unexpected mixed dataset source: {source_name!r}")
         row = super().__getitem__(item)
         row["extra_info"]["split"] = source.get("split", "train")
@@ -22,4 +25,7 @@ class ZwzDeepEyesV2Dataset(ZwzOriginalRelationDataset):
                 "split": source.get("split", "train"), "index": item,
                 "source_image": source["source_image"],
             }
+            if source_name in {"visual-agent-depth-raw", "visual-agent-tallyqa"}:
+                row["extra_info"]["uid"] = source.get("uid")
+                row["extra_info"]["original_source"] = source.get("original_source")
         return row

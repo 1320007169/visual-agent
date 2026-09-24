@@ -87,7 +87,9 @@ def has_think_action_format(text: str) -> bool:
                 call = json.loads(match[3])
             except (ValueError, TypeError):
                 return False
-            if not isinstance(call, dict) or call.get("name") not in {"grounding_detect", "crop_zoom"} or not isinstance(call.get("arguments"), dict):
+            if not isinstance(call, dict) or call.get("name") not in {
+                "grounding_detect", "crop_zoom", "depth_measure", "object_count"
+            } or not isinstance(call.get("arguments"), dict):
                 return False
     return True
 
@@ -407,6 +409,14 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         # These are closed A-D tasks. Accept the option label with its displayed
         # text, as the benchmark evaluator does, without using a semantic judge.
         correct = multiple_choice_match(answer, ground_truth)
+    elif (extra_info or {}).get("data_source") == "visual-agent-depth-raw":
+        correct = (
+            multiple_choice_match(answer, ground_truth)
+            if (extra_info or {}).get("original_source") == "ca_vqa_multichoice"
+            else normalize_answer(answer) == normalize_answer(ground_truth)
+        )
+    elif (extra_info or {}).get("data_source") == "visual-agent-tallyqa":
+        correct = answer.strip() == ground_truth.strip()
     else:
         question = str((extra_info or {}).get("question", ""))
         correct = rule_match(answer, ground_truth)
