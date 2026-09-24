@@ -1,8 +1,10 @@
 import json
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
 import threading
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -80,3 +82,55 @@ def test_bridge_translates_images_to_shared_paths_and_back(tmp_path):
     assert result.result["structured"] == {"text": "ok"}
     assert len(result.images) == 1
     assert result.images[0].startswith("data:image/png;base64,")
+
+
+def test_bridge_balances_across_replicas_and_fails_over(tmp_path):
+    calls = [0, 0]
+    servers = []
+    threads = []
+
+    def handler_for(index):
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                return
+
+            def do_POST(self):
+                calls[index] += 1
+                self.rfile.read(int(self.headers["Content-Length"]))
+                body = json.dumps({"status": "success", "structured": {"replica": index}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        return Handler
+
+    try:
+        for index in range(2):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(index))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            servers.append(server)
+            threads.append(thread)
+
+        endpoints = ",".join(f"http://127.0.0.1:{server.server_port}" for server in servers)
+        with patch.dict("os.environ", {"VTS_DEPTH_ENDPOINT": endpoints, "VTS_TOOL_BRIDGE_ROOT": str(tmp_path)}):
+            bridge = VtsRemoteBridge.from_env(endpoint_env="VTS_DEPTH_ENDPOINT", tool_name="depth_estimate")
+        for index in range(20):
+            bridge.execute(images=[Image.new("RGB", (4, 4))], arguments={"image_id": 0}, instance_id=f"rollout-{index}")
+        assert all(count > 0 for count in calls)
+
+        servers[0].shutdown()
+        servers[0].server_close()
+        threads[0].join(timeout=5)
+        candidate = next(
+            f"failover-{index}" for index in range(20)
+            if int.from_bytes(hashlib.sha256(f"failover-{index}".encode()).digest()[:8], "big") % 2 == 0
+        )
+        result = bridge.execute(images=[Image.new("RGB", (4, 4))], arguments={"image_id": 0}, instance_id=candidate)
+        assert result.result["structured"]["replica"] == 1
+    finally:
+        for server, thread in zip(servers, threads):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)

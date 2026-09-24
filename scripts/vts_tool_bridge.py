@@ -8,6 +8,7 @@ shared-filesystem ToolResult contract.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import tempfile
@@ -78,8 +79,11 @@ class VtsRemoteBridge:
         root = Path(configured_root).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         token_env = os.environ.get("VTS_TOOL_SERVICE_TOKEN_ENV", "VTS_TOOL_SERVICE_TOKEN")
+        endpoints = [item.strip().rstrip("/") for item in endpoint.split(",") if item.strip()]
+        if not endpoints:
+            raise ValueError(f"{endpoint_env} must contain at least one endpoint")
         return cls(
-            endpoint=endpoint.rstrip("/"),
+            endpoint=",".join(endpoints),
             tool_name=tool_name,
             shared_root=root,
             timeout=float(os.environ.get("VTS_TOOL_TIMEOUT", "300")),
@@ -130,13 +134,23 @@ class VtsRemoteBridge:
             headers = {"Content-Type": "application/json"}
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
-            request = urllib.request.Request(f"{self.endpoint}/execute", data=data, headers=headers, method="POST")
-            try:
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with opener.open(request, timeout=self.timeout) as response:
-                    body = json.load(response)
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-                raise VtsBridgeError(f"VTS service {self.endpoint} failed: {type(exc).__name__}: {exc}") from exc
+            endpoints = tuple(item.strip().rstrip("/") for item in self.endpoint.split(",") if item.strip())
+            if not endpoints:
+                raise VtsBridgeError("VTS service has no endpoints")
+            start = int.from_bytes(hashlib.sha256(instance_id.encode()).digest()[:8], "big") % len(endpoints)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            errors = []
+            for offset in range(len(endpoints)):
+                endpoint = endpoints[(start + offset) % len(endpoints)]
+                request = urllib.request.Request(f"{endpoint}/execute", data=data, headers=headers, method="POST")
+                try:
+                    with opener.open(request, timeout=self.timeout) as response:
+                        body = json.load(response)
+                    break
+                except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                    errors.append(f"{endpoint}: {type(exc).__name__}: {exc}")
+            else:
+                raise VtsBridgeError(f"VTS services failed: {'; '.join(errors)}")
             if not isinstance(body, dict):
                 raise VtsBridgeError("VTS service response must be a JSON object")
 
