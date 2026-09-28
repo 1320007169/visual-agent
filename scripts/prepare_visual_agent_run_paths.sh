@@ -5,10 +5,22 @@ if [[ "${VISUAL_AGENT_RUN_PATHS_READY:-0}" != "1" && "${RESUME_MODE:-disable}" =
   run_token="${TRAIN_RUN_TOKEN:-${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-}}}}"
   if [[ -z "$run_token" ]]; then
     if [[ "${NNODES:-1}" != "1" && "${MULTITOOL_CONFIG_ONLY:-0}" != "1" && "${DRY_RUN:-0}" != "1" ]]; then
-      echo "error: set the same TRAIN_RUN_TOKEN on all nodes when the platform supplies no job ID" >&2
-      exit 2
+      run_token_python=""
+      for candidate in "${RL_ENV_DIR:-}/bin/python" \
+        /home/ma-user/work/dataset/Common_wl/miniconda3/envs/visual-agent-qwen3vl-rl/bin/python \
+        "$(command -v python3 || true)"; do
+        if [[ -x "$candidate" ]]; then
+          run_token_python="$candidate"
+          break
+        fi
+      done
+      [[ -n "$run_token_python" ]] || { echo "error: Python is unavailable for run directory initialization" >&2; exit 2; }
+      run_token="$(BASE="$BASE" NNODES="${NNODES:-1}" RUN_ID="${RUN_ID:-visual_agent_rl}" \
+        NODE_RANK="${NODE_RANK:-}" MASTER_ADDR="${MASTER_ADDR:-}" \
+        "$run_token_python" "$REPO_ROOT/scripts/resolve_visual_agent_run_token.py")" || exit 2
+    else
+      run_token="$(date -u +%Y%m%dT%H%M%S%N)"
     fi
-    run_token="$(date -u +%Y%m%dT%H%M%S%N)"
   fi
   [[ "$run_token" =~ ^[a-zA-Z0-9_.-]+$ ]] || {
     echo "error: TRAIN_RUN_TOKEN/job ID must contain only letters, digits, underscores, dots or hyphens" >&2

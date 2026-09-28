@@ -9,11 +9,11 @@ export RL_CUDA_VISIBLE_DEVICES="${RL_CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6}"
 export TOOL_GPU="${TOOL_GPU:-7}"
 export VISUAL_TOOL_SERVERS_PER_NODE="${VISUAL_TOOL_SERVERS_PER_NODE:-2}"
 
-# 126 x 8 = 1008 trajectories: 48 per RL GPU, with PPO minibatches of 16.
+# 126 x 16 = 2016 trajectories: 96 per RL GPU, with PPO minibatches of 32.
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-126}"
 export PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-42}"
 export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-126}"
-export ROLLOUT_N="${ROLLOUT_N:-8}"
+export ROLLOUT_N="${ROLLOUT_N:-16}"
 export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-168}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
@@ -23,7 +23,7 @@ export SAVE_FREQ="${SAVE_FREQ:-20}"
 export VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
 
 JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
-export RUN_ID="${RUN_ID:-qwen3base_depth_tallyqa5k_multitool_pairdepth_n8_3node_${JOB_TOKEN}}"
+export RUN_ID="${RUN_ID:-qwen3base_depth_tallyqa5k_multitool_pairdepth_n16_3node_${JOB_TOKEN}}"
 
 if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
   for key in NNODES RL_CUDA_VISIBLE_DEVICES TOOL_GPU VISUAL_TOOL_SERVERS_PER_NODE \

@@ -57,11 +57,11 @@ class RunPathsTest(unittest.TestCase):
             self.assertIn("RL_OUTPUT_DIR=/existing/weights\n", result.stdout)
             self.assertIn("RL_LOG_DIR=/existing/logs\n", result.stdout)
 
-    def test_manual_distributed_run_requires_shared_token(self):
+    def test_manual_distributed_run_requires_cluster_information(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = self.resolve(directory, TRAIN_RUN_TOKEN="")
+            result = self.resolve(directory, TRAIN_RUN_TOKEN="", REPO_ROOT=str(HELPER.parents[1]))
             self.assertEqual(result.returncode, 2)
-            self.assertIn("same TRAIN_RUN_TOKEN", result.stderr)
+            self.assertIn("cluster node information", result.stderr)
 
     def test_platform_job_id_provides_shared_token(self):
         with tempfile.TemporaryDirectory() as directory:
