@@ -170,7 +170,57 @@ def _validate_native_reward_signal(metrics: dict[str, float]) -> None:
         )
 
 
-def _prune_checkpoint_directories(checkpoint_root: str, max_to_keep: int) -> list[str]:
+def _resolve_training_steps(steps_per_epoch: int, total_epochs: int, requested_steps: Optional[int]) -> int:
+    available_steps = steps_per_epoch * total_epochs
+    if available_steps <= 0 or (requested_steps is not None and requested_steps <= 0):
+        raise ValueError("Training requires positive epochs and steps")
+    return available_steps if requested_steps is None else min(available_steps, requested_steps)
+
+
+def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="train") -> dict[str, float]:
+    """Keep task accuracy and individual tool usage visible in mixed batches."""
+    if len(data_sources) != len(traces) or (accuracies is not None and len(accuracies) != len(traces)):
+        raise ValueError("Visual tool metric metadata length mismatch")
+    groups = defaultdict(list)
+    for index, (source, trace) in enumerate(zip(data_sources, traces)):
+        if isinstance(trace, dict):
+            groups[str(source)].append((index, trace.get("tool_calls", [])))
+    metrics = {}
+    for source, rows in groups.items():
+        root = f"{prefix}-tools/{source}"
+        metrics[f"{root}/trajectories"] = float(len(rows))
+        metrics[f"{root}/error_trajectory_rate"] = sum(
+            any(call.get("status") == "error" for call in calls) for _, calls in rows
+        ) / len(rows)
+        if accuracies is not None:
+            metrics[f"{root}/acc_mean"] = sum(float(accuracies[i]) for i, _ in rows) / len(rows)
+        for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count"):
+            tool_calls = [call for _, calls in rows for call in calls if call.get("tool") == tool]
+            metrics[f"{root}/{tool}/trajectory_rate"] = sum(
+                any(call.get("tool") == tool for call in calls) for _, calls in rows
+            ) / len(rows)
+            metrics[f"{root}/{tool}/calls"] = float(len(tool_calls))
+            metrics[f"{root}/{tool}/errors"] = float(sum(call.get("status") == "error" for call in tool_calls))
+            if tool_calls:
+                metrics[f"{root}/{tool}/success_rate"] = sum(
+                    call.get("status") == "success" for call in tool_calls
+                ) / len(tool_calls)
+    return metrics
+
+
+def _visual_accuracy_macro_mean(data_sources, accuracies) -> Optional[float]:
+    if len(data_sources) != len(accuracies):
+        raise ValueError("Validation accuracy metadata length mismatch")
+    groups = defaultdict(list)
+    for source, accuracy in zip(data_sources, accuracies):
+        if str(source).startswith("visual-agent-"):
+            groups[str(source)].append(float(accuracy))
+    if not groups:
+        return None
+    return sum(sum(values) / len(values) for values in groups.values()) / len(groups)
+
+
+def _prune_checkpoint_directories(checkpoint_root: str, max_to_keep: int, protected_step: Optional[int] = None) -> list[str]:
     """Remove old complete checkpoint directories, including dataloader state."""
     if max_to_keep <= 0:
         raise ValueError(f"max_to_keep must be positive, got {max_to_keep}")
@@ -185,7 +235,8 @@ def _prune_checkpoint_directories(checkpoint_root: str, max_to_keep: int) -> lis
         path = os.path.join(checkpoint_root, name)
         if os.path.isdir(path):
             checkpoint_dirs.append((step, path))
-    checkpoint_dirs.sort()
+    # A restart from an older step must not prune the checkpoint just saved.
+    checkpoint_dirs.sort(key=lambda item: (item[0] == protected_step, item[0]))
     removed = [path for _, path in checkpoint_dirs[:-max_to_keep]]
     for stale_path in removed:
         shutil.rmtree(stale_path)
@@ -629,10 +680,12 @@ class RayPPOTrainer:
 
         print(f"Size of train dataloader: {len(self.train_dataloader)}, Size of val dataloader: {len(self.val_dataloader)}")
 
-        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
-
-        if self.config.trainer.total_training_steps is not None:
-            total_training_steps = self.config.trainer.total_training_steps
+        total_training_steps = _resolve_training_steps(
+            len(self.train_dataloader), self.config.trainer.total_epochs,
+            self.config.trainer.total_training_steps,
+        )
+        if self.config.trainer.total_training_steps is not None and total_training_steps < self.config.trainer.total_training_steps:
+            print(f"Capping requested training steps to {total_training_steps}: configured epochs cannot provide more batches")
 
         self.total_training_steps = total_training_steps
         print(f"Total training steps: {self.total_training_steps}")
@@ -756,6 +809,7 @@ class RayPPOTrainer:
         sample_outputs = []
         sample_scores = []
         sample_source_metadata = []
+        sample_rollout_traces = []
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -835,6 +889,7 @@ class RayPPOTrainer:
 
             test_batch = test_batch.union(test_output_gen_batch)
             sample_source_metadata.extend(self._generation_source_metadata(test_batch, "validation"))
+            sample_rollout_traces.extend(test_batch.non_tensor_batch.get("rollout_trace", [None] * len(test_batch)))
 
             # evaluate using reward_function
             result = self.val_reward_fn(test_batch, return_dict=True)
@@ -861,6 +916,7 @@ class RayPPOTrainer:
                 reward_extra_infos_dict=reward_extra_infos_dict,
                 dump_path=val_data_dir,
                 source_metadata=sample_source_metadata,
+                rollout_traces=sample_rollout_traces,
             )
 
         for key_info, lst in reward_extra_infos_dict.items():
@@ -890,6 +946,14 @@ class RayPPOTrainer:
                     pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
                     metric_dict[pfx] = metric_val
 
+        accuracies = reward_extra_infos_dict.get("acc")
+        metric_dict.update(_compute_visual_tool_metrics(
+            data_sources, sample_rollout_traces, accuracies, prefix="val",
+        ))
+        if accuracies is not None:
+            macro_mean = _visual_accuracy_macro_mean(data_sources, accuracies)
+            if macro_mean is not None:
+                metric_dict["val-core/visual-agent/acc/macro_mean"] = macro_mean
         return metric_dict
 
     def init_workers(self):
@@ -1019,6 +1083,7 @@ class RayPPOTrainer:
             removed_paths = _prune_checkpoint_directories(
                 self.config.trainer.default_local_dir,
                 int(max_checkpoints_to_keep),
+                protected_step=self.global_steps,
             )
             for stale_path in removed_paths:
                 print(f"Removed stale complete checkpoint: {stale_path}")
@@ -1201,6 +1266,8 @@ class RayPPOTrainer:
         progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
         run_start_step = self.global_steps
         run_start_time = time.time()
+        stop_after_seconds = int(self.config.trainer.get("stop_after_seconds", 0))
+        wait_for_checkpoint = None
 
         # we start from step 1
         self.global_steps += 1
@@ -1517,15 +1584,6 @@ class RayPPOTrainer:
                         critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
                         metrics.update(critic_output_metrics)
 
-                    # implement critic warmup
-                    if self.config.trainer.critic_warmup <= self.global_steps:
-                        # update actor
-                        with marked_timer("update_actor", timing_raw, color="red"):
-                            batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
-                            actor_output = self.actor_rollout_wg.update_actor(batch)
-                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                        metrics.update(actor_output_metrics)
-
                     # Log rollout generations if enabled
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
@@ -1534,6 +1592,11 @@ class RayPPOTrainer:
                             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
                             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
                             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
+                            source_metadata = self._generation_source_metadata(batch, "train")
+                            response_width = batch.batch["responses"].shape[-1]
+                            response_lengths = batch.batch["attention_mask"][:, -response_width:].sum(-1).tolist()
+                            for metadata, length in zip(source_metadata, response_lengths):
+                                metadata["response_tokens"] = int(length)
                             self._dump_generations(
                                 inputs=inputs,
                                 outputs=outputs,
@@ -1541,8 +1604,17 @@ class RayPPOTrainer:
                                 reward_extra_infos_dict=reward_extra_infos_dict,
                                 dump_path=rollout_data_dir,
                                 rollout_traces=batch.non_tensor_batch.get("rollout_trace"),
-                                source_metadata=self._generation_source_metadata(batch, "train"),
+                                source_metadata=source_metadata,
                             )
+
+                    # implement critic warmup
+                    if self.config.trainer.critic_warmup <= self.global_steps:
+                        # update actor
+                        with marked_timer("update_actor", timing_raw, color="red"):
+                            batch.meta_info["multi_turn"] = self.config.actor_rollout_ref.rollout.multi_turn.enable
+                            actor_output = self.actor_rollout_wg.update_actor(batch)
+                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
+                        metrics.update(actor_output_metrics)
 
                     # validate
                     is_best_val_step = False
@@ -1593,6 +1665,10 @@ class RayPPOTrainer:
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 rollout_traces = batch.non_tensor_batch.get("rollout_trace")
                 if rollout_traces is not None:
+                    metrics.update(_compute_visual_tool_metrics(
+                        batch.non_tensor_batch.get("data_source", ["unknown"] * len(batch)),
+                        rollout_traces, batch.non_tensor_batch.get("acc"),
+                    ))
                     valid_traces = [trace for trace in rollout_traces if isinstance(trace, dict)]
                     if valid_traces:
                         model_ratios = [trace["model_time_ratio"] for trace in valid_traces]
@@ -1661,3 +1737,13 @@ class RayPPOTrainer:
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
+                if stop_after_seconds and elapsed_seconds >= stop_after_seconds:
+                    if wait_for_checkpoint is None:
+                        wait_for_checkpoint = (self.global_steps - 1) % self.config.trainer.save_freq >= self.config.trainer.save_freq // 2
+                    if not wait_for_checkpoint or should_save:
+                        pprint(
+                            f"Stopping at step {self.global_steps - 1}: {elapsed_seconds:.0f}s elapsed, "
+                            f"checkpoint saved: {should_save}"
+                        )
+                        progress_bar.close()
+                        return

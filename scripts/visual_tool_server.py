@@ -457,7 +457,6 @@ class ToolService:
             _pixel_box_to_relative(box, images[target].size)
             for box in structured.get("boxes") or []
         ]
-        returned_images = response.images
         result = {
             "query": query,
             "count": int(structured.get("count", len(points) or len(boxes))),
@@ -480,9 +479,7 @@ class ToolService:
                     _pixel_box_to_relative(box, images[target].size)
                     for box in structured["pseudo_exemplar_boxes"]
                 ]
-        if returned_images:
-            result["annotated_image"] = len(images)
-        return result, returned_images
+        return result, []
 
     def _execute_depth(
         self,
@@ -495,10 +492,17 @@ class ToolService:
             raise ToolServerError(f"{name} service is not configured")
         target = _target_image(arguments, images)
         query = None
+        multiple_boxes = False
         if name == "depth_measure":
-            relative_box = arguments.get("bbox_2d")
-            pixel_box = _relative_box_to_pixels(relative_box, images[target].size)
-            relative_box = _pixel_box_to_relative(pixel_box, images[target].size)
+            boxes = arguments.get("bboxes_2d")
+            if boxes is not None:
+                if not isinstance(boxes, list) or not boxes:
+                    raise ToolServerError("depth_measure.bboxes_2d must contain at least one box")
+                multiple_boxes = len(boxes) > 1
+            else:
+                boxes = [arguments.get("bbox_2d")]
+            pixel_boxes = [_relative_box_to_pixels(box, images[target].size) for box in boxes]
+            relative_boxes = [_pixel_box_to_relative(box, images[target].size) for box in pixel_boxes]
         elif name == "ground_depth":
             query = str(arguments.get("query") or "").strip()
             if not query:
@@ -526,12 +530,14 @@ class ToolService:
             )
             pixel_box = [float(value) for value in boxes[selected]]
             relative_box = _pixel_box_to_relative(pixel_box, images[target].size)
+            pixel_boxes = [pixel_box]
+            relative_boxes = [relative_box]
         else:  # pragma: no cover - only called from the checked dispatch below
             raise ToolServerError(f"Unsupported depth tool: {name}")
 
         response = self.depth_bridge.execute(
             images=images,
-            arguments={"image_id": target, "bboxes": [pixel_box]},
+            arguments={"image_id": target, "bboxes": pixel_boxes},
             instance_id=instance_id,
         )
         if error := _remote_error(response.result, name):
@@ -547,22 +553,31 @@ class ToolService:
                 "message": "The configured backend does not provide metric depth.",
                 "recoverable": False,
             }, []
-        if not regions or regions[0].get("median_depth_m") is None:
+        if len(regions) < len(pixel_boxes) or any(
+            region.get("median_depth_m") is None for region in regions[: len(pixel_boxes)]
+        ):
             return {
                 "status": "error",
                 "tool": name,
                 "message": "No valid depth pixels were found inside the target region.",
                 "recoverable": True,
             }, []
-        returned_images = response.images
+        if multiple_boxes:
+            return {
+                "depths_m": [round(float(region["median_depth_m"]), 4) for region in regions[: len(pixel_boxes)]],
+                "bboxes_2d": relative_boxes,
+                "target_image": target,
+                "coordinate_space": "relative_0_1000",
+            }, []
         result = {
             "depth_m": round(float(regions[0]["median_depth_m"]), 4),
-            "bbox_2d": relative_box,
+            "bbox_2d": relative_boxes[0],
             "target_image": target,
             "coordinate_space": "relative_0_1000",
         }
         if query is not None:
             result["query"] = query
+        returned_images = response.images if name == "ground_depth" else []
         if returned_images:
             result["depth_image"] = len(images)
         return result, returned_images

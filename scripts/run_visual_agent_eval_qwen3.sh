@@ -26,7 +26,7 @@ REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
 ENV_DIR="${ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM}"
 VLMEVAL_ENV_DIR="${VLMEVAL_ENV_DIR:-$ENV_DIR}"
 VLMEVAL_PYTHON="${VLMEVAL_PYTHON:-$VLMEVAL_ENV_DIR/bin/python}"
-VLMEVAL_LD_LIBRARY_PATH="${VLMEVAL_LD_LIBRARY_PATH:-$VLMEVAL_ENV_DIR/lib}"
+VLMEVAL_LD_LIBRARY_PATH="${VLMEVAL_LD_LIBRARY_PATH:-$VLMEVAL_ENV_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 VLMEVAL_PYTHONPATH="${VLMEVAL_PYTHONPATH-}"
 TOOL_ENV_DIR="${TOOL_ENV_DIR:-$BASE/conda_envs/visual-tools}"
 CUDA_HOME="${CUDA_HOME:-$BASE/conda_envs/spacetools-rl}"
@@ -376,41 +376,46 @@ PY
 }
 
 start_model_servers() {
-  local backend="$1" index gpu port replica_cache
-  MODEL_PIDS=()
-  model_api_bases=()
-  for index in "${!MODEL_GPUS[@]}"; do
-    gpu="${MODEL_GPUS[$index]}"
-    port=$((MODEL_PORT_BASE + index))
-    replica_cache="$TRITON_CACHE_ROOT/${variant}_gpu_${gpu}"
-    mkdir -p "$replica_cache"
-    if [[ "$backend" == "vllm" ]]; then
-      setsid env \
-        CUDA_VISIBLE_DEVICES="$gpu" MODEL_PATH="$model_path" SERVED_MODEL_NAME="$served_model" \
-        HOST="$HOST" PORT="$port" TENSOR_PARALLEL_SIZE=1 \
-        GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION" MAX_MODEL_LEN="$MAX_MODEL_LEN" \
-        LIMIT_MM_PER_PROMPT="$LIMIT_MM_PER_PROMPT" CC="$MODEL_CC" CXX="$MODEL_CXX" \
-        CUDAHOSTCXX="$MODEL_CXX" VISUAL_AGENT_CUDA_HOME="$MODEL_CUDA_HOME" \
-        VLLM_PYTHON="$PYTHON_BIN" \
-        TRITON_CACHE_DIR="$replica_cache" \
-        bash "$REPO_ROOT/scripts/serve_visual_agent_model.sh" &
-    else
-      setsid env CUDA_VISIBLE_DEVICES="$gpu" \
-        "$PYTHON_BIN" "$REPO_ROOT/scripts/serve_visual_agent_transformers.py" \
-          --model "$model_path" --served-model-name "$served_model" \
-          --host "$HOST" --port "$port" &
-    fi
-    MODEL_PIDS+=("$!")
-    model_api_bases+=("http://127.0.0.1:$port/v1")
-  done
+    local backend="$1" index gpu port replica_cache replica_log
+    MODEL_PIDS=()
+    model_api_bases=()
+    for index in "${!MODEL_GPUS[@]}"; do
+        gpu="${MODEL_GPUS[$index]}"
+        port=$((MODEL_PORT_BASE + index))
+        replica_cache="$TRITON_CACHE_ROOT/${variant}_gpu_${gpu}"
+        replica_log="$WORK_ROOT/${variant}_gpu_${gpu}.log"
+        mkdir -p "$replica_cache"
+        echo "Starting $variant $backend on GPU $gpu, port $port; log: $replica_log"
+        if [[ "$backend" == "vllm" ]]; then
+            setsid env \
+                CUDA_VISIBLE_DEVICES="$gpu" MODEL_PATH="$model_path" SERVED_MODEL_NAME="$served_model" \
+                HOST="$HOST" PORT="$port" TENSOR_PARALLEL_SIZE=1 \
+                GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION" MAX_MODEL_LEN="$MAX_MODEL_LEN" \
+                LIMIT_MM_PER_PROMPT="$LIMIT_MM_PER_PROMPT" CC="$MODEL_CC" CXX="$MODEL_CXX" \
+                CUDAHOSTCXX="$MODEL_CXX" VISUAL_AGENT_CUDA_HOME="$MODEL_CUDA_HOME" \
+                VLLM_PYTHON="$PYTHON_BIN" \
+                TRITON_CACHE_DIR="$replica_cache" \
+                bash "$REPO_ROOT/scripts/serve_visual_agent_model.sh" >"$replica_log" 2>&1 &
+        else
+            setsid env CUDA_VISIBLE_DEVICES="$gpu" \
+                "$PYTHON_BIN" "$REPO_ROOT/scripts/serve_visual_agent_transformers.py" \
+                    --model "$model_path" --served-model-name "$served_model" \
+                    --host "$HOST" --port "$port" >"$replica_log" 2>&1 &
+        fi
+        MODEL_PIDS+=("$!")
+        model_api_bases+=("http://127.0.0.1:$port/v1")
+    done
 }
 
 wait_model_servers() {
-  local backend="$1" index
-  for index in "${!model_api_bases[@]}"; do
-    wait_http "${model_api_bases[$index]}/models" \
-      "$variant $backend replica $index" "${MODEL_PIDS[$index]}" || return 1
-  done
+    local backend="$1" index
+    for index in "${!model_api_bases[@]}"; do
+        wait_http "${model_api_bases[$index]}/models" \
+            "$variant $backend replica $index" "${MODEL_PIDS[$index]}" || {
+            tail -n 60 "$WORK_ROOT/${variant}_gpu_${MODEL_GPUS[$index]}.log"
+            return 1
+        }
+    done
 }
 
 results_ready() {

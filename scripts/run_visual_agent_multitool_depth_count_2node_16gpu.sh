@@ -27,15 +27,16 @@ export VISUAL_TOOL_SERVERS_PER_NODE="${VISUAL_TOOL_SERVERS_PER_NODE:-2}"
 
 export NNODES="${NNODES:-2}"
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-112}"
-export ROLLOUT_N="${ROLLOUT_N:-16}"
-export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-276}"
+export ROLLOUT_N="${ROLLOUT_N:-8}"
+export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
+export VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
 export MAX_TURNS="${MAX_TURNS:-8}"
 export ACTOR_USE_KL_LOSS="${ACTOR_USE_KL_LOSS:-True}"
 export ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.001}"
 export RESUME_MODE="${RESUME_MODE:-disable}"
 export SAVE_FREQ="${SAVE_FREQ:-40}"
 JOB_TOKEN="${MA_JOB_ID:-${VC_JOB_ID:-${JOB_ID:-manual}}}"
-export RUN_ID="${RUN_ID:-qwen3base_depth_tallyqa5k_multitool_n16_${JOB_TOKEN}}"
+export RUN_ID="${RUN_ID:-qwen3base_depth_tallyqa5k_multitool_pairdepth_n8_${JOB_TOKEN}}"
 
 ensure_symlink() {
   local target="$1" link_path="$2"
@@ -46,10 +47,15 @@ ensure_symlink() {
 }
 
 ensure_symlink /opt/huawei/quoteModel/xiaoyi_tmpstorage /home/ma-user/work/model/xiaoyi_tmpstorage
+source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
 [[ -f "$PIPELINE_ROOT/.env" ]] || { echo "error: missing VTS environment file: $PIPELINE_ROOT/.env" >&2; exit 2; }
+inherited_pythonpath="${PYTHONPATH:-}"
 set -a
 source "$PIPELINE_ROOT/.env"
 set +a
+if [[ -n "$inherited_pythonpath" ]]; then
+  export PYTHONPATH="$inherited_pythonpath${PYTHONPATH:+:$PYTHONPATH}"
+fi
 
 export VTS_TOOL_BRIDGE_ROOT="${VTS_TOOL_BRIDGE_ROOT:-${VTS_OUTPUT_ROOT:-$BASE/outputs}/visual_agent_bridge/$RUN_ID/${HOSTNAME:-node}}"
 export COUNT_SERVICE_CONFIG="${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml}"

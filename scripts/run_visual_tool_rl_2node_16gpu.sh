@@ -70,6 +70,7 @@ TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-False}"
 BALANCE_BATCH="${BALANCE_BATCH:-True}"
 VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 SAVE_FREQ="${SAVE_FREQ:--1}"
+TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-}"
 SAVE_HF_MODEL="${SAVE_HF_MODEL:-0}"
 MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-}"
 MAX_CHECKPOINTS_TO_KEEP="${MAX_CHECKPOINTS_TO_KEEP:-}"
@@ -138,6 +139,7 @@ RUN_ID="${RUN_ID:-visual_rl_2node16_${JOB_TOKEN}}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/saves/visual_tool_rl_smoke_2node/$RUN_ID}"
 BEST_HF_MODEL_DIR="${BEST_HF_MODEL_DIR:-$OUTPUT_DIR/best_huggingface}"
 LOG_DIR="${LOG_DIR:-$BASE/logs/visual-tool-rl-2node}"
+source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
 SYNC_DIR="${SYNC_DIR:-$BASE/tmp/visual-tool-rl-${NNODES}node/$RUN_ID}"
 DONE_FILE="$SYNC_DIR/driver.done"
 
@@ -398,6 +400,9 @@ fi
   die "PPO_MAX_TOKEN_LEN_PER_GPU ($PPO_MAX_TOKEN_LEN_PER_GPU) must fit one full sequence ($((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH)))"
 }
 [[ "$WARM_START_GLOBAL_STEP" =~ ^[0-9]+$ ]] || die "WARM_START_GLOBAL_STEP must be a non-negative integer"
+if [[ -n "$TRAINER_STOP_AFTER_SECONDS" ]]; then
+  [[ "$TRAINER_STOP_AFTER_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "TRAINER_STOP_AFTER_SECONDS must be a positive integer"
+fi
 if [[ -n "$WARM_START_DATA_PATH" ]]; then
   [[ -f "$WARM_START_DATA_PATH" || -f "$WARM_START_DATA_PATH/data.pt" ]] || {
     die "warm-start dataloader state not found: $WARM_START_DATA_PATH"
@@ -479,6 +484,11 @@ TRAJECTORIES_PER_GPU="$((TRAIN_BATCH_SIZE * ROLLOUT_N / TOTAL_RL_GPUS))"
   die "per-GPU trajectories ($TRAJECTORIES_PER_GPU) must be divisible by normalized PPO mini batch ($PPO_MINI_BATCH_PER_GPU)"
 }
 
+if [[ "$RESUME_MODE" == "disable" ]]; then
+  if [[ -d "$OUTPUT_DIR" ]] && [[ -n "$(find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 ! -name '.launch-node-*' -print -quit)" ]]; then
+    die "fresh training output already contains files: $OUTPUT_DIR; use a new TRAIN_RUN_TOKEN or resume explicitly"
+  fi
+fi
 mkdir -p "$LOG_DIR" "$OUTPUT_DIR" "$SMOKE_DATA_DIR" "$SYNC_DIR" \
   "$RAY_TEMP_DIR" "$RAY_SPILL_DIR" \
   "$BASE/cache/huggingface" "$BASE/cache/torch" "$BASE/cache/xdg"
@@ -1038,6 +1048,9 @@ if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
 fi
 if [[ -n "$MAX_CHECKPOINTS_TO_KEEP" ]]; then
   TRAIN_ARGS+=("+trainer.max_checkpoints_to_keep=$MAX_CHECKPOINTS_TO_KEEP")
+fi
+if [[ -n "$TRAINER_STOP_AFTER_SECONDS" ]]; then
+  TRAIN_ARGS+=("+trainer.stop_after_seconds=$TRAINER_STOP_AFTER_SECONDS")
 fi
 if [[ "$SAVE_BEST_ONLY" == "True" || "$SAVE_BEST_HF_MODEL" == "True" ]]; then
     TRAIN_ARGS+=(

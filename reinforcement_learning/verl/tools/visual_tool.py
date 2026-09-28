@@ -11,6 +11,7 @@ from typing import Any, Optional, Tuple
 from uuid import uuid4
 
 import aiohttp
+from jsonschema import Draft202012Validator
 
 from .base_tool import BaseTool
 from .schemas import OpenAIFunctionToolSchema
@@ -102,6 +103,9 @@ class OnlineVisualTool(BaseTool):
         self.api_key = config.get("api_key") or None
         self.timeout = float(config.get("timeout", 300.0))
         self.max_retries = int(config.get("max_retries", 2))
+        self._argument_validator = Draft202012Validator(
+            self.tool_schema.function.parameters.model_dump(exclude_none=True)
+        )
         self._instance_dict = _ONLINE_VISUAL_TOOL_INSTANCES
 
     async def create(self, instance_id: Optional[str] = None, **kwargs) -> str:
@@ -117,6 +121,13 @@ class OnlineVisualTool(BaseTool):
             raise KeyError(f"Unknown visual-tool instance: {instance_id}")
 
         state = self._instance_dict[instance_id]
+        validation_error = next(self._argument_validator.iter_errors(parameters), None)
+        if validation_error is not None:
+            path = ".".join(map(str, validation_error.absolute_path)) or "arguments"
+            raise ValueError(f"{self.name}.{path}: {validation_error.message}")
+        target_image = parameters.get("target_image")
+        if target_image is not None and not 0 <= target_image < len(state["images"]):
+            raise ValueError(f"target_image {target_image} outside images[0:{len(state['images'])}]")
         payload = {
             "instance_id": instance_id,
             "name": self.name,
@@ -141,6 +152,8 @@ class OnlineVisualTool(BaseTool):
                         f"{selected_base_url}/execute", json=payload, headers=headers
                     ) as response:
                         response_text = await response.text()
+                        if 400 <= response.status < 500 and response.status not in {408, 429}:
+                            raise ValueError(f"visual tool HTTP {response.status}: {response_text[:1000]}")
                         if response.status >= 400:
                             raise RuntimeError(f"visual tool HTTP {response.status}: {response_text[:1000]}")
                         result = json.loads(response_text)
@@ -164,6 +177,8 @@ class OnlineVisualTool(BaseTool):
         output = result.get("result", result.get("output", result))
         response_text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
         metrics = dict(result.get("metrics") or {})
+        if isinstance(output, dict) and output.get("status") in {"error", "failed"}:
+            metrics["tool_error"] = str(output.get("message") or output.get("error") or output)
         metrics.update(
             {
                 "online": True,

@@ -231,7 +231,8 @@ class VisualToolServerTest(unittest.TestCase):
         self.assertEqual(result["points_2d"], [[100.0, 100.0], [500.0, 500.0]])
         self.assertEqual(result["source"], "object_count")
         self.assertNotIn("countgd", str(result).lower())
-        self.assertEqual(len(images), 1)
+        self.assertNotIn("annotated_image", result)
+        self.assertEqual(images, [])
         self.assertEqual(bridge.calls[0]["arguments"], {"image_id": 0, "query": "apples"})
 
     def test_count_contract_keeps_pseudo_exemplar_fields(self):
@@ -301,12 +302,83 @@ class VisualToolServerTest(unittest.TestCase):
 
         self.assertEqual(result["depth_m"], 1.4)
         self.assertEqual(result["bbox_2d"], [500.0, 100.0, 900.0, 800.0])
-        self.assertEqual(result["depth_image"], 1)
-        self.assertEqual(len(images), 1)
+        self.assertNotIn("depth_image", result)
+        self.assertEqual(images, [])
         self.assertEqual(
             bridge.calls[0]["arguments"]["bboxes"],
             [[100.0, 10.0, 180.0, 80.0]],
         )
+
+    def test_depth_measure_multiple_boxes_returns_only_numeric_depths(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "statistics": {"metric_depth": True, "unit": "meter"},
+                    "region_depths": [
+                        {"median_depth_m": 1.4},
+                        {"median_depth_m": 2.7},
+                        {"median_depth_m": 3.2},
+                    ],
+                },
+                "provenance": {"metric_depth": True},
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, depth_bridge=bridge)
+        result, returned_images = service.execute(
+            "depth_measure",
+            {
+                "target_image": 0,
+                "bboxes_2d": [[500, 100, 900, 800], [100, 200, 300, 400], [0, 0, 500, 500]],
+            },
+            [self.image],
+        )
+
+        self.assertEqual(result["depths_m"], [1.4, 2.7, 3.2])
+        self.assertEqual(result["bboxes_2d"], [[500.0, 100.0, 900.0, 800.0], [100.0, 200.0, 300.0, 400.0], [0.0, 0.0, 500.0, 500.0]])
+        self.assertNotIn("depth_image", result)
+        self.assertEqual(returned_images, [])
+        self.assertEqual(
+            bridge.calls[0]["arguments"]["bboxes"],
+            [[100.0, 10.0, 180.0, 80.0], [20.0, 20.0, 60.0, 40.0], [0.0, 0.0, 100.0, 50.0]],
+        )
+
+    def test_depth_measure_plural_one_box_returns_one_depth(self):
+        bridge = FakeBridge(
+            {
+                "status": "success",
+                "success": True,
+                "structured": {
+                    "statistics": {"metric_depth": True},
+                    "region_depths": [{"median_depth_m": 1.4}],
+                },
+                "provenance": {"metric_depth": True},
+            },
+            [encode_image(self.image)],
+        )
+        service = ToolService(None, None, depth_bridge=bridge)
+        result, returned_images = service.execute(
+            "depth_measure",
+            {"target_image": 0, "bboxes_2d": [[500, 100, 900, 800]]},
+            [self.image],
+        )
+        self.assertEqual(result["depth_m"], 1.4)
+        self.assertEqual(result["bbox_2d"], [500.0, 100.0, 900.0, 800.0])
+        self.assertNotIn("depths_m", result)
+        self.assertNotIn("depth_image", result)
+        self.assertEqual(returned_images, [])
+        self.assertEqual(bridge.calls[0]["arguments"]["bboxes"], [[100.0, 10.0, 180.0, 80.0]])
+
+    def test_depth_measure_plural_rejects_empty_list(self):
+        service = ToolService(None, None, depth_bridge=FakeBridge({}))
+        with self.assertRaisesRegex(ToolServerError, "at least one box"):
+            service.execute(
+                "depth_measure",
+                {"target_image": 0, "bboxes_2d": []},
+                [self.image],
+            )
 
     def test_ground_depth_contract_localizes_one_query(self):
         bridge = FakeBridge(

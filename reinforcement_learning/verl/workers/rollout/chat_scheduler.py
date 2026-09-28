@@ -354,7 +354,9 @@ class ToolCompletionCallback(CompletionCallback):
             )
 
         returned_images = tool_metrics.get("returned_images", [])
-        tool_trace["status"] = "success"
+        tool_trace["status"] = "error" if tool_metrics.get("tool_error") else "success"
+        if tool_metrics.get("tool_error"):
+            tool_trace["error"] = tool_metrics["tool_error"]
         tool_trace["service_latency_ms"] = tool_metrics.get("latency_ms")
         tool_trace["returned_image_count"] = len(returned_images)
         if returned_images:

@@ -5,6 +5,7 @@ datasets
 dill
 flash-attn
 hydra-core
+jsonschema>=4.23.0
 liger-kernel
 numpy
 pandas
