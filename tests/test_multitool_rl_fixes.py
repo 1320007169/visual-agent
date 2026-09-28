@@ -103,7 +103,7 @@ class MultitoolTrainingMetricsTest(unittest.TestCase):
     def test_schema_keeps_nested_bbox_constraints(self):
         schema = tool_schema("depth_measure").model_dump(exclude_none=True)
         boxes = schema["function"]["parameters"]["properties"]["bboxes_2d"]
-        self.assertEqual(boxes["minItems"], 2)
+        self.assertEqual(boxes["minItems"], 1)
         self.assertEqual(boxes["items"]["minItems"], 4)
         self.assertEqual(boxes["items"]["maxItems"], 4)
         self.assertEqual(boxes["items"]["items"]["maximum"], 1000)
@@ -123,7 +123,10 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.requests = []
         self.statuses = []
-        self.result = {"status": "success", "result": {"count": 1}}
+        self.result = {"status": "success", "result": {
+            "bboxes_2d": [[0, 0, 100, 100], [100, 100, 200, 200]],
+            "depths_m": [1.0, 2.0],
+        }}
         test = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -160,7 +163,7 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_boxes_and_image_index_never_reach_http(self):
         bad_arguments = [
             {"bboxes_2d": [[0, 0, 100], [100, 100, 200, 200]], "target_image": 0},
-            {"bboxes_2d": [[0, 0, 100, 100]], "target_image": 0},
+            {"bboxes_2d": [], "target_image": 0},
             {"bboxes_2d": [[0, 0, 1001, 100], [100, 100, 200, 200]], "target_image": 0},
             dict(self.arguments, target_image=1),
         ]
@@ -168,6 +171,17 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await self.tool.execute(self.instance, arguments)
         self.assertEqual(self.requests, [])
+
+    async def test_single_depth_box_returns_a_region(self):
+        box = [0, 0, 100, 100]
+        self.result = {"status": "success", "result": {
+            "bbox_2d": box, "depth_m": 1.5,
+            "target_image": 0, "coordinate_space": "relative_0_1000",
+        }}
+        arguments = {"bboxes_2d": [box], "target_image": 0}
+        output, _, _ = await self.tool.execute(self.instance, arguments)
+        self.assertEqual(json.loads(output), {"regions": [{"bbox_2d": box, "depth_m": 1.5}]})
+        self.assertEqual(self.requests[0]["arguments"], arguments)
 
     async def test_http_422_is_not_retried(self):
         self.statuses = [422]
@@ -179,7 +193,10 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         self.statuses = [503, 200]
         with patch.object(visual_tool.asyncio, "sleep", AsyncMock()):
             output, _, _ = await self.tool.execute(self.instance, self.arguments)
-        self.assertEqual(json.loads(output), {"count": 1})
+        self.assertEqual(json.loads(output), {"regions": [
+            {"bbox_2d": [0, 0, 100, 100], "depth_m": 1.0},
+            {"bbox_2d": [100, 100, 200, 200], "depth_m": 2.0},
+        ]})
         self.assertEqual(len(self.requests), 2)
 
     async def test_business_error_is_visible_without_retry(self):

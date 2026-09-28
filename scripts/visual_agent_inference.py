@@ -436,10 +436,34 @@ class VisualAgent:
                 "result": tool_result.output,
                 "returned_images": len(tool_result.images),
             })
+            output = tool_result.output
+            if isinstance(output, dict) and output.get("status") not in {"error", "failed"}:
+                if invocation.name == "grounding_detect":
+                    output = {key: output[key] for key in ("boxes", "confidence")}
+                elif invocation.name == "crop_zoom":
+                    output = {"target_image": output["crop_zoom"]["target_image"]}
+                elif invocation.name == "depth_measure":
+                    if "depths_m" in output:
+                        output = {"regions": [
+                            {"bbox_2d": box, "depth_m": depth}
+                            for box, depth in zip(output["bboxes_2d"], output["depths_m"], strict=True)
+                        ]}
+                    else:
+                        output = {"regions": [{key: output[key] for key in ("bbox_2d", "depth_m")}]}
+                elif invocation.name == "object_count":
+                    count_output = {"count": output["count"]}
+                    if output.get("boxes"):
+                        count_output["boxes"] = output["boxes"]
+                    elif output.get("points_2d"):
+                        count_output["points_2d"] = output["points_2d"]
+                    output = count_output
+                elif invocation.name in {"text_detect", "text_recognize"}:
+                    keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
+                    output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
             serialized = (
-                tool_result.output
-                if isinstance(tool_result.output, str)
-                else json.dumps(tool_result.output, ensure_ascii=False)
+                output
+                if isinstance(output, str)
+                else json.dumps(output, ensure_ascii=False)
             )
             tool_text = f"<tool_response>\n{serialized}\n</tool_response>"
             if tool_result.images:

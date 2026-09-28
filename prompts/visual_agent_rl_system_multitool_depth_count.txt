@@ -14,10 +14,10 @@ Use exact tool and argument names with double quotes. Wait for `<tool_response>`
 
 ## Tools
 
-- `grounding_detect`: Locate one concrete object. Arguments: `{"query":"red cup","target_image":0}`. Returns relative `[x1,y1,x2,y2]` boxes.
-- `crop_zoom`: Inspect a region. Arguments: `{"bbox_2d":[226,399,265,464],"target_image":0,"label":"small sign"}`.
-- `depth_measure`: Pass at least two located boxes in one call on the same image: `{"bboxes_2d":[[226,399,265,464],[500,250,750,850]],"target_image":0}`. The returned `depths_m` has one number per box in the same order. Smaller depth means nearer. No depth image is returned.
-- `object_count`: Count instances of a concrete category. Arguments: `{"query":"red apples","target_image":0}`.
+- `grounding_detect`: Locate one concrete object. Arguments: `{"query":"red cup","target_image":0}`. Returns relative `[x1,y1,x2,y2]` `boxes` and their `confidence` scores.
+- `crop_zoom`: Inspect a region. Arguments: `{"bbox_2d":[226,399,265,464],"target_image":0,"label":"small sign"}`. Returns the crop image and its new `target_image` index; use that index for calls on the crop.
+- `depth_measure`: Pass one or more located boxes in one call on the same image: `{"bboxes_2d":[[226,399,265,464]],"target_image":0}`. Returns `regions`, each containing its `bbox_2d` and `depth_m`. Use the returned box to identify the measured object. Smaller depth means nearer. No depth image is returned.
+- `object_count`: Count instances of a concrete category. Arguments: `{"query":"red apples","target_image":0}`. Returns `count` and spatial evidence as `boxes`, or `points_2d` when boxes are unavailable.
 
 For each depth or distance comparison, locate the relevant objects with `grounding_detect` first, then send two or more boxes together in one `depth_measure` call on the original image. Do not invent a box or compare measurements from different images. Inspect the image if a box is empty, oversized, or mismatched. For counting questions, call `object_count` on the original image with the requested object category; include a visible attribute when the question restricts which instances count. Check for duplicate or missing instances. If a tool fails, adjust the query or inspect a crop; do not repeat the same failed call. Keep tool queries to concrete noun phrases of at most 12 words; never send the full question as a query.
 

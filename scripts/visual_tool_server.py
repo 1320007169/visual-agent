@@ -15,7 +15,7 @@ import queue
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,8 @@ SUPPORTED_TOOLS = {
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
     "ocr_read",
+    "text_detect",
+    "text_recognize",
     "depth_measure",
     "ground_depth",
     "object_count",
@@ -382,6 +384,37 @@ class ToolService:
     crop_size: int = 336
     minimum_crop_size: int = 96
 
+    def _execute_text(
+        self, name: str, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.ocr_bridge is None:
+            raise ToolServerError(f"{name} service is not configured")
+        target = _target_image(arguments, images)
+        remote_arguments = {"image_id": target}
+        if name == "text_recognize":
+            boxes = arguments.get("bboxes_2d")
+            if not isinstance(boxes, list) or not boxes:
+                raise ToolServerError("text_recognize.bboxes_2d must contain at least one box")
+            remote_arguments["bboxes"] = [_relative_box_to_pixels(box, images[target].size) for box in boxes]
+        response = replace(self.ocr_bridge, tool_name=name).execute(
+            images=images, arguments=remote_arguments, instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, name):
+            return error, []
+        regions = []
+        for item in response.result["structured"]["results"]:
+            region = {
+                "bbox_2d": _pixel_box_to_relative(item["bbox"], images[target].size),
+                "confidence": round(float(item["confidence"]), 6),
+            }
+            if name == "text_recognize":
+                region["text"] = str(item["text"])
+            regions.append(region)
+        return {
+            "regions": regions, "count": len(regions), "target_image": target,
+            "coordinate_space": "relative_0_1000", "source": name,
+        }, []
+
     def _execute_ocr(
         self,
         arguments: dict[str, Any],
@@ -592,6 +625,11 @@ class ToolService:
     ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
+        if name in {"text_detect", "text_recognize"}:
+            try:
+                return self._execute_text(name, arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
         if name == "ocr_read":
             try:
                 return self._execute_ocr(arguments, images, instance_id)

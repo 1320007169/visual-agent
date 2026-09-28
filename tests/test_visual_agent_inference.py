@@ -38,7 +38,10 @@ class FakeToolExecutor:
 
     def execute(self, invocation, images):
         self.calls.append((invocation, images))
-        return ToolExecutionResult(output={"count": 2})
+        return ToolExecutionResult(output={
+            "query": "car", "boxes": [[0, 0, 100, 100], [200, 200, 300, 300]],
+            "confidence": [0.9, 0.8], "count": 2, "source": "groundingdino",
+        })
 
 
 class FailingToolExecutor:
@@ -104,6 +107,51 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertEqual(result.response, "<answer>2</answer>")
         self.assertEqual(len(executor.calls), 1)
         self.assertIn("<tool_response>", result.messages[-2]["content"])
+        self.assertNotIn('"source"', result.messages[-2]["content"])
+        self.assertNotIn('"count"', result.messages[-2]["content"])
+        self.assertEqual(result.tool_calls[0]["result"]["count"], 2)
+        self.assertEqual(result.tool_calls[0]["result"]["source"], "groundingdino")
+
+    def test_compact_observations_keep_full_trace_and_crop_image(self):
+        box = [0, 0, 100, 100]
+        crop_image = "data:image/jpeg;base64,eA=="
+        cases = [
+            ("crop_zoom", {"bbox_2d": box, "target_image": 0},
+             {"crop_zoom": {"target_image": 1, "crop_path": "tool://crop.jpg"}, "source": "crop_zoom"},
+             {"target_image": 1}, [crop_image]),
+            ("depth_measure", {"bboxes_2d": [box], "target_image": 0},
+             {"bbox_2d": box, "depth_m": 1.5, "coordinate_space": "relative_0_1000"},
+             {"regions": [{"bbox_2d": box, "depth_m": 1.5}]}, []),
+            ("object_count", {"query": "cars", "target_image": 0},
+             {"count": 2, "boxes": [box], "points_2d": [[50, 50]], "query": "cars", "source": "object_count"},
+             {"count": 2, "boxes": [box]}, []),
+            ("text_detect", {"target_image": 0},
+             {"regions": [{"bbox_2d": box, "confidence": 0.9}], "count": 1},
+             {"regions": [{"bbox_2d": box}]}, []),
+            ("text_recognize", {"bboxes_2d": [box], "target_image": 0},
+             {"regions": [{"bbox_2d": box, "text": "OPEN", "confidence": 0.9}], "count": 1},
+             {"regions": [{"bbox_2d": box, "text": "OPEN"}]}, []),
+            ("depth_measure", {"bboxes_2d": [box], "target_image": 0},
+             {"status": "error", "message": "No valid depth pixels", "recoverable": True},
+             {"status": "error", "message": "No valid depth pixels", "recoverable": True}, []),
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"image-for-transport")
+            image.flush()
+            for name, arguments, original, expected, returned_images in cases:
+                with self.subTest(tool=name, output=original):
+                    model = FakeModelClient()
+                    model.responses[0]["content"] = "<tool_call>" + json.dumps({"name": name, "arguments": arguments}) + "</tool_call>"
+                    executor = FakeToolExecutor()
+                    executor.execute = lambda invocation, images: ToolExecutionResult(output=original, images=returned_images)
+                    result = VisualAgent(model, tool_executor=executor, allowed_tool_names={name}).run([image.name], "Inspect image")
+                    content = result.messages[-2]["content"]
+                    text = content[0]["text"] if isinstance(content, list) else content
+                    observed = json.loads(text.removeprefix("<tool_response>\n").removesuffix("\n</tool_response>"))
+                    self.assertEqual(observed, expected)
+                    self.assertEqual(result.tool_calls[0]["result"], original)
+                    if returned_images:
+                        self.assertEqual(content[1]["image_url"]["url"], crop_image)
 
     def test_agent_recovers_from_tool_error(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:

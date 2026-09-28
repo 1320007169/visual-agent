@@ -17,6 +17,8 @@ VISUAL_TOOL_NAMES = {
     "sam3_crop_zoom_multi",
     "grounding_detect",
     "ocr_read",
+    "text_detect",
+    "text_recognize",
     "depth_measure",
     "ground_depth",
     "object_count",
@@ -175,7 +177,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "depth_measure",
-            "description": "Return the median metric depth inside one relative 0-1000 bbox.",
+            "description": "Return regions with bbox_2d and median depth_m for one or more located boxes in the same image.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -183,15 +185,18 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": "Zero-based index into the sample images array.",
                     },
-                    "bbox_2d": {
+                    "bboxes_2d": {
                         "type": "array",
-                        "items": {"type": "number", "minimum": 0, "maximum": 1000},
-                        "minItems": 4,
-                        "maxItems": 4,
-                        "description": "Relative xyxy region whose median depth should be measured.",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                            "minItems": 4,
+                            "maxItems": 4,
+                        },
+                        "minItems": 1,
                     },
                 },
-                "required": ["bbox_2d", "target_image"],
+                "required": ["bboxes_2d", "target_image"],
             },
         },
     },
@@ -228,6 +233,44 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["query", "target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "text_detect",
+            "description": "Locate text without reading it; return regions with bbox_2d in relative 0-1000 coordinates.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {"type": "integer", "description": "Zero-based image index."},
+                },
+                "required": ["target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "text_recognize",
+            "description": "Read selected relative 0-1000 boxes without running detection; return regions with bbox_2d and text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {"type": "integer", "description": "Zero-based image index."},
+                    "bboxes_2d": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                            "minItems": 4,
+                            "maxItems": 4,
+                        },
+                        "minItems": 1,
+                    },
+                },
+                "required": ["bboxes_2d", "target_image"],
             },
         },
     },

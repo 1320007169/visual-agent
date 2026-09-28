@@ -70,3 +70,37 @@ tools:
             query: {type: string, description: Concrete object category to count.}
             target_image: {type: integer, description: Zero-based image index.}
           required: [query, target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: text_detect
+        description: Locate text without reading it; return regions with bbox_2d in relative 0-1000 coordinates.
+        parameters:
+          type: object
+          properties:
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [target_image]
+
+  - class_name: verl.tools.visual_tool.OnlineVisualTool
+    config: *online_visual_tool
+    tool_schema:
+      type: function
+      function:
+        name: text_recognize
+        description: Read selected relative 0-1000 boxes without running detection; return regions with bbox_2d and text.
+        parameters:
+          type: object
+          properties:
+            bboxes_2d:
+              type: array
+              items:
+                type: array
+                items: {type: number, minimum: 0, maximum: 1000}
+                minItems: 4
+                maxItems: 4
+              minItems: 1
+            target_image: {type: integer, description: Zero-based image index.}
+          required: [bboxes_2d, target_image]

@@ -194,7 +194,7 @@ def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="
         ) / len(rows)
         if accuracies is not None:
             metrics[f"{root}/acc_mean"] = sum(float(accuracies[i]) for i, _ in rows) / len(rows)
-        for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count"):
+        for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize"):
             tool_calls = [call for _, calls in rows for call in calls if call.get("tool") == tool]
             metrics[f"{root}/{tool}/trajectory_rate"] = sum(
                 any(call.get("tool") == tool for call in calls) for _, calls in rows

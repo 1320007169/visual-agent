@@ -175,10 +175,33 @@ class OnlineVisualTool(BaseTool):
         state["images"].extend(returned_images)
         state["calls"].append(parameters)
         output = result.get("result", result.get("output", result))
-        response_text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
         metrics = dict(result.get("metrics") or {})
         if isinstance(output, dict) and output.get("status") in {"error", "failed"}:
             metrics["tool_error"] = str(output.get("message") or output.get("error") or output)
+        elif isinstance(output, dict):
+            if self.name == "grounding_detect":
+                output = {key: output[key] for key in ("boxes", "confidence")}
+            elif self.name == "crop_zoom":
+                output = {"target_image": output["crop_zoom"]["target_image"]}
+            elif self.name == "depth_measure":
+                if "depths_m" in output:
+                    output = {"regions": [
+                        {"bbox_2d": box, "depth_m": depth}
+                        for box, depth in zip(output["bboxes_2d"], output["depths_m"], strict=True)
+                    ]}
+                else:
+                    output = {"regions": [{key: output[key] for key in ("bbox_2d", "depth_m")}]}
+            elif self.name == "object_count":
+                count_output = {"count": output["count"]}
+                if output.get("boxes"):
+                    count_output["boxes"] = output["boxes"]
+                elif output.get("points_2d"):
+                    count_output["points_2d"] = output["points_2d"]
+                output = count_output
+            elif self.name in {"text_detect", "text_recognize"}:
+                keys = ("bbox_2d", "text") if self.name == "text_recognize" else ("bbox_2d",)
+                output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
+        response_text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
         metrics.update(
             {
                 "online": True,

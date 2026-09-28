@@ -56,6 +56,10 @@ set +a
 if [[ -n "$inherited_pythonpath" ]]; then
   export PYTHONPATH="$inherited_pythonpath${PYTHONPATH:+:$PYTHONPATH}"
 fi
+if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
+    export VTS_OCR_ENDPOINT="http://127.0.0.1:9002"
+    export PADDLEX_MODEL_ROOT="${PADDLEX_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models}"
+fi
 
 export VTS_TOOL_BRIDGE_ROOT="${VTS_TOOL_BRIDGE_ROOT:-${VTS_OUTPUT_ROOT:-$BASE/outputs}/visual_agent_bridge/$RUN_ID/${HOSTNAME:-node}}"
 export COUNT_SERVICE_CONFIG="${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml}"
@@ -85,6 +89,10 @@ unique_port_count="$(printf '%s\n' "${depth_ports[@]}" "${count_ports[@]}" | sor
   echo "error: VTS ports must be distinct" >&2
   exit 2
 }
+if [[ "${RL_SPLIT_OCR:-0}" == "1" && ",$VTS_DEPTH_PORTS,$VTS_COUNT_PORTS," == *,9002,* ]]; then
+    echo "error: OCR requires port 9002; depth and count must use other ports" >&2
+    exit 2
+fi
 export VTS_DEPTH_ENDPOINT="${VTS_DEPTH_ENDPOINT:-http://127.0.0.1:${depth_ports[0]},http://127.0.0.1:${depth_ports[1]}}"
 export VTS_COUNT_ENDPOINT="${VTS_COUNT_ENDPOINT:-http://127.0.0.1:${count_ports[0]},http://127.0.0.1:${count_ports[1]}}"
 if [[ "$START_VTS_SERVICES" == "1" ]]; then
@@ -135,7 +143,11 @@ if [[ "$START_VTS_SERVICES" == "1" ]]; then
   export PYTHONPATH="$PIPELINE_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   VTS_SERVICE_DIR="${VTS_SERVICE_DIR:-$BASE/logs/visual-agent-multitool/$RUN_ID/${HOSTNAME:-node}}"
   mkdir -p "$VTS_SERVICE_DIR" "$VTS_TOOL_BRIDGE_ROOT"
-  "$VTS_DEPTH_ENV/bin/python3" - "${depth_ports[@]}" "${count_ports[@]}" <<'PY'
+    vts_ports=("${depth_ports[@]}" "${count_ports[@]}")
+    if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
+        vts_ports+=(9002)
+    fi
+    "$VTS_DEPTH_ENV/bin/python3" - "${vts_ports[@]}" <<'PY'
 import socket
 import sys
 
@@ -182,9 +194,20 @@ PY
   for index in 0 1; do
     start_vts_service "count$index" "$VTS_COUNT_ENV" "$COUNT_SERVICE_CONFIG" "${count_ports[index]}"
   done
+    if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
+        setsid env CUDA_VISIBLE_DEVICES="$TOOL_GPU" PYTHONUNBUFFERED=1 \
+            conda run --no-capture-output -p "$VTS_OCR_ENV" \
+                python3 "$REPO_ROOT/scripts/paddleocr_split_server.py" --model-root "$PADDLEX_MODEL_ROOT" --port 9002 \
+                >"$VTS_SERVICE_DIR/ocr.log" 2>&1 &
+        VTS_SERVICE_PIDS+=("$!")
+        echo "Started PP-OCRv5 detection and recognition on GPU $TOOL_GPU, port 9002; log: $VTS_SERVICE_DIR/ocr.log"
+    fi
 fi
 
 IFS=',' read -r -a vts_endpoints <<< "$VTS_DEPTH_ENDPOINT,$VTS_COUNT_ENDPOINT"
+if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
+    vts_endpoints+=("$VTS_OCR_ENDPOINT")
+fi
 for index in "${!vts_endpoints[@]}"; do
   endpoint="${vts_endpoints[index]}"
   deadline=$((SECONDS + VTS_SERVICE_STARTUP_TIMEOUT))
