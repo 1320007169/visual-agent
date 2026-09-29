@@ -129,6 +129,9 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
+    if valid_adv.numel() == 0:
+        valid_adv = advantages.new_zeros(1)
+        valid_returns = returns.new_zeros(1)
 
     if use_critic:
         values = batch.batch["values"]
@@ -221,7 +224,7 @@ def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Di
 
     return {
         **{f"timing_s/{name}": value for name, value in timing_raw.items()},
-        **{f"timing_per_token_ms/{name}": timing_raw[name] * 1000 / num_tokens_of_section[name] for name in set(num_tokens_of_section.keys()) & set(timing_raw.keys())},
+        **{f"timing_per_token_ms/{name}": timing_raw[name] * 1000 / max(1, num_tokens_of_section[name]) for name in set(num_tokens_of_section.keys()) & set(timing_raw.keys())},
     }
 
 

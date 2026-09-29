@@ -30,6 +30,7 @@ from .vlm2bench import VLM2Bench
 from .vlmbias import VLMBias
 from .spatial457 import Spatial457
 from .charxiv import CharXiv
+from .fsc147 import FSC147
 
 from .mmbench_video import MMBenchVideo
 from .videomme import VideoMME
@@ -211,7 +212,7 @@ IMAGE_DATASET = [
     MMEReasoning, GOBenchDataset, SFE, ChartMimic, MMVMBench, XLRSBench,
     OmniEarthMCQBench, VisFactor, OSTDataset, OCRBench_v2, TreeBench, CVQA, M4Bench,
     AyaVisionBench, TopViewRS, VLMBias, MMHELIX, MedqbenchMCQDataset,
-    MedqbenchPairedDescriptionDataset, MedqbenchCaptionDataset
+    MedqbenchPairedDescriptionDataset, MedqbenchCaptionDataset, FSC147
 ]
 
 VIDEO_DATASET = [

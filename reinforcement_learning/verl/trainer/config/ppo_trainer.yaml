@@ -122,6 +122,9 @@ actor_rollout_ref:
     # Whether to remove padding tokens in inputs during training
     use_remove_padding: false
 
+    # Crop shared prompt/response boundary padding without packing sequences.
+    crop_common_padding: false
+
     # Set to positive value to enable LoRA (e.g., 32)
     lora_rank: 0
 
@@ -495,6 +498,9 @@ actor_rollout_ref:
 
     # Multi-turn interaction config for tools or chat.
     multi_turn:
+
+      # Exclude budget-truncated trajectories from all training losses and GRPO statistics.
+      overlong_masking: true
 
       # set to True for multi-turn tool interaction tasks; should set rollout.name to sglang as well
       enable: False

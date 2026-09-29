@@ -222,6 +222,9 @@ def compute_grpo_outcome_advantage(
     else:
         reward_valid_mask = np.asarray(reward_valid_mask, dtype=bool).tolist()
 
+    has_loss = response_mask.any(dim=-1).detach().cpu().tolist()
+    reward_valid_mask = [valid and has_tokens for valid, has_tokens in zip(reward_valid_mask, has_loss)]
+
     id2score = defaultdict(list)
     id2mean = {}
     id2std = {}
@@ -546,7 +549,7 @@ def agg_loss(loss_mat: torch.Tensor, loss_mask: torch.Tensor, loss_agg_mode: str
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)  # token-sum
         loss = torch.mean(seq_losses)  # seq-mean
     elif loss_agg_mode == "seq-mean-token-mean":
-        seq_losses = torch.sum(loss_mat * loss_mask, dim=-1) / torch.sum(loss_mask, dim=-1)  # token-mean
+        seq_losses = torch.sum(loss_mat * loss_mask, dim=-1) / torch.sum(loss_mask, dim=-1).clamp_min(1)  # token-mean
         loss = torch.mean(seq_losses)  # seq-mean
     elif loss_agg_mode == "seq-mean-token-sum-norm":
         seq_losses = torch.sum(loss_mat * loss_mask, dim=-1)

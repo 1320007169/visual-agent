@@ -574,6 +574,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             with open_dict(self.config.actor):
                 self.config.actor.use_remove_padding = use_remove_padding
                 self.config.actor.use_fused_kernels = use_fused_kernels
+                self.config.actor.crop_common_padding = self.config.model.get("crop_common_padding", False)
             self.actor = DataParallelPPOActor(config=self.config.actor, actor_module=self.actor_module_fsdp, actor_optimizer=self.actor_optimizer, processor=self.processor)
 
         if self._is_rollout:
@@ -596,6 +597,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             with open_dict(self.config.ref):
                 self.config.ref.use_remove_padding = use_remove_padding
                 self.config.ref.use_fused_kernels = use_fused_kernels
+                self.config.ref.crop_common_padding = self.config.model.get("crop_common_padding", False)
             self.ref_policy = DataParallelPPOActor(config=self.config.ref, actor_module=self.ref_module_fsdp, processor=self.processor)
 
         if self._is_actor:
@@ -648,7 +650,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
 
             lr = self.actor_lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr
-            self.actor_lr_scheduler.step()
+            if any(metrics.get("actor/optimizer_step_per_minibatch", [1])):
+                self.actor_lr_scheduler.step()
 
             # TODO: here, we should return all metrics
             output = DataProto(meta_info={"metrics": metrics})

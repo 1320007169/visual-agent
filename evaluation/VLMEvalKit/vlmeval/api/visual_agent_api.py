@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import threading
+import traceback
+from uuid import uuid4
 from pathlib import Path
 from typing import Any
 
@@ -159,8 +161,34 @@ class VisualAgentAPI(BaseAPI):
         return images, text
 
     def generate_inner(self, inputs: list[dict[str, Any]], **kwargs: Any):
+        state: dict[str, Any] = {}
+        try:
+            return self._generate_inner(inputs, state, **kwargs)
+        except Exception as exc:
+            failure_dir = os.getenv("VISUAL_AGENT_FAILURE_TRACE_DIR", "").strip()
+            if failure_dir:
+                record = {
+                    "dataset": kwargs.get("dataset"),
+                    "inputs": inputs,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                    **state,
+                }
+                try:
+                    directory = Path(failure_dir)
+                    directory.mkdir(parents=True, exist_ok=True)
+                    path = directory / f"{uuid4().hex}.json"
+                    path.write_text(json.dumps(_redact_data_urls(record), ensure_ascii=False), encoding="utf-8")
+                    self.logger.error("Visual-agent request failed (%s): %s; trace: %s", type(exc).__name__, exc, path)
+                except Exception as save_error:
+                    self.logger.error("Could not save failure trace: %s; original error: %s", save_error, exc)
+            raise
+
+    def _generate_inner(self, inputs: list[dict[str, Any]], state: dict[str, Any], **kwargs: Any):
         images, question = self._unpack_inputs(inputs)
         model_base, tool_base = self._next_endpoints()
+        state.update(image_paths=images, question=question, model_endpoint=model_base, tool_endpoint=tool_base)
         model_client = OpenAICompatibleModelClient(
             model_base,
             api_key=self.api_key,
@@ -213,7 +241,7 @@ class VisualAgentAPI(BaseAPI):
             system_prompt=self.system_prompt,
             allowed_tool_names=self.allowed_tool_names,
         )
-        result = agent.run(images, question)
+        result = agent.run(images, question, trace_sink=state)
         match = ANSWER_RE.search(result.response)
         answer = (match.group(1) if match else result.response).strip()
         trace = _redact_data_urls(result.to_dict())

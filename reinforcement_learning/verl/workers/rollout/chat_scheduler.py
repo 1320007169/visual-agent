@@ -40,6 +40,7 @@ from verl.protocol import DataProto
 from verl.tools.base_tool import initialize_tools_from_config
 from verl.utils import hf_processor, hf_tokenizer
 from verl.utils.fs import copy_to_local
+from verl.workers.rollout.response_budget import ResponseBudget, retain_trace
 
 logger = logging.getLogger(__file__)
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -145,7 +146,7 @@ def _collect_message_images(messages: List[Dict[str, Any]]) -> List[Any]:
     return images
 
 
-def _encode_response_with_images(tokenizer, processor, response_text: str, images: List[Any]):
+def _encode_response_with_images(tokenizer, processor, response_text: str, images: List[Any], image_cache=None):
     """Tokenize a response and build matching features for returned images."""
     if not images:
         encoded = tokenizer(response_text, return_tensors="pt", add_special_tokens=False)
@@ -155,9 +156,18 @@ def _encode_response_with_images(tokenizer, processor, response_text: str, image
 
     from verl.utils.dataset.vision_utils import process_image
 
+    prepared_images = []
+    for image in images:
+        key = image if isinstance(image, str) else id(image)
+        if image_cache is None:
+            prepared_images.append(process_image(image))
+        else:
+            if key not in image_cache:
+                image_cache[key] = process_image(image)
+            prepared_images.append(image_cache[key])
     model_inputs = processor(
         text=[response_text],
-        images=[process_image(image) for image in images],
+        images=prepared_images,
         return_tensors="pt",
         add_special_tokens=False,
     )
@@ -236,6 +246,16 @@ class ToolCompletionCallback(CompletionCallback):
         messages.append(message)
         finish_reason = completions.choices[0].finish_reason
 
+        budget = info["response_budget"]
+        budget.enforce(messages)
+        if budget.truncated:
+            return
+        if finish_reason == "length" and info.get("budget_limited_generation", False):
+            budget.truncated = True
+            budget.reason = "generation_budget"
+            budget.drop_last_group(messages)
+            return
+
         info["assistant_turns"] = info.get("assistant_turns", 0) + 1
 
         # A Native rollout is deliberately single-turn and must never execute
@@ -273,6 +293,11 @@ class ToolCompletionCallback(CompletionCallback):
             return
 
         # STEP 2: call tools
+        if budget.generation_allowance(messages) == 0:
+            budget.truncated = True
+            budget.reason = "tool_budget"
+            budget.drop_last_group(messages)
+            return
         tool_calls = native_tool_calls or xml_tool_calls
         print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Call {len(tool_calls)} tools")
         tasks = []
@@ -283,6 +308,10 @@ class ToolCompletionCallback(CompletionCallback):
             print(f"[id={completions.id},turn={len(messages)},finish_reason={finish_reason}] Error when calling tools, done!")
             return
         messages.extend(tool_responses)
+
+        budget.enforce(messages)
+        if budget.truncated:
+            return
 
         # STEP 3: resubmit completion request with tool responses
         self.scheduler.submit_chat_completions(messages=messages, request_id=completions.id, info=info)
@@ -359,6 +388,9 @@ class ToolCompletionCallback(CompletionCallback):
             tool_trace["error"] = tool_metrics["tool_error"]
         tool_trace["service_latency_ms"] = tool_metrics.get("latency_ms")
         tool_trace["returned_image_count"] = len(returned_images)
+        if "raw_result" in tool_metrics:
+            tool_trace["raw_result"] = tool_metrics["raw_result"]
+        tool_trace["model_observation"] = tool_response
         if returned_images:
             info.setdefault("images", []).extend(returned_images)
 
@@ -394,6 +426,7 @@ class ToolCompletionCallback(CompletionCallback):
         batch_conversations: List[List[Dict[str, str]]],
         n: int,
         tools_enabled: bool = True,
+        response_budgets=None,
     ) -> DataProto:
         # NOTE: consistent with batch version of generate_sequences in vllm_rollout_spmd.py
         # prompts: left pad
@@ -410,27 +443,26 @@ class ToolCompletionCallback(CompletionCallback):
         ]
         assert len(batch_conversations) == len(prompt_texts) * n
 
-        sequences = [
-            self.tokenizer.apply_chat_template(conversation, tools=tool_schemas, add_generation_prompt=False, tokenize=False)
-            for conversation in batch_conversations
-        ]
-        response_texts = [sequence[len(prompt_texts[i // n]) :] for i, sequence in enumerate(sequences)]
         response_input_ids = []
         response_attention_masks = []
         rollout_multi_modal_inputs = []
         raw_prompts = batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0)
-        for index, response_text in enumerate(response_texts):
-            response_messages = batch_conversations[index][len(raw_prompts[index]) :]
-            returned_images = _collect_message_images(response_messages)
-            input_ids, attention_mask, mm_inputs = _encode_response_with_images(
-                self.tokenizer,
-                self.processor,
-                response_text,
-                returned_images,
-            )
+        if response_budgets is None:
+            response_budgets = [ResponseBudget(
+                self.tokenizer, self.processor, prompt, tool_schemas,
+                self.config.actor_rollout_ref.rollout.response_length,
+                _encode_response_with_images, _collect_message_images,
+            ) for prompt in raw_prompts]
+        for index, conversation in enumerate(batch_conversations):
+            input_ids, attention_mask, mm_inputs = response_budgets[index].enforce(conversation)
+            if input_ids.numel() == 0:
+                # A masked placeholder keeps tensor widths and rank call counts stable.
+                input_ids = torch.tensor([self.tokenizer.pad_token_id], dtype=torch.long)
+                attention_mask = torch.zeros_like(input_ids)
             response_input_ids.append(input_ids)
             response_attention_masks.append(attention_mask)
             rollout_multi_modal_inputs.append(mm_inputs)
+            response_budgets[index].release_cache()
 
         responses = {
             "input_ids": torch.nn.utils.rnn.pad_sequence(
@@ -455,6 +487,9 @@ class ToolCompletionCallback(CompletionCallback):
 
         # response_mask: response mask with tools calling masked out
         response_mask = self._mask_out_tools_calling_tokens(batch.non_tensor_batch["raw_prompt"].repeat(n, axis=0), batch_conversations, responses["input_ids"], responses["attention_mask"])
+        truncated = torch.tensor([budget.truncated for budget in response_budgets], dtype=torch.bool)
+        if self.config.actor_rollout_ref.rollout.multi_turn.get("overlong_masking", True):
+            response_mask[truncated] = 0
 
         input_ids = torch.cat([prompt_input_ids, responses["input_ids"]], dim=1)
         attention_mask = torch.cat([prompt_attention_mask, responses["attention_mask"]], dim=1)
@@ -477,6 +512,7 @@ class ToolCompletionCallback(CompletionCallback):
                 "responses": responses["input_ids"],  # [bsz, response_length]
                 "response_mask": response_mask,  # [bsz, response_length]
                 "loss_mask": loss_mask,  # [bsz, prompt_length + response_length]
+                "truncated": truncated,
                 "input_ids": input_ids,  # [bsz, prompt_length + response_length]
                 "attention_mask": attention_mask,  # [bsz, prompt_length + response_length]
                 "position_ids": position_ids,  # [bsz, prompt_length + response_length]
@@ -554,7 +590,9 @@ class ToolCompletionCallback(CompletionCallback):
         loss_mask = attention_mask.clone()
         for i in range(batch_size):
             responses = batch_conversations[i][len(raw_prompts[i]) :]
-            assert len(responses) > 0, f"responses is empty: {responses}"
+            if not responses:
+                loss_mask[i] = 0
+                continue
 
             roles = deduplicate_adjacent_tool_calls([response_role(response) for response in responses])
             # Each turn should be: [BOS]...[EOS]
@@ -624,6 +662,16 @@ class ChatCompletionScheduler:
             request_id: Request id.
             info: Any other auxiliary information pass across multi-turn.
         """
+        allowance = info["response_budget"].generation_allowance(messages)
+        if allowance == 0:
+            info["response_budget"].truncated = True
+            info["response_budget"].reason = "generation_budget"
+            if info["__depth__"] == 0:
+                info["__done__"].set()
+            return
+        requested = info["max_tokens_per_turn"]
+        info["budget_limited_generation"] = allowance < requested
+        info["__sampling_params__"] = {**info["__sampling_params__"], "max_tokens": min(requested, allowance)}
         info["__depth__"] += 1
         task = asyncio.create_task(self._submit_chat_completions_and_callback(messages, request_id, info))
 
@@ -814,12 +862,17 @@ class ChatCompletionScheduler:
             )
 
         trajectory_traces = await asyncio.gather(*tasks)
+        response_budgets = [trace.pop("_response_budget") for trace in trajectory_traces]
         output_batch = self.completion_callback.postprocess(
             batch,
             batch_conversations,
             n=n,
             tools_enabled=tools_enabled,
+            response_budgets=response_budgets,
         )
+        turns = output_batch.non_tensor_batch["__num_turns__"]
+        for trace, budget, retained_turns in zip(trajectory_traces, response_budgets, turns):
+            retain_trace(trace, int(retained_turns), budget.truncated, budget.reason)
         if self.trace_rollouts:
             output_batch.non_tensor_batch["rollout_trace"] = np.array(trajectory_traces, dtype=object)
         output_batch.meta_info["timing"] = {"generate_sequences": time.time() - t_start}
@@ -841,14 +894,18 @@ class ChatCompletionScheduler:
         async with self.request_semaphore:
             trajectory_started = time.perf_counter()
             done = asyncio.Event()
-            trace = None
-            if self.trace_rollouts:
-                trace = {
-                    "started_at_unix": time.time(),
-                    "queue_latency_ms": round((trajectory_started - queued_at) * 1000, 3),
-                    "model_calls": [],
-                    "tool_calls": [],
-                }
+            trace = {
+                "started_at_unix": time.time(),
+                "queue_latency_ms": round((trajectory_started - queued_at) * 1000, 3),
+                "model_calls": [],
+                "tool_calls": [],
+            }
+            callback = self.completion_callback
+            budget = ResponseBudget(
+                callback.tokenizer, callback.processor, messages,
+                callback.tool_schemas if tools_enabled else None,
+                self.config.response_length, _encode_response_with_images, _collect_message_images,
+            )
 
             info = {
                 "__done__": done,
@@ -857,14 +914,19 @@ class ChatCompletionScheduler:
                 "__trace__": trace,
                 "images": images or [],
                 "tools_enabled": tools_enabled,
+                "response_budget": budget,
+                "max_tokens_per_turn": sampling_params.get("max_tokens", self.config.response_length),
             }
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
 
             # Wait until all completion requests are done
             await done.wait()
-            if trace is None:
-                return None
+
+            # Keep the retained encoding, but release intermediate images before
+            # other trajectories in this rollout batch finish.
+            budget.enforce(messages)
+            budget.release_cache(keep_encoding=True)
 
             active_latency_ms = (time.perf_counter() - trajectory_started) * 1000
             model_latency_ms = sum(item["latency_ms"] for item in trace["model_calls"])
@@ -884,4 +946,5 @@ class ChatCompletionScheduler:
                     "tool_call_count": len(trace["tool_calls"]),
                 }
             )
+            trace["_response_budget"] = budget
             return trace

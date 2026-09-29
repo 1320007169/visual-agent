@@ -22,8 +22,8 @@ data/Visual_Agent/
 /data/*
 !/data/README.md
 Visual_Agent/
-model/
-models/
+/model/
+/models/
 /images
 data/**/images/
 Visual_Agent/training_trajectories_natural/images/

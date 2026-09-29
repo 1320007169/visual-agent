@@ -220,6 +220,51 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("No valid depth pixels", message["content"])
         self.assertEqual(info["__trace__"]["tool_calls"][0]["status"], "error")
+        self.assertEqual(info["__trace__"]["tool_calls"][0]["raw_result"], self.result["result"])
+
+    async def test_callback_preserves_raw_results_and_compact_observations(self):
+        path = VERL / "workers/rollout/chat_scheduler.py"
+        tree = ast.parse(path.read_text())
+        node = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_call_tool")
+        namespace = {"Any": object, "Dict": dict, "json": json, "time": importlib.import_module("time")}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
+        boxes = [[0, 0, 100, 100], [100, 100, 200, 200]]
+        crop_image = "data:image/jpeg;base64,eA=="
+        cases = [
+            ("grounding_detect", {"query": "number above entrance", "target_image": 0},
+             {"boxes": boxes, "confidence": [0.8, 0.7], "labels": ["entrance", "number"],
+              "query": "number above entrance", "source": "groundingdino", "count": 2},
+             {"boxes": boxes, "confidence": [0.8, 0.7], "labels": ["entrance", "number"]}, []),
+            ("crop_zoom", {"bbox_2d": boxes[0], "target_image": 0},
+             {"crop_zoom": {"target_image": 1, "crop_path": "tool://crop.jpg"}, "source": "crop_zoom"},
+             {"target_image": 1}, [crop_image]),
+            ("depth_measure", self.arguments,
+             {"bboxes_2d": boxes, "depths_m": [1.0, 2.0], "target_image": 0},
+             {"regions": [{"bbox_2d": box, "depth_m": depth} for box, depth in zip(boxes, [1.0, 2.0])]}, []),
+            ("object_count", {"query": "cars", "target_image": 0},
+             {"count": 2, "boxes": boxes, "points_2d": [[50, 50], [150, 150]], "source": "object_count"},
+             {"count": 2, "boxes": boxes}, []),
+        ]
+        for name, arguments, original, expected, images in cases:
+            with self.subTest(tool=name), patch("builtins.print"):
+                tool = visual_tool.OnlineVisualTool(
+                    {"base_url": f"http://127.0.0.1:{self.server.server_port}"}, tool_schema(name),
+                )
+                self.result = {"status": "success", "result": original, "images": images}
+                info = {"images": ["data:image/png;base64,AA=="], "__trace__": {"model_calls": [], "tool_calls": []}}
+                message = await namespace["_call_tool"](
+                    SimpleNamespace(tools={name: tool}), {"name": name, "arguments": arguments}, info, xml_mode=True,
+                )
+                trace = info["__trace__"]["tool_calls"][0]
+                self.assertEqual(trace["status"], "success")
+                self.assertEqual(json.loads(trace["model_observation"]), expected)
+                self.assertEqual(trace["raw_result"], original)
+                self.assertEqual(json.loads(json.dumps(trace))["raw_result"], original)
+                self.assertEqual(trace["returned_image_count"], len(images))
+                if images:
+                    self.assertEqual(message["content"][1]["image_url"]["url"], crop_image)
+                else:
+                    self.assertEqual(message["content"], f'<tool_response>\n{trace["model_observation"]}\n</tool_response>')
 
 
 if __name__ == "__main__":

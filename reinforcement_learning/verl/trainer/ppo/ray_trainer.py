@@ -360,7 +360,11 @@ def compute_response_mask(data: DataProto):
     responses = data.batch["responses"]
     response_length = responses.size(1)
     action_or_attn_mask = data.batch['action_mask'] if 'action_mask' in data.batch.keys() else data.batch['attention_mask']
-    return action_or_attn_mask[:, -response_length:]
+    mask = action_or_attn_mask[:, -response_length:]
+    if "loss_mask" in data.batch:
+        has_loss = data.batch["loss_mask"][:, -response_length:].any(dim=-1)
+        mask = mask * has_loss.unsqueeze(-1)
+    return mask
 
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
@@ -1424,6 +1428,10 @@ class RayPPOTrainer:
                         # repeat to align with repeated responses in rollout
                         batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
+
+                    if "truncated" in batch.batch:
+                        metrics["rollout/truncated_rate"] = batch.batch["truncated"].float().mean().item()
+                        metrics["rollout/empty_loss_rate"] = (~batch.batch["loss_mask"].bool().any(dim=-1)).float().mean().item()
 
                     # Multi-turn visual tools may append crop images to the
                     # response. Merge their processor outputs with each

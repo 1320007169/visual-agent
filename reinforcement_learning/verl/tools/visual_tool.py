@@ -176,11 +176,12 @@ class OnlineVisualTool(BaseTool):
         state["calls"].append(parameters)
         output = result.get("result", result.get("output", result))
         metrics = dict(result.get("metrics") or {})
+        metrics["raw_result"] = output
         if isinstance(output, dict) and output.get("status") in {"error", "failed"}:
             metrics["tool_error"] = str(output.get("message") or output.get("error") or output)
         elif isinstance(output, dict):
             if self.name == "grounding_detect":
-                output = {key: output[key] for key in ("boxes", "confidence")}
+                output = {key: output[key] for key in ("boxes", "confidence", "labels") if key in output}
             elif self.name == "crop_zoom":
                 output = {"target_image": output["crop_zoom"]["target_image"]}
             elif self.name == "depth_measure":

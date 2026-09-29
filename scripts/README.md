@@ -27,6 +27,7 @@
 - 四工具 RL：[tool schema](../reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_depth_count_config.yaml)、[system prompt](../prompts/visual_agent_rl_system_multitool_depth_count.txt)。
 - `depth_measure` 接收同一图片上的一个或多个 `bboxes_2d`，返回 `regions`，每项直接包含 `bbox_2d` 和 `depth_m`。
 - `text_detect(target_image)` 返回 `regions`，每项只有 `bbox_2d`；`text_recognize(target_image, bboxes_2d)` 返回 `regions`，每项包含 `bbox_2d` 和 `text`。
+- 模型看到精简后的工具返回；`grounding_detect` 保留 `boxes`、`labels` 和 `confidence`。RL 训练及验证 JSONL 的 `rollout_trace.tool_calls` 同时保存 `raw_result`（原始工具结果）和 `model_observation`（模型实际收到的文本）。返回图片仍按原协议传入模型，这两个字段不额外归档图片内容。
 - 两节点 ModelArts 入口默认先做验证，每 40 步验证一次，每 20 步保存；最佳权重按各数据源验证准确率的宏平均选取。恢复方式见 [RL 训练说明](../docs/rl_multitool_training.md)。
 
 ### 运行命令
@@ -86,6 +87,38 @@ OCR 服务使用 `PIPELINE_ROOT/.env` 中的 `VTS_OCR_ENV`，模型目录由 `PA
 本地 `repair_data/` 保存 P2R 修复用的标注数据，尚未提交。
 
 ## 公共内部脚本
+
+### 六工具双权重评测
+
+入口：[run_visual_agent_eval_multitool_ocr_step20_8gpu.sh](run_visual_agent_eval_multitool_ocr_step20_8gpu.sh)。
+沿用此前 step80 的单节点 8 卡评测协议，依次评测 64 卡 OCR 训练的 step20 和 24 卡训练当前最新完整的 step40（路径固定，便于复现）。
+使用六工具 RL prompt，最多 8 轮、每轮 512 token；评测 VStarBench、HRBench8K、OCRBench、MME-RealWorld-Lite、HRBench4K、MME-RealWorld-CN、CV-Bench-2D、CV-Bench-3D、ChartQA_TEST、FSC147_TEST。
+ChartQA 使用 `VLMEVAL_CHARTQA_RULE_ONLY=1`，沿用 2026-09-22 Qwen3 base 直答基准的规则评分模式。
+FSC147_TEST 使用已有 CountGDPlusPlus 的 FSCD 点标注（1,190 张测试图片），按每张图片的类别生成文字计数问题，不提供 exemplar 框。
+这是文字指定目标的六工具 Agent 计数评测，与原始 FSC 的 few-shot exemplar 协议不同。
+FSC 图片预先下载到共享目录 `$BASE/visual-tools/datasets/fsc147/images_384_VarV2`，下载包约 204 MB，校验 SHA256 和图片完整性。
+提交后，脚本在 GPU 服务启动前调用 `prepare_fsc147_eval.py`，校验本地图片并生成 TSV。默认 `FSC147_DOWNLOAD_IMAGES=0`，无需在评测作业里下载。
+可通过 `FSC147_IMAGE_ROOT` 指定其他已有图片目录；确需在线补下载时设置 `FSC147_DOWNLOAD_IMAGES=1`。
+评分输出 `MAE`、`RMSE`、有效回答率和失败数，无需 judge API；若有无效回答，完整集 MAE/RMSE 留空，同时单独报告 `MAE_valid`/`RMSE_valid`，避免跳过失败样本而高估效果。
+7 卡用于模型副本，1 卡用于 GroundingDINO、深度、计数和独立 OCR 检测/识别服务。
+保留并发 14、GroundingDINO 副本 1、原有 vLLM 和 CUDA 环境。
+每次新建 `outputs/vlmeval/multitool_ocr_step20_8gpu/<run_id>/`，保留服务日志及评测轨迹；已有目录会拒绝复用。
+预检使用独立临时结果目录，成功或失败后自动清理，日志仍保存在 `LOG_DIR`；可以固定 `RUN_ID`/`WORK_ROOT` 先预检再正式启动。
+两个权重分别写入 `64gpu_step20/`、`24gpu_step40/`，共用 OCR、深度、计数服务，模型副本依次加载。
+`status.tsv` 保存完成状态；第一个权重评测失败时停止。`HF_HOME` 指向已有 CN 数据集缓存 `$BASE/hf_cache`。
+
+```bash
+# 沿用已有预检模式，不启动 GPU 服务。
+EVAL_PREFLIGHT_ONLY=1 bash scripts/run_visual_agent_eval_multitool_ocr_step20_8gpu.sh
+
+# 使用现有转换器生成 ModelArts 提交入口，保留平台软链接初始化。
+python scripts/convert_training_launcher_to_modelarts.py \
+  scripts/run_visual_agent_eval_multitool_ocr_step20_8gpu.sh --profile basic \
+  --output /home/ma-user/work/algorithm/codebkp/run_visual_agent/eval/run_visual_agent_eval_multitool_ocr_step20_8gpu_modelarts.sh
+```
+
+可用 `STEP20_MODEL_PATH`、`STEP24_MODEL_PATH`、`EVAL_DATASETS` 覆盖默认选择。
+ModelArts 申请单节点 8 卡；提交生成的 `.sh` 入口，使用 Bash 执行。
 
 这些文件负责启动链中的某一步。使用上面的具体实验入口可以得到对应的数据、环境、工具与训练参数。
 

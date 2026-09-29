@@ -50,6 +50,25 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+def crop_common_padding(micro_batch):
+    """Crop only shared boundary padding; preserve positions and image features."""
+    original_width = micro_batch["responses"].shape[-1]
+    mask = micro_batch["attention_mask"].bool()
+    prompt_width = mask.shape[-1] - original_width
+    if prompt_width < 1 or original_width < 1:
+        raise ValueError("Padding crop requires a prompt token and a response slot")
+    prompt_columns = mask[:, :prompt_width].any(dim=0).nonzero().flatten()
+    left = int(prompt_columns[0]) if prompt_columns.numel() else prompt_width - 1
+    left = min(left, prompt_width - 1)
+    response_columns = mask[:, prompt_width:].any(dim=0).nonzero().flatten()
+    width = int(response_columns[-1]) + 1 if response_columns.numel() else 1
+    cropped = dict(micro_batch)
+    for key in ("input_ids", "attention_mask", "position_ids"):
+        cropped[key] = micro_batch[key][..., left:prompt_width + width]
+    cropped["responses"] = micro_batch["responses"][..., :width]
+    return cropped, original_width - width
+
+
 class DataParallelPPOActor(BasePPOActor):
     def __init__(self, config, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None, **kwargs):
         """When optimizer is None, it is Reference Policy"""
@@ -90,6 +109,9 @@ class DataParallelPPOActor(BasePPOActor):
             entropy: # (bs, response_len)
             log_probs: # (bs, response_len)
         """
+        response_padding = 0
+        if not self.use_remove_padding and self.config.get("crop_common_padding", False):
+            micro_batch, response_padding = crop_common_padding(micro_batch)
         response_length = micro_batch["responses"].size(-1)
         multi_modal_inputs = {}
         if "multi_modal_inputs" in micro_batch.keys():
@@ -248,6 +270,10 @@ class DataParallelPPOActor(BasePPOActor):
                     if calculate_entropy:
                         entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
 
+            if response_padding:
+                log_probs = torch.nn.functional.pad(log_probs, (0, response_padding))
+                if entropy is not None:
+                    entropy = torch.nn.functional.pad(entropy, (0, response_padding))
             return entropy, log_probs
 
     def _optimizer_step(self):
@@ -378,6 +404,7 @@ class DataParallelPPOActor(BasePPOActor):
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 self.actor_optimizer.zero_grad()
+                valid_loss_tokens = torch.zeros((), device=get_device_id(), dtype=torch.long)
 
                 for data in micro_batches:
                     # Support all hardwares
@@ -393,6 +420,7 @@ class DataParallelPPOActor(BasePPOActor):
                         response_mask = data["loss_mask"][:, -response_length:]
                     else:
                         response_mask = action_or_attn_mask[:, -response_length:]
+                    valid_loss_tokens += response_mask.sum().long()
 
                     old_log_prob = data["old_log_probs"]
                     advantages = data["advantages"]
@@ -409,6 +437,18 @@ class DataParallelPPOActor(BasePPOActor):
                     if entropy_coeff != 0:
                         calculate_entropy = True
                     entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
+
+                    if not response_mask.any():
+                        # Keep FSDP forward/backward calls on ranks with masked samples.
+                        (log_prob.sum() * 0.0).backward()
+                        append_to_dict(metrics, {
+                            "actor/pg_loss": 0.0, "actor/pg_clipfrac": 0.0,
+                            "actor/ppo_kl": 0.0, "actor/pg_clipfrac_lower": 0.0,
+                        })
+                        if self.config.use_kl_loss:
+                            metrics["actor/kl_loss"] = 0.0
+                            metrics["actor/kl_coef"] = self.config.kl_loss_coef
+                        continue
 
                     pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = compute_policy_loss(
                         old_log_prob=old_log_prob,
@@ -455,7 +495,11 @@ class DataParallelPPOActor(BasePPOActor):
                     }
                     append_to_dict(metrics, data)
 
-                grad_norm = self._optimizer_step()
+                if torch.distributed.is_initialized():
+                    torch.distributed.all_reduce(valid_loss_tokens)
+                # Skip Adam momentum/weight decay only when every rank is masked.
+                grad_norm = self._optimizer_step() if valid_loss_tokens.item() else valid_loss_tokens.float()
+                append_to_dict(metrics, {"actor/optimizer_step_per_minibatch": float(valid_loss_tokens.item() > 0)})
                 data = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, data)
         self.actor_optimizer.zero_grad()

@@ -41,6 +41,7 @@ class FakeToolExecutor:
         return ToolExecutionResult(output={
             "query": "car", "boxes": [[0, 0, 100, 100], [200, 200, 300, 300]],
             "confidence": [0.9, 0.8], "count": 2, "source": "groundingdino",
+            "labels": ["car", "truck"],
         })
 
 
@@ -79,6 +80,22 @@ class FakeSession:
 
 
 class VisualAgentInferenceTest(unittest.TestCase):
+    def test_failure_trace_preserves_prior_tools_and_malformed_assistant(self):
+        model = FakeModelClient()
+        model.responses[1]["content"] = "<tool_call>{bad-json}</tool_call>"
+        trace = {}
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"image-for-transport")
+            image.flush()
+            with self.assertRaisesRegex(InferenceError, "invalid <tool_call> JSON"):
+                VisualAgent(model, tool_executor=FakeToolExecutor()).run(
+                    [image.name], "Read formula", trace_sink=trace,
+                )
+        self.assertEqual(trace["turn"], 2)
+        self.assertEqual(trace["tool_calls"][0]["name"], "grounding_detect")
+        self.assertEqual(trace["messages"][-1]["content"], "<tool_call>{bad-json}</tool_call>")
+        self.assertEqual(trace["last_assistant"]["content"], "<tool_call>{bad-json}</tool_call>")
+
     def test_parse_xml_tool_call(self):
         invocation = parse_tool_invocation(
             {
@@ -109,6 +126,7 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertIn("<tool_response>", result.messages[-2]["content"])
         self.assertNotIn('"source"', result.messages[-2]["content"])
         self.assertNotIn('"count"', result.messages[-2]["content"])
+        self.assertIn('"labels": ["car", "truck"]', result.messages[-2]["content"])
         self.assertEqual(result.tool_calls[0]["result"]["count"], 2)
         self.assertEqual(result.tool_calls[0]["result"]["source"], "groundingdino")
 

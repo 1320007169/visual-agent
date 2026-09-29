@@ -13,6 +13,44 @@ SPEC.loader.exec_module(converter)
 
 
 class ConverterTest(unittest.TestCase):
+    def test_three_node_ocr_conversion_selects_six_tools_and_prompt(self):
+        self._check_ocr_conversion(3, 126, 42, 168)
+
+    def test_eight_node_ocr_conversion_keeps_per_gpu_load(self):
+        self._check_ocr_conversion(8, 336, 112, 448)
+
+    def _check_ocr_conversion(self, nodes, batch, mini, concurrent):
+        launcher = "scripts/run_visual_agent_multitool_depth_count_3node_24gpu.sh"
+        settings = {
+            "NNODES": str(nodes), "TRAIN_BATCH_SIZE": str(batch), "PPO_MINI_BATCH_SIZE": str(mini),
+            "VAL_BATCH_SIZE": str(batch), "ROLLOUT_N": "16", "MAX_CONCURRENT_REQUESTS": str(concurrent),
+            "RUN_ID": f"qwen3base_multitool_text_det_rec_n16_{nodes}node", "RL_SPLIT_OCR": "1",
+            "TOOL_CONFIG_PATH": str(ROOT / "reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_depth_count_ocr_config.yaml"),
+            "VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE": str(ROOT / "prompts/visual_agent_rl_system_multitool_depth_count_ocr.txt"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "ocr_modelarts.sh"
+            arguments = [launcher, "-o", str(output)]
+            for key, value in settings.items():
+                arguments.extend(["--env", f"{key}={value}"])
+            converter.main(arguments)
+            env = {"PATH": os.environ["PATH"], "REPO_ROOT": str(ROOT),
+                   "MULTITOOL_CONFIG_ONLY": "1", "TRAIN_RUN_TOKEN": "ocr_config_test"}
+            result = subprocess.run(["bash", str(output)], env=env, capture_output=True, text=True, check=True)
+            converted = dict(line.split("=", 1) for line in result.stdout.splitlines())
+            for key, value in settings.items():
+                self.assertEqual(converted[key], value + "_ocr_config_test" if key == "RUN_ID" else value)
+            self.assertEqual(converted["LAUNCHER"], str(ROOT / launcher))
+            self.assertEqual(converted["RESUME_MODE"], "disable")
+            self.assertTrue(converted["RL_OUTPUT_DIR"].endswith(settings["RUN_ID"] + "_ocr_config_test"))
+            self.assertEqual(converted["VISUAL_AGENT_IMAGE_TRANSPORT"], "source_cached")
+            total_rl_gpus = int(converted["NNODES"]) * len(converted["RL_CUDA_VISIBLE_DEVICES"].split(","))
+            self.assertEqual(batch % total_rl_gpus, 0)
+            self.assertEqual(batch * int(converted["ROLLOUT_N"]) // total_rl_gpus, 96)
+            self.assertEqual(mini * int(converted["ROLLOUT_N"]) // total_rl_gpus, 32)
+            self.assertEqual(batch % mini, 0)
+            self.assertIn("ensure_symlink /opt/huawei/quoteModel", output.read_text())
+
     def test_three_node_launcher_and_conversion_keep_divisible_batches(self):
         launcher = "scripts/run_visual_agent_multitool_depth_count_3node_24gpu.sh"
         env = {"PATH": os.environ["PATH"], "REPO_ROOT": str(ROOT),

@@ -14,7 +14,7 @@ Use exact tool and argument names with double quotes. Wait for `<tool_response>`
 
 ## Tools
 
-- `grounding_detect`: Locate one concrete object. Arguments: `{"query":"red cup","target_image":0}`. Returns relative `[x1,y1,x2,y2]` `boxes` and their `confidence` scores.
+- `grounding_detect`: Locate one concrete object. Arguments: `{"query":"red cup","target_image":0}`. Returns relative `[x1,y1,x2,y2]` `boxes`, their `labels`, and `confidence` scores.
 - `crop_zoom`: Inspect a region. Arguments: `{"bbox_2d":[226,399,265,464],"target_image":0,"label":"small sign"}`. Returns the crop image and its new `target_image` index; use that index for calls on the crop.
 - `depth_measure`: Pass one or more located boxes in one call on the same image: `{"bboxes_2d":[[226,399,265,464]],"target_image":0}`. Returns `regions`, each containing its `bbox_2d` and `depth_m`. Use the returned box to identify the measured object. Smaller depth means nearer. No depth image is returned.
 - `object_count`: Count instances of a concrete category. Arguments: `{"query":"red apples","target_image":0}`. Returns `count` and spatial evidence as `boxes`, or `points_2d` when boxes are unavailable.

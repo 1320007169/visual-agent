@@ -341,7 +341,10 @@ class VisualAgent:
             get_visual_tool_schemas(self.allowed_tool_names)
         self.system_prompt = system_prompt or build_system_prompt(self.allowed_tool_names)
 
-    def run(self, image_paths: list[str | Path], question: str) -> InferenceResult:
+    def run(
+        self, image_paths: list[str | Path], question: str,
+        *, trace_sink: dict[str, Any] | None = None,
+    ) -> InferenceResult:
         if not image_paths:
             raise InferenceError("At least one image is required")
         if not question.strip():
@@ -358,8 +361,12 @@ class VisualAgent:
             {"role": "user", "content": user_content},
         ]
         trace: list[dict[str, Any]] = []
+        if trace_sink is not None:
+            trace_sink.update(messages=messages, tool_calls=trace)
 
         for turn in range(1, self.max_turns + 1):
+            if trace_sink is not None:
+                trace_sink["turn"] = turn
             assistant = self.model_client.chat(
                 messages,
                 tools=(
@@ -370,11 +377,14 @@ class VisualAgent:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
-            invocation = parse_tool_invocation(assistant)
             response_text = _message_text(assistant)
+            messages.append({"role": "assistant", "content": response_text})
+            if trace_sink is not None:
+                trace_sink["last_assistant"] = assistant
+            invocation = parse_tool_invocation(assistant)
             if invocation and not response_text:
                 response_text = _xml_tool_call(invocation)
-            messages.append({"role": "assistant", "content": response_text})
+                messages[-1]["content"] = response_text
 
             if invocation is None:
                 return InferenceResult(
@@ -439,7 +449,7 @@ class VisualAgent:
             output = tool_result.output
             if isinstance(output, dict) and output.get("status") not in {"error", "failed"}:
                 if invocation.name == "grounding_detect":
-                    output = {key: output[key] for key in ("boxes", "confidence")}
+                    output = {key: output[key] for key in ("boxes", "confidence", "labels") if key in output}
                 elif invocation.name == "crop_zoom":
                     output = {"target_image": output["crop_zoom"]["target_image"]}
                 elif invocation.name == "depth_measure":

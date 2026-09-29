@@ -166,7 +166,8 @@ class AsyncNaiveRewardManager:
             else:
                 reward = score
 
-            reward_tensor[i, valid_response_length - 1] += reward
+            if valid_response_length > 0:
+                reward_tensor[i, valid_response_length - 1] += reward
 
             # eos_idx = torch.nonzero(action_or_attn_mask[i, prompt_length: prompt_length + valid_response_length])[-1]
             # reward_tensor[i, eos_idx] = score
