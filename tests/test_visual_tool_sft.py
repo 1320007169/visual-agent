@@ -205,10 +205,12 @@ def test_extended_tool_inputs_are_minimal():
     schemas = {
         schema["function"]["name"]: schema["function"]["parameters"]
         for schema in get_visual_tool_schemas(
-            {"ocr_read", "depth_measure", "ground_depth", "object_count", "text_detect", "text_recognize"}
+            {"ocr_read", "text_locate", "depth_measure", "ground_depth", "object_count", "text_detect", "text_recognize"}
         )
     }
-    assert set(schemas["ocr_read"]["properties"]) == {"target_image"}
+    assert set(schemas["ocr_read"]["properties"]) == {"target_image", "bbox_2d"}
+    assert schemas["ocr_read"]["required"] == ["target_image"]
+    assert set(schemas["text_locate"]["required"]) == {"target_image", "query"}
     assert set(schemas["object_count"]["properties"]) == {"query", "target_image"}
     assert set(schemas["depth_measure"]["properties"]) == {"bboxes_2d", "target_image"}
     assert schemas["depth_measure"]["properties"]["bboxes_2d"]["minItems"] == 1

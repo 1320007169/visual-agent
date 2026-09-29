@@ -17,6 +17,7 @@ VISUAL_TOOL_NAMES = {
     "sam3_crop_zoom_multi",
     "grounding_detect",
     "ocr_read",
+    "text_locate",
     "text_detect",
     "text_recognize",
     "depth_measure",
@@ -160,7 +161,7 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "ocr_read",
-            "description": "Read visible text and return text regions in relative 0-1000 coordinates.",
+            "description": "Detect and read text in the whole image or optional bbox_2d. Return text and text-region boxes in relative 0-1000 coordinates of the selected image.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -168,8 +169,34 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": "integer",
                         "description": "Zero-based index into the sample images array.",
                     },
+                    "bbox_2d": {
+                        "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                        "minItems": 4, "maxItems": 4,
+                        "description": "Optional reading area [x1,y1,x2,y2] on target_image; omit to read the whole image.",
+                    },
                 },
                 "required": ["target_image"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "text_locate",
+            "description": "Find literal text in an image using OCR and return matching text-region boxes. Exact matching ignores case and normalizes whitespace; contains matches within a region. Boxes cover the whole recognized region, not individual characters. Semantic descriptions and cross-region phrases are not supported.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {"type": "integer", "description": "Zero-based image index."},
+                    "query": {"type": "string", "minLength": 1, "description": "Literal text to find, e.g. Corn or 营业时间; not a question or region description."},
+                    "match_mode": {"type": "string", "enum": ["exact", "contains"], "default": "exact"},
+                    "bbox_2d": {
+                        "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                        "minItems": 4, "maxItems": 4,
+                        "description": "Optional search area [x1,y1,x2,y2] on target_image.",
+                    },
+                },
+                "required": ["query", "target_image"],
             },
         },
     },

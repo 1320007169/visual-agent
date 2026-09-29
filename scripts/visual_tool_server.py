@@ -15,6 +15,7 @@ import queue
 import sys
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ SUPPORTED_TOOLS = {
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
     "ocr_read",
+    "text_locate",
     "text_detect",
     "text_recognize",
     "depth_measure",
@@ -425,9 +427,17 @@ class ToolService:
             raise ToolServerError("ocr_read service is not configured")
         target = _target_image(arguments, images)
         threshold = 0.0
-        max_results = 50
+        source_size = images[target].size
+        offset_x = offset_y = 0
+        request_images = images
+        if "bbox_2d" in arguments:
+            box = _relative_box_to_pixels(arguments["bbox_2d"], source_size)
+            offset_x, offset_y = math.floor(box[0]), math.floor(box[1])
+            right, bottom = math.ceil(box[2]), math.ceil(box[3])
+            request_images = list(images)
+            request_images[target] = images[target].crop((offset_x, offset_y, right, bottom))
         response = self.ocr_bridge.execute(
-            images=images,
+            images=request_images,
             arguments={"image_id": target, "minimum_confidence": threshold},
             instance_id=instance_id,
         )
@@ -435,12 +445,18 @@ class ToolService:
             return error, []
         structured = dict(response.result.get("structured") or {})
         regions = []
-        for item in (structured.get("results") or [])[:max_results]:
+        for item in structured.get("results") or []:
             if not isinstance(item, dict) or not str(item.get("text") or "").strip():
                 continue
             region = {"text": str(item["text"])}
-            bbox = _ocr_bbox_to_relative(item.get("bbox"), images[target].size)
+            bbox = _ocr_bbox_to_relative(item.get("bbox"), request_images[target].size)
             if bbox is not None:
+                if request_images is not images:
+                    width, height = request_images[target].size
+                    bbox = _pixel_box_to_relative([
+                        bbox[0] * width / 1000 + offset_x, bbox[1] * height / 1000 + offset_y,
+                        bbox[2] * width / 1000 + offset_x, bbox[3] * height / 1000 + offset_y,
+                    ], source_size)
                 region["bbox_2d"] = bbox
             if item.get("confidence") is not None:
                 region["confidence"] = round(float(item["confidence"]), 4)
@@ -457,6 +473,35 @@ class ToolService:
         if returned_images:
             result["annotated_image"] = len(images)
         return result, returned_images
+
+    def _execute_text_locate(
+        self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolServerError("text_locate.query must be nonempty literal text")
+        mode = arguments.get("match_mode", "exact")
+        if not isinstance(mode, str) or mode not in {"exact", "contains"}:
+            raise ToolServerError("text_locate.match_mode must be exact or contains")
+        output, _ = self._execute_ocr(arguments, images, instance_id)
+        if output.get("status") == "error":
+            return {**output, "tool": "text_locate"}, []
+
+        def normalized(text):
+            return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+        needle = normalized(query)
+        regions = []
+        for region in output["regions"]:
+            text = normalized(region["text"])
+            matched = text == needle if mode == "exact" else needle in text
+            if matched and "bbox_2d" in region:
+                regions.append(region)
+        return {
+            "query": query.strip(), "match_mode": mode, "match_scope": "text_region",
+            "regions": regions, "count": len(regions), "target_image": output["target_image"],
+            "coordinate_space": "relative_0_1000", "source": "text_locate",
+        }, []
 
     def _execute_count(
         self,
@@ -633,6 +678,11 @@ class ToolService:
         if name == "ocr_read":
             try:
                 return self._execute_ocr(arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
+        if name == "text_locate":
+            try:
+                return self._execute_text_locate(arguments, images, instance_id)
             except VtsBridgeError as exc:
                 raise ToolServerError(str(exc)) from exc
         if name == "object_count":

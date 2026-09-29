@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Serve PP-OCRv5 text detection and region recognition independently."""
+"""Serve PP-OCRv5 detection, region recognition, and combined OCR."""
 
 import argparse
+from collections import OrderedDict
+import hashlib
 import math
 from pathlib import Path
 import threading
@@ -12,7 +14,7 @@ from paddlex import create_model
 import uvicorn
 
 
-def create_app(model_root: Path) -> FastAPI:
+def create_app(model_root: Path, *, cache_size: int = 64) -> FastAPI:
     detector = create_model(
         model_name="PP-OCRv5_server_det",
         model_dir=str(model_root / "PP-OCRv5_server_det"),
@@ -24,11 +26,14 @@ def create_app(model_root: Path) -> FastAPI:
         device="gpu:0",
     )
     lock = threading.Lock()
+    # Bridges create a new temporary path on each call. Cache by image content,
+    # retaining only OCR results so repeated word queries do not repeat inference.
+    ocr_cache = OrderedDict()
     app = FastAPI(title="PP-OCRv5 Split Tools")
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "tools": ["text_detect", "text_recognize"]}
+        return {"status": "ok", "tools": ["text_detect", "text_recognize", "ocr_read"]}
 
     @app.post("/execute")
     def execute(payload: dict):
@@ -59,6 +64,42 @@ def create_app(model_root: Path) -> FastAPI:
                     {"bbox": box, "text": prediction["rec_text"], "confidence": float(prediction["rec_score"])}
                     for box, prediction in zip(arguments["bboxes"], predictions, strict=True)
                 ]
+            elif tool == "ocr_read":
+                try:
+                    cache_key = hashlib.sha256(Path(image_path).read_bytes()).digest()
+                except OSError as exc:
+                    raise HTTPException(status_code=422, detail="Cannot read OCR image") from exc
+                if cache_key in ocr_cache:
+                    regions = ocr_cache[cache_key]
+                    ocr_cache.move_to_end(cache_key)
+                else:
+                    image = cv2.imread(image_path)
+                    if image is None:
+                        raise HTTPException(status_code=422, detail="Cannot decode OCR image")
+                    height, width = image.shape[:2]
+                    prediction = next(iter(detector.predict(image_path)))
+                    boxes = []
+                    for polygon in prediction["dt_polys"]:
+                        xs, ys = zip(*polygon)
+                        box = [max(0, math.floor(min(xs))), max(0, math.floor(min(ys))),
+                               min(width, math.ceil(max(xs))), min(height, math.ceil(max(ys)))]
+                        if box[2] > box[0] and box[3] > box[1]:
+                            boxes.append(box)
+                    boxes.sort(key=lambda box: (box[1], box[0]))
+                    crops = [image[y1:y2, x1:x2] for x1, y1, x2, y2 in boxes]
+                    predictions = recognizer.predict(input=crops, batch_size=16) if crops else []
+                    regions = [
+                        {"bbox": box, "text": str(prediction["rec_text"]),
+                         "confidence": float(prediction["rec_score"])}
+                        for box, prediction in zip(boxes, predictions, strict=True)
+                    ]
+                    if cache_size > 0:
+                        ocr_cache[cache_key] = regions
+                        while len(ocr_cache) > cache_size:
+                            ocr_cache.popitem(last=False)
+                threshold = float(arguments.get("minimum_confidence", 0.0))
+                regions = [region for region in regions
+                           if region["text"].strip() and region["confidence"] >= threshold]
             else:
                 raise HTTPException(status_code=422, detail=f"Unsupported OCR tool: {tool}")
         return {"status": "success", "structured": {"results": regions}, "images": []}
