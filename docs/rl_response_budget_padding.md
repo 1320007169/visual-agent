@@ -112,6 +112,51 @@ synchronization have not been validated. No end-to-end throughput improvement
 is claimed from these checks. Run a short test on the target training stack
 before a long 24/64-GPU run.
 
+## Diagnostics
+
+These metrics do not change training:
+
+- `actor/entropy` is the old-policy entropy on loss tokens (tool observations
+  excluded). `actor/entropy_tool_call` and `actor/entropy_non_tool_call` split it
+  at `<tool_call>...</tool_call>` spans. Entropy is computed during the old log
+  probability pass with row chunking; set `LOG_ENTROPY=False` to skip it.
+- `rollout_consistency/*` compares the tokens vLLM sampled with the re-encoded
+  training tokens. `turn_exact_match_rate` and `sampled_token_coverage` measure
+  re-rendering drift; `logprob_abs_diff_*` compares vLLM and actor log
+  probabilities on exactly matching turns. Requests set `logprobs=true` and
+  `return_tokens_as_token_ids=true`; if vLLM ignores them, coverage is 0.
+- `rollout/truncated_rate/{agent,native,single_turn,multi_turn}` and
+  `rollout/row_share/*` split truncation by stream and by tool use.
+  `actor/masked_micro_batch_rate` is the share of micro batches without loss
+  tokens; these still count in gradient accumulation and shrink the update.
+
+## GPU verification on Qwen3-VL-8B
+
+`tests/test_qwen3vl_rope_index.py` compares the trainer's mRoPE rebuild
+(`verl.models.transformers.qwen2_vl.get_rope_index`) with the Transformers
+Qwen3-VL implementation. It needs `QWEN3_VL_PROCESSOR_PATH` with config and
+processor files, but no weights and no GPU.
+
+`scripts/verify_qwen3vl_actor_forward.py` runs the production actor forward on
+the pretrained checkpoint (one GPU, about 40 GB with gradients):
+
+```bash
+python3 scripts/verify_qwen3vl_actor_forward.py --model-path "$MODEL_PATH" --mode crop
+python3 scripts/verify_qwen3vl_actor_forward.py --model-path "$MODEL_PATH" --mode rmpad
+```
+
+`crop` compares `crop_common_padding` off/on. `rmpad` compares
+`use_remove_padding` off/on with micro batch 1, then checks that a sample's
+outputs do not change when a different sample is packed next to it. Each check
+prints one JSON line with the names of failed differences; the exit code is
+non-zero when any log-prob, entropy or gradient difference exceeds its limit
+(`--max-abs`, `--mean-abs`, `--entropy-max-abs`, `--entropy-mean-abs`,
+`--grad-rel`). With `--no-grad`, the padded path computes entropy in float32
+while the packed path uses the configured `entropy_from_logits`, so an
+`rmpad` failure on entropy alone may be a precision difference. Enable
+`CROP_COMMON_PADDING=True` for long runs only after the `crop` mode passes, and
+`use_remove_padding` only after the `rmpad` mode passes.
+
 ## Resuming checkpoints
 
 Model and optimizer tensor shapes are unchanged. Resume using the existing

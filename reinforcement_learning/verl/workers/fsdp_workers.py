@@ -727,7 +727,7 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
         data.meta_info["use_dynamic_bsz"] = self.config.rollout.log_prob_use_dynamic_bsz
         data.meta_info["temperature"] = self.config.rollout.temperature
-        calculate_entropy = self.config.actor.entropy_coeff != 0
+        calculate_entropy = self.config.actor.entropy_coeff != 0 or self.config.actor.get("log_entropy", False)
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)

@@ -93,6 +93,9 @@ def _concat_dual_stream_rollouts(agent_output: DataProto, native_output: DataPro
         if response_padding:
             output.batch["responses"] = F.pad(output.batch["responses"], (0, response_padding), value=pad_token_id)
             output.batch["response_mask"] = F.pad(output.batch["response_mask"], (0, response_padding), value=0)
+            for key in ("rollout_log_probs", "rollout_logprob_mask"):
+                if key in output.batch.keys():
+                    output.batch[key] = F.pad(output.batch[key], (0, response_padding), value=0)
         if sequence_padding:
             output.batch["input_ids"] = F.pad(output.batch["input_ids"], (0, sequence_padding), value=pad_token_id)
             for key in ("attention_mask", "loss_mask", "position_ids"):
@@ -365,6 +368,71 @@ def compute_response_mask(data: DataProto):
         has_loss = data.batch["loss_mask"][:, -response_length:].any(dim=-1)
         mask = mask * has_loss.unsqueeze(-1)
     return mask
+
+
+def compute_entropy_metrics(data: DataProto, entropys: torch.Tensor, loss_agg_mode: str, tool_call_ids=None) -> dict:
+    """Old-policy entropy on trainable response tokens, split at tool-call spans."""
+    responses = data.batch["responses"]
+    if "loss_mask" in data.batch.keys():
+        mask = data.batch["loss_mask"][:, -responses.size(1):].bool()
+    else:
+        mask = data.batch["response_mask"].bool()
+    if not mask.any():
+        return {}
+    metrics = {"actor/entropy": agg_loss(loss_mat=entropys, loss_mask=mask.float(), loss_agg_mode=loss_agg_mode).item()}
+    if tool_call_ids is not None:
+        open_id, close_id = tool_call_ids
+        closes = responses.eq(close_id)
+        inside = (responses.eq(open_id).long().cumsum(-1) - closes.long().cumsum(-1) + closes.long()) > 0
+        for name, part in (("tool_call", mask & inside), ("non_tool_call", mask & ~inside)):
+            if part.any():
+                metrics[f"actor/entropy_{name}"] = entropys[part].mean().item()
+    return metrics
+
+
+def compute_rollout_consistency_metrics(data: DataProto) -> dict:
+    """Agreement between vLLM-sampled tokens and the re-encoded training tokens."""
+    stats = {
+        key: float(np.sum(data.non_tensor_batch[f"__rollout_{key}__"]))
+        for key in ("turns", "matched_turns", "sampled_tokens", "matched_tokens", "unaligned")
+    }
+    metrics = {
+        "rollout_consistency/turn_exact_match_rate": stats["matched_turns"] / max(stats["turns"], 1.0),
+        "rollout_consistency/sampled_token_coverage": stats["matched_tokens"] / max(stats["sampled_tokens"], 1.0),
+        "rollout_consistency/unaligned_rate": stats["unaligned"] / len(data),
+    }
+    mask = data.batch["rollout_logprob_mask"].bool()
+    if mask.any():
+        rollout = data.batch["rollout_log_probs"][mask]
+        actor = data.batch["old_log_probs"][mask]
+        diff = (rollout - actor).abs()
+        metrics["rollout_consistency/logprob_abs_diff_mean"] = diff.mean().item()
+        metrics["rollout_consistency/logprob_abs_diff_max"] = diff.max().item()
+        metrics["rollout_consistency/prob_abs_diff_mean"] = (rollout.exp() - actor.exp()).abs().mean().item()
+    return metrics
+
+
+def compute_truncation_metrics(data: DataProto) -> dict:
+    """Truncation and empty-loss rates, split by stream and by single/multi-turn trajectories."""
+    truncated = data.batch["truncated"].bool()
+    empty = ~data.batch["loss_mask"].bool().any(dim=-1)
+    metrics = {
+        "rollout/truncated_rate": truncated.float().mean().item(),
+        "rollout/empty_loss_rate": empty.float().mean().item(),
+    }
+    groups = {}
+    if "stream_id" in data.non_tensor_batch:
+        stream = np.asarray(data.non_tensor_batch["stream_id"])
+        groups.update({name: stream == name for name in ("agent", "native")})
+    if "__num_turns__" in data.non_tensor_batch:
+        multi_turn = np.asarray(data.non_tensor_batch["__num_turns__"]) > 1
+        groups.update({"multi_turn": multi_turn, "single_turn": ~multi_turn})
+    for name, rows in groups.items():
+        rows = torch.from_numpy(rows)
+        if rows.any():
+            metrics[f"rollout/truncated_rate/{name}"] = truncated[rows].float().mean().item()
+            metrics[f"rollout/row_share/{name}"] = rows.float().mean().item()
+    return metrics
 
 
 def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_repeat=1, multi_turn=False, norm_adv_by_std_in_grpo=True, config=None):
@@ -1430,8 +1498,7 @@ class RayPPOTrainer:
                     batch = batch.union(gen_batch_output)
 
                     if "truncated" in batch.batch:
-                        metrics["rollout/truncated_rate"] = batch.batch["truncated"].float().mean().item()
-                        metrics["rollout/empty_loss_rate"] = (~batch.batch["loss_mask"].bool().any(dim=-1)).float().mean().item()
+                        metrics.update(compute_truncation_metrics(batch))
 
                     # Multi-turn visual tools may append crop images to the
                     # response. Merge their processor outputs with each
@@ -1499,39 +1566,17 @@ class RayPPOTrainer:
                     with marked_timer("old_log_prob", timing_raw, color="blue"):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         if "entropys" in old_log_prob.batch:
-                            entropys = old_log_prob.batch["entropys"]
-                            response_masks = batch.batch["response_mask"]
-                            loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                            entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
-                            old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
-                            metrics.update(old_log_prob_metrics)
+                            tool_call_ids = self.tokenizer.convert_tokens_to_ids(["<tool_call>", "</tool_call>"])
+                            metrics.update(compute_entropy_metrics(
+                                batch, old_log_prob.batch["entropys"],
+                                self.config.actor_rollout_ref.actor.loss_agg_mode,
+                                tool_call_ids if None not in tool_call_ids else None,
+                            ))
                             old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
 
-                        if "rollout_log_probs" in batch.batch.keys():
-                            # TODO: we may want to add diff of probs too.
-                            rollout_old_log_probs = batch.batch["rollout_log_probs"]
-                            actor_old_log_probs = batch.batch["old_log_probs"]
-
-                            action_or_attn_mask = data.batch['action_mask'] if 'action_mask' in data.batch.keys() else data.batch['attention_mask']
-                            responses = batch.batch["responses"]
-                            response_length = responses.size(1)
-                            response_mask = action_or_attn_mask[:, -response_length:]
-
-                            rollout_probs = torch.exp(rollout_old_log_probs)
-                            actor_probs = torch.exp(actor_old_log_probs)
-                            rollout_probs_diff = torch.abs(rollout_probs - actor_probs)
-                            rollout_probs_diff = torch.masked_select(rollout_probs_diff, response_mask.bool())
-                            rollout_probs_diff_max = torch.max(rollout_probs_diff)
-                            rollout_probs_diff_mean = torch.mean(rollout_probs_diff)
-                            rollout_probs_diff_std = torch.std(rollout_probs_diff)
-                            metrics.update(
-                                {
-                                    "training/rollout_probs_diff_max": rollout_probs_diff_max.detach().item(),
-                                    "training/rollout_probs_diff_mean": rollout_probs_diff_mean.detach().item(),
-                                    "training/rollout_probs_diff_std": rollout_probs_diff_std.detach().item(),
-                                }
-                            )
+                        if "rollout_logprob_mask" in batch.batch.keys():
+                            metrics.update(compute_rollout_consistency_metrics(batch))
 
                     if self.use_reference_policy:
                         # compute reference log_prob

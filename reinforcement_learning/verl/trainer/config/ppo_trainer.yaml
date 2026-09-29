@@ -193,6 +193,9 @@ actor_rollout_ref:
     # Entropy regularization coefficient in PPO loss
     entropy_coeff: 0
 
+    # Log old-policy entropy on loss tokens even when entropy_coeff is 0
+    log_entropy: true
+
     # Whether to use KL loss instead of KL reward penalty. True for GRPO
     use_kl_loss: false
 

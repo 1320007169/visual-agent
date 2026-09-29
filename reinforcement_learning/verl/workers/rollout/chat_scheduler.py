@@ -41,6 +41,7 @@ from verl.tools.base_tool import initialize_tools_from_config
 from verl.utils import hf_processor, hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.workers.rollout.response_budget import ResponseBudget, retain_trace
+from verl.workers.rollout.rollout_consistency import align_sampled_turns, parse_sampled_logprobs, template_turn_roles
 
 logger = logging.getLogger(__file__)
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -244,6 +245,10 @@ class ToolCompletionCallback(CompletionCallback):
         if "content" not in message:
             message["content"] = ""
         messages.append(message)
+        # One entry per assistant message; budget truncation only drops a suffix.
+        info.setdefault("sampled_turns", []).append(
+            parse_sampled_logprobs(getattr(completions.choices[0], "logprobs", None))
+        )
         finish_reason = completions.choices[0].finish_reason
 
         budget = info["response_budget"]
@@ -427,6 +432,7 @@ class ToolCompletionCallback(CompletionCallback):
         n: int,
         tools_enabled: bool = True,
         response_budgets=None,
+        sampled_turns=None,
     ) -> DataProto:
         # NOTE: consistent with batch version of generate_sequences in vllm_rollout_spmd.py
         # prompts: left pad
@@ -530,13 +536,30 @@ class ToolCompletionCallback(CompletionCallback):
             ],
             dtype=np.int32,
         )
-        return DataProto(
-            batch=batch,
-            non_tensor_batch={
-                "__num_turns__": num_turns,
-                "rollout_multi_modal_inputs": np.array(rollout_multi_modal_inputs, dtype=object),
-            },
-        )
+        non_tensor_batch = {
+            "__num_turns__": num_turns,
+            "rollout_multi_modal_inputs": np.array(rollout_multi_modal_inputs, dtype=object),
+        }
+        if sampled_turns is not None:
+            # Monitor only: training still uses the re-encoded response tokens.
+            rollout_log_probs = torch.zeros(responses["input_ids"].shape, dtype=torch.float32)
+            rollout_logprob_mask = torch.zeros(responses["input_ids"].shape, dtype=torch.bool)
+            header_ids = self.tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
+            stats = []
+            for index, conversation in enumerate(batch_conversations):
+                roles = template_turn_roles(conversation[len(raw_prompts[index]) :])
+                positions, values, row_stats = align_sampled_turns(
+                    response_input_ids[index].tolist(), roles, self.tokenizer.eos_token_id,
+                    header_ids, sampled_turns[index],
+                )
+                rollout_log_probs[index, positions] = torch.tensor(values, dtype=torch.float32)
+                rollout_logprob_mask[index, positions] = True
+                stats.append(row_stats)
+            batch["rollout_log_probs"] = rollout_log_probs
+            batch["rollout_logprob_mask"] = rollout_logprob_mask
+            for key in stats[0]:
+                non_tensor_batch[f"__rollout_{key}__"] = np.array([row[key] for row in stats], dtype=np.int64)
+        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     def _mask_out_tools_calling_tokens(
         self,
@@ -798,6 +821,9 @@ class ChatCompletionScheduler:
             if max_tokens_per_turn <= 0:
                 raise ValueError("multi_turn.max_tokens_per_turn must be positive")
             kwargs["max_tokens"] = max_tokens_per_turn
+        # Sampled token ids and log probabilities for rollout/training consistency metrics.
+        kwargs["logprobs"] = True
+        kwargs["return_tokens_as_token_ids"] = True
 
         # override sampling params for validation
         if batch.meta_info.get("validate", False):
@@ -863,12 +889,14 @@ class ChatCompletionScheduler:
 
         trajectory_traces = await asyncio.gather(*tasks)
         response_budgets = [trace.pop("_response_budget") for trace in trajectory_traces]
+        sampled_turns = [trace.pop("_sampled_turns") for trace in trajectory_traces]
         output_batch = self.completion_callback.postprocess(
             batch,
             batch_conversations,
             n=n,
             tools_enabled=tools_enabled,
             response_budgets=response_budgets,
+            sampled_turns=sampled_turns,
         )
         turns = output_batch.non_tensor_batch["__num_turns__"]
         for trace, budget, retained_turns in zip(trajectory_traces, response_budgets, turns):
@@ -916,6 +944,7 @@ class ChatCompletionScheduler:
                 "tools_enabled": tools_enabled,
                 "response_budget": budget,
                 "max_tokens_per_turn": sampling_params.get("max_tokens", self.config.response_length),
+                "sampled_turns": [],
             }
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
@@ -947,4 +976,5 @@ class ChatCompletionScheduler:
                 }
             )
             trace["_response_budget"] = budget
+            trace["_sampled_turns"] = info["sampled_turns"]
             return trace

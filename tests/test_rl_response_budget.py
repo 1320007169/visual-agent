@@ -39,6 +39,7 @@ def load_module(name, path):
 
 
 budget_module = load_module("response_budget", VERL / "workers/rollout/response_budget.py")
+consistency_module = load_module("rollout_consistency", VERL / "workers/rollout/rollout_consistency.py")
 verification = load_module("verify_rl_padding", ROOT / "scripts/verify_rl_padding.py")
 
 
@@ -70,6 +71,9 @@ def scheduler_definitions():
         classes={"ToolCompletionCallback": {"postprocess", "_mask_out_tools_calling_tokens", "__call__"},
                  "ChatCompletionScheduler": {"submit_chat_completions", "_submit_chat_completions_semaphore"}},
         namespace={"TensorDict": TensorDict, "DataProto": SimpleNamespace,
+                   "parse_sampled_logprobs": consistency_module.parse_sampled_logprobs,
+                   "align_sampled_turns": consistency_module.align_sampled_turns,
+                   "template_turn_roles": consistency_module.template_turn_roles,
                    "ResponseBudget": budget_module.ResponseBudget, "itertools": itertools,
                    "asyncio": asyncio, "json": json, "time": time, "logger": logging.getLogger(__name__)},
     )

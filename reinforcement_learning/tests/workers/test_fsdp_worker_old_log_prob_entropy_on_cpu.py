@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
+from omegaconf import OmegaConf
 
 from verl import DataProto
 from verl.workers import fsdp_workers
@@ -34,7 +35,7 @@ def test_compute_old_log_prob_skips_entropy_when_coefficient_is_zero():
     worker._world_size = 1
     worker.actor = SimpleNamespace(compute_log_prob=compute_log_prob)
     worker.config = SimpleNamespace(
-        actor=SimpleNamespace(entropy_coeff=0),
+        actor=OmegaConf.create({"entropy_coeff": 0}),
         rollout=SimpleNamespace(
             log_prob_micro_batch_size_per_gpu=1,
             log_prob_max_token_len_per_gpu=1024,

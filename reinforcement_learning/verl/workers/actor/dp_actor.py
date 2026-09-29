@@ -268,7 +268,11 @@ class DataParallelPPOActor(BasePPOActor):
                     logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
                     log_probs = logprobs_from_logits(logits, micro_batch["responses"])
                     if calculate_entropy:
-                        entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
+                        if torch.is_grad_enabled():
+                            entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
+                        else:
+                            # Metric-only entropy: chunk rows to bound the float32 softmax buffer.
+                            entropy = verl_F.entropy_from_logits_with_chunking(logits.flatten(0, 1)).view(logits.shape[:-1])
 
             if response_padding:
                 log_probs = torch.nn.functional.pad(log_probs, (0, response_padding))
@@ -442,6 +446,7 @@ class DataParallelPPOActor(BasePPOActor):
                         # Keep FSDP forward/backward calls on ranks with masked samples.
                         (log_prob.sum() * 0.0).backward()
                         append_to_dict(metrics, {
+                            "actor/masked_micro_batch_rate": 1.0,
                             "actor/pg_loss": 0.0, "actor/pg_clipfrac": 0.0,
                             "actor/ppo_kl": 0.0, "actor/pg_clipfrac_lower": 0.0,
                         })
@@ -488,6 +493,7 @@ class DataParallelPPOActor(BasePPOActor):
                     loss.backward()
 
                     data = {
+                        "actor/masked_micro_batch_rate": 0.0,
                         "actor/pg_loss": pg_loss.detach().item(),
                         "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                         "actor/ppo_kl": ppo_kl.detach().item(),
