@@ -47,6 +47,10 @@ tool_config = yaml.safe_load((
 
 
 def tool_schema(name):
+    if name == "chart_parse":
+        config = yaml.safe_load((ROOT / "reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_text_rec_chart_config.yaml").read_text())
+        row = next(row for row in config["tools"] if row["tool_schema"]["function"]["name"] == name)
+        return schemas.OpenAIFunctionToolSchema.model_validate(row["tool_schema"])
     row = next(row for row in tool_config["tools"] if row["tool_schema"]["function"]["name"] == name)
     return schemas.OpenAIFunctionToolSchema.model_validate(row["tool_schema"])
 
@@ -90,6 +94,24 @@ class MultitoolTrainingMetricsTest(unittest.TestCase):
         self.assertEqual(metrics[f"train-tools/{depth}/error_trajectory_rate"], 1)
         self.assertEqual(metrics[f"train-tools/{depth}/depth_measure/errors"], 1)
         self.assertEqual(metrics[f"train-tools/{depth}/depth_measure/success_rate"], 0)
+
+    def test_chart_parse_metrics_are_grouped_by_task(self):
+        chart, count = "visual-agent-chartqa", "visual-agent-tallyqa"
+        for prefix in ("train", "val"):
+            metrics = helpers["_compute_visual_tool_metrics"](
+                [chart, chart, chart, count],
+                [{"tool_calls": [{"tool": "chart_parse", "status": "success"},
+                                 {"tool": "chart_parse", "status": "error"}]},
+                 {"tool_calls": [{"tool": "chart_parse", "status": "success"}]},
+                 {"tool_calls": []}, {"tool_calls": []}],
+                prefix=prefix,
+            )
+            root = f"{prefix}-tools/{chart}/chart_parse"
+            self.assertEqual(metrics[f"{root}/trajectory_rate"], 2 / 3)
+            self.assertEqual(metrics[f"{root}/calls"], 3)
+            self.assertEqual(metrics[f"{root}/errors"], 1)
+            self.assertEqual(metrics[f"{root}/success_rate"], 2 / 3)
+            self.assertEqual(metrics[f"{prefix}-tools/{count}/chart_parse/calls"], 0)
 
     def test_macro_accuracy_does_not_weight_by_dataset_size(self):
         macro = helpers["_visual_accuracy_macro_mean"]
@@ -231,6 +253,9 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         boxes = [[0, 0, 100, 100], [100, 100, 200, 200]]
         crop_image = "data:image/jpeg;base64,eA=="
         cases = [
+            ("chart_parse", {"target_image": 0},
+             {"text": "A | 10", "truncated": True, "source": "paddleocr_vl_chart", "target_image": 0},
+             {"text": "A | 10", "truncated": True}, []),
             ("grounding_detect", {"query": "number above entrance", "target_image": 0},
              {"boxes": boxes, "confidence": [0.8, 0.7], "labels": ["entrance", "number"],
               "query": "number above entrance", "source": "groundingdino", "count": 2},

@@ -60,6 +60,11 @@ if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
     export VTS_OCR_ENDPOINT="http://127.0.0.1:9002"
     export PADDLEX_MODEL_ROOT="${PADDLEX_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models}"
 fi
+if [[ "${RL_CHART_PARSE:-0}" == "1" ]]; then
+    export VTS_CHART_ENDPOINT="${VTS_CHART_ENDPOINT:-http://127.0.0.1:9007}"
+    export PADDLEOCR_VL_MODEL_ROOT="${PADDLEOCR_VL_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models/PaddleOCR-VL}"
+    export VTS_CHART_ENV="${VTS_CHART_ENV:-${RL_ENV_DIR:-$BASE/conda_envs/visual-agent-eval}}"
+fi
 
 export VTS_TOOL_BRIDGE_ROOT="${VTS_TOOL_BRIDGE_ROOT:-${VTS_OUTPUT_ROOT:-$BASE/outputs}/visual_agent_bridge/$RUN_ID/${HOSTNAME:-node}}"
 export COUNT_SERVICE_CONFIG="${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml}"
@@ -91,6 +96,10 @@ unique_port_count="$(printf '%s\n' "${depth_ports[@]}" "${count_ports[@]}" | sor
 }
 if [[ "${RL_SPLIT_OCR:-0}" == "1" && ",$VTS_DEPTH_PORTS,$VTS_COUNT_PORTS," == *,9002,* ]]; then
     echo "error: OCR requires port 9002; depth and count must use other ports" >&2
+    exit 2
+fi
+if [[ "${RL_CHART_PARSE:-0}" == "1" && ",$VTS_DEPTH_PORTS,$VTS_COUNT_PORTS," == *,9007,* ]]; then
+    echo "error: chart_parse requires port 9007; depth and count must use other ports" >&2
     exit 2
 fi
 export VTS_DEPTH_ENDPOINT="${VTS_DEPTH_ENDPOINT:-http://127.0.0.1:${depth_ports[0]},http://127.0.0.1:${depth_ports[1]}}"
@@ -147,6 +156,13 @@ if [[ "$START_VTS_SERVICES" == "1" ]]; then
     if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
         vts_ports+=(9002)
     fi
+    if [[ "${RL_CHART_PARSE:-0}" == "1" ]]; then
+        vts_ports+=(9007)
+        [[ -x "$VTS_CHART_ENV/bin/python" && -f "$PADDLEOCR_VL_MODEL_ROOT/model.safetensors" ]] || {
+            echo "error: chart_parse Python environment or local model is missing" >&2
+            exit 2
+        }
+    fi
     "$VTS_DEPTH_ENV/bin/python3" - "${vts_ports[@]}" <<'PY'
 import socket
 import sys
@@ -202,11 +218,26 @@ PY
         VTS_SERVICE_PIDS+=("$!")
         echo "Started PP-OCRv5 detection and recognition on GPU $TOOL_GPU, port 9002; log: $VTS_SERVICE_DIR/ocr.log"
     fi
+    if [[ "${RL_CHART_PARSE:-0}" == "1" ]]; then
+        export VTS_CHART_ENDPOINT="http://127.0.0.1:9007"
+        setsid env CUDA_VISIBLE_DEVICES="$TOOL_GPU" PYTHONUNBUFFERED=1 \
+            HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+            conda run --no-capture-output -p "$VTS_CHART_ENV" \
+                python3 "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
+                --model-root "$PADDLEOCR_VL_MODEL_ROOT" --allowed-root "$VTS_TOOL_BRIDGE_ROOT" \
+                --max-new-tokens "${CHART_PARSE_MAX_NEW_TOKENS:-1024}" --port 9007 \
+                >"$VTS_SERVICE_DIR/chart.log" 2>&1 &
+        VTS_SERVICE_PIDS+=("$!")
+        echo "Started PaddleOCR-VL chart parser on GPU $TOOL_GPU, port 9007; log: $VTS_SERVICE_DIR/chart.log"
+    fi
 fi
 
 IFS=',' read -r -a vts_endpoints <<< "$VTS_DEPTH_ENDPOINT,$VTS_COUNT_ENDPOINT"
 if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
     vts_endpoints+=("$VTS_OCR_ENDPOINT")
+fi
+if [[ "${RL_CHART_PARSE:-0}" == "1" ]]; then
+    vts_endpoints+=("$VTS_CHART_ENDPOINT")
 fi
 for index in "${!vts_endpoints[@]}"; do
   endpoint="${vts_endpoints[index]}"

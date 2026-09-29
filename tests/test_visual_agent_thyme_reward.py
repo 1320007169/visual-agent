@@ -16,6 +16,21 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
+    def test_chart_parse_is_valid_in_both_strict_protocol_switches(self):
+        call = '<tool_call>{"name":"chart_parse","arguments":{"target_image":0,"bbox_2d":[0,0,1000,1000]}}</tool_call>'
+        observation = '<|im_end|>\n<|im_start|>user\n<tool_response>{"text":"A | 4","truncated":false}</tool_response><|im_end|>\n<|im_start|>assistant\n'
+        transcript = call + observation + '<answer>4</answer><|im_end|>'
+        for protocol, require_think in (("reason_act", "0"), ("", "1")):
+            with self.subTest(protocol=protocol, require_think=require_think), patch.dict(
+                os.environ, {"VISUAL_AGENT_FORMAT_PROTOCOL": protocol, "VISUAL_AGENT_REQUIRE_THINK": require_think},
+            ):
+                self.assertTrue(reward.has_strict_answer_format(transcript))
+                result = reward.compute_score(transcript, "4", {"data_source": "visual-agent-tallyqa"})
+                self.assertEqual(result["format"], 1.0)
+                self.assertEqual(result["score"], 1.0)
+                self.assertFalse(reward.has_strict_answer_format(transcript.replace('"chart_parse"', '"unknown"')))
+                self.assertFalse(reward.has_strict_answer_format(call))
+
     def test_think_action_protocol(self):
         final = '<think>The target is below the anchor.</think><answer>below</answer>'
         call = '<think>Inspect the target.</think><tool_call>{"name":"crop_zoom","arguments":{"target_image":0}}</tool_call>'

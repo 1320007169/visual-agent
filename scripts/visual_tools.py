@@ -17,6 +17,7 @@ VISUAL_TOOL_NAMES = {
     "sam3_crop_zoom_multi",
     "grounding_detect",
     "ocr_read",
+    "chart_parse",
     "text_locate",
     "text_detect",
     "text_recognize",
@@ -35,6 +36,26 @@ DEFAULT_VISUAL_TOOL_NAMES = {
 
 
 VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "chart_parse",
+            "description": "Parse a chart with PaddleOCR-VL and return its data as text. Select the whole chart, including axes and legend. This tool does not answer questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_image": {"type": "integer", "minimum": 0, "description": "Zero-based image index."},
+                    "bbox_2d": {
+                        "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1000},
+                        "minItems": 4, "maxItems": 4,
+                        "description": "Optional chart area [x1,y1,x2,y2]; omit for a whole-image chart.",
+                    },
+                },
+                "required": ["target_image"],
+                "additionalProperties": False,
+            },
+        },
+    },
     {
         "type": "function",
         "function": {

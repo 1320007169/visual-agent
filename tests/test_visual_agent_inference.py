@@ -134,6 +134,9 @@ class VisualAgentInferenceTest(unittest.TestCase):
         box = [0, 0, 100, 100]
         crop_image = "data:image/jpeg;base64,eA=="
         cases = [
+            ("chart_parse", {"target_image": 0},
+             {"text": "A | 10", "truncated": True, "source": "paddleocr_vl_chart", "target_image": 0},
+             {"text": "A | 10", "truncated": True}, []),
             ("crop_zoom", {"bbox_2d": box, "target_image": 0},
              {"crop_zoom": {"target_image": 1, "crop_path": "tool://crop.jpg"}, "source": "crop_zoom"},
              {"target_image": 1}, [crop_image]),

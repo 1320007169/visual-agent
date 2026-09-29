@@ -88,7 +88,7 @@ def has_think_action_format(text: str) -> bool:
             except (ValueError, TypeError):
                 return False
             if not isinstance(call, dict) or call.get("name") not in {
-                "grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize"
+                "grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse"
             } or not isinstance(call.get("arguments"), dict):
                 return False
     return True

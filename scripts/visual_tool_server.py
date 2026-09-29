@@ -37,6 +37,7 @@ SUPPORTED_TOOLS = {
     "sam3_crop_zoom",
     "sam3_crop_zoom_multi",
     "ocr_read",
+    "chart_parse",
     "text_locate",
     "text_detect",
     "text_recognize",
@@ -385,6 +386,34 @@ class ToolService:
     count_bridge: VtsRemoteBridge | None = None
     crop_size: int = 336
     minimum_crop_size: int = 96
+    chart_bridge: VtsRemoteBridge | None = None
+
+    def _execute_chart(
+        self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.chart_bridge is None:
+            raise ToolServerError("chart_parse service is not configured; set VTS_CHART_ENDPOINT")
+        if set(arguments) - {"target_image", "bbox_2d"}:
+            raise ToolServerError("chart_parse accepts only target_image and optional bbox_2d")
+        target = _target_image(arguments, images)
+        box = arguments.get("bbox_2d", [0, 0, 1000, 1000])
+        pixels = _relative_box_to_pixels(box, images[target].size)
+        crop = images[target].crop((math.floor(pixels[0]), math.floor(pixels[1]),
+                                   math.ceil(pixels[2]), math.ceil(pixels[3])))
+        response = self.chart_bridge.execute(
+            images=[crop], arguments={"image_id": 0}, instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, "chart_parse"):
+            return error, []
+        structured = response.result.get("structured") or {}
+        text = structured.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return {"status": "error", "tool": "chart_parse", "code": "empty_chart",
+                    "message": "Chart parser returned no content; inspect the image or select another region.",
+                    "recoverable": True}, []
+        return {"text": text.strip(), "truncated": bool(structured.get("truncated", False)),
+                "bbox_2d": _pixel_box_to_relative(pixels, images[target].size),
+                "target_image": target, "source": "paddleocr_vl_chart"}, []
 
     def _execute_text(
         self, name: str, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
@@ -670,6 +699,11 @@ class ToolService:
     ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
+        if name == "chart_parse":
+            try:
+                return self._execute_chart(arguments, images, instance_id)
+            except VtsBridgeError as exc:
+                raise ToolServerError(str(exc)) from exc
         if name in {"text_detect", "text_recognize"}:
             try:
                 return self._execute_text(name, arguments, images, instance_id)
@@ -761,6 +795,7 @@ def load_service(backend: str) -> ToolService:
         sam3=sam3,
         grounding_dino=grounding_dino,
         ocr_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_OCR_ENDPOINT", tool_name="ocr_read"),
+        chart_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_CHART_ENDPOINT", tool_name="chart_parse"),
         depth_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_DEPTH_ENDPOINT", tool_name="depth_estimate"),
         count_bridge=VtsRemoteBridge.from_env(
             endpoint_env="VTS_COUNT_ENDPOINT", tool_name="countgd_plusplus_count"
@@ -790,6 +825,7 @@ def create_app(service: ToolService):
             "sam3_replicas": getattr(service.sam3, "replica_count", 0),
             "grounding_dino_replicas": getattr(service.grounding_dino, "replica_count", 0),
             "ocr_service": service.ocr_bridge is not None,
+            "chart_service": service.chart_bridge is not None,
             "depth_service": service.depth_bridge is not None,
             "count_service": service.count_bridge is not None,
         }

@@ -467,6 +467,8 @@ class VisualAgent:
                     elif output.get("points_2d"):
                         count_output["points_2d"] = output["points_2d"]
                     output = count_output
+                elif invocation.name == "chart_parse":
+                    output = {key: output[key] for key in ("text", "truncated") if key in output}
                 elif invocation.name in {"text_detect", "text_recognize"}:
                     keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
                     output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
