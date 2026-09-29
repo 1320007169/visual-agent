@@ -1,0 +1,205 @@
+{
+  "commit": "56e0fcac41b4c3efa71c02c851b2e2d65298b6ef",
+  "cpu": {
+    "passed": 56,
+    "subtests_passed": 15,
+    "mrope_passed": 2,
+    "mrope_skipped": 0
+  },
+  "gpu_crop": [
+    {
+      "check": "crop/text",
+      "entropy_max_abs": 0.057720184326171875,
+      "entropy_mean_abs": 0.017352819442749023,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "gradient_relative_difference",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "gradient_relative_difference": 0.044131087331486935,
+      "log_prob_max_abs": 0.08878326416015625,
+      "log_prob_mean_abs": 0.01890110969543457,
+      "passed": false
+    },
+    {
+      "check": "crop/image",
+      "entropy_max_abs": 0.03472900390625,
+      "entropy_mean_abs": 0.010853290557861328,
+      "failed": [
+        "entropy_mean_abs",
+        "gradient_relative_difference",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "gradient_relative_difference": 0.2417712024737475,
+      "log_prob_max_abs": 0.12405014038085938,
+      "log_prob_mean_abs": 0.03261613845825195,
+      "passed": false
+    },
+    {
+      "check": "crop/crop",
+      "entropy_max_abs": 0.6690216064453125,
+      "entropy_mean_abs": 0.0747007429599762,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "gradient_relative_difference",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "gradient_relative_difference": 0.5180954986857709,
+      "log_prob_max_abs": 1.1043720245361328,
+      "log_prob_mean_abs": 0.14905674755573273,
+      "passed": false
+    },
+    {
+      "check": "crop/long_tool_text",
+      "entropy_max_abs": 0.0,
+      "entropy_mean_abs": 0.0,
+      "failed": [],
+      "gradient_relative_difference": 0.013124209294901849,
+      "log_prob_max_abs": 0.0,
+      "log_prob_mean_abs": 0.0,
+      "passed": true
+    },
+    {
+      "mode": "crop",
+      "all_passed": false
+    }
+  ],
+  "training": {
+    "completed_steps": 0,
+    "blocker": "OpenCV ImportError: libGL.so.1 missing during vLLM engine startup",
+    "metrics": {},
+    "requested_metric_prefixes": [
+      "rollout_consistency/",
+      "rollout/truncated_rate",
+      "actor/entropy",
+      "timing_s/"
+    ]
+  },
+  "gpu_rmpad_forward_only": [
+    {
+      "check": "rmpad/text",
+      "entropy_max_abs": 0.057727813720703125,
+      "entropy_mean_abs": 0.01735377311706543,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 0.08878326416015625,
+      "log_prob_mean_abs": 0.01890110969543457,
+      "passed": false
+    },
+    {
+      "check": "rmpad/image",
+      "entropy_max_abs": 0.03472137451171875,
+      "entropy_mean_abs": 0.010853290557861328,
+      "failed": [
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 0.12405014038085938,
+      "log_prob_mean_abs": 0.03261613845825195,
+      "passed": false
+    },
+    {
+      "check": "rmpad/crop",
+      "entropy_max_abs": 0.6690216064453125,
+      "entropy_mean_abs": 0.0747005045413971,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 1.1043720245361328,
+      "log_prob_mean_abs": 0.14905674755573273,
+      "passed": false
+    },
+    {
+      "check": "rmpad/long_tool_text",
+      "entropy_max_abs": 0.0,
+      "entropy_mean_abs": 0.0,
+      "failed": [],
+      "log_prob_max_abs": 0.0,
+      "log_prob_mean_abs": 0.0,
+      "passed": true
+    },
+    {
+      "check": "isolation/crop+long_tool_text",
+      "entropy_max_abs": 0.4678230285644531,
+      "entropy_mean_abs": 0.07375215739011765,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 1.1253776550292969,
+      "log_prob_mean_abs": 0.15658004581928253,
+      "passed": false
+    },
+    {
+      "check": "isolation/crop+text",
+      "entropy_max_abs": 0.6690206527709961,
+      "entropy_mean_abs": 0.07470038533210754,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 1.1043720245361328,
+      "log_prob_mean_abs": 0.14905674755573273,
+      "passed": false
+    },
+    {
+      "check": "isolation/crop+image",
+      "entropy_max_abs": 1.1663246154785156,
+      "entropy_mean_abs": 0.08545208722352982,
+      "failed": [
+        "entropy_max_abs",
+        "entropy_mean_abs",
+        "log_prob_max_abs",
+        "log_prob_mean_abs"
+      ],
+      "log_prob_max_abs": 1.3902225494384766,
+      "log_prob_mean_abs": 0.149896502494812,
+      "passed": false
+    },
+    {
+      "mode": "rmpad",
+      "all_passed": false
+    }
+  ],
+  "environment": {
+    "model": "Qwen3-VL-8B-Instruct",
+    "gpu": "NVIDIA A800-SXM4-80GB",
+    "gpu_count_used": 1,
+    "gpu_test": {
+      "torch": "2.8.0",
+      "transformers": "4.57.1",
+      "flash_attn": "2.8.3",
+      "vllm": "0.11.0",
+      "dtype": "bfloat16",
+      "attention": "flash_attention_2"
+    },
+    "cpu_test": {
+      "torch": "2.6.0+cu118",
+      "transformers": "4.57.1"
+    }
+  },
+  "limits": {
+    "log_prob_max_abs": 0.05,
+    "log_prob_mean_abs": 0.005,
+    "entropy_max_abs": 0.05,
+    "entropy_mean_abs": 0.005,
+    "gradient_relative_difference": 0.02
+  }
+}
