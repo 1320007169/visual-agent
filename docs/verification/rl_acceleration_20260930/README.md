@@ -1,5 +1,10 @@
 # RL verification results, 2026-09-30
 
+**Read the [verification-method correction](method-audit.md) first.** The
+historical failure flags below do not establish crop indexing errors or packed
+sample leakage. Padding-only controls reproduce the differences; the old NLL
+gradient mask included observations, and the old isolation test changed shape.
+
 Tested commit: `56e0fcac41b4c3efa71c02c851b2e2d65298b6ef`.
 See the [review report](../../rl_acceleration_review_20260930.md) for findings
 and limitations. These artifacts record the existing tests without changing
@@ -12,7 +17,7 @@ their tolerances or the production training configuration.
 - Full pretrained 8B crop: three of four comparisons failed. Gradients were
   included. Default crop remains disabled.
 - Full pretrained 8B remove padding: three of four forward comparisons and
-  all three sample-isolation comparisons failed. Gradients were not checked.
+  all three varying-shape comparisons failed. Gradients were not checked.
   Remove padding remains disabled.
 - Training smoke: zero steps completed. OpenCV could not load `libGL.so.1`
   during vLLM initialization. There is no training timing baseline.
@@ -48,6 +53,10 @@ CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 python3 -m pytest -q \
 CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 python3 \
     docs/verification/rl_acceleration_20260930/reproduce_metrics.py
 ```
+
+These are historical commands for commit `56e0fca`; the current script adds
+controls and corrects the gradient mask and isolation design. New results are
+linked from the method audit.
 
 GPU 1 was verified idle before the GPU runs; select an available GPU on another
 host. Use a working C compiler for Triton (the tested environment required its

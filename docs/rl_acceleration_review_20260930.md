@@ -1,5 +1,16 @@
 # RL acceleration review (2026-09-30)
 
+**Verification-method correction:** follow-up controls reproduce all the BF16
+forward differences below with crop disabled and only padding changed. Crop
+and independently compacted inputs produce identical forward outputs. The old
+isolation comparison also changed total shape, so it cannot identify sample
+leakage. Fixed-shape neighbour changes in both directions produce identical
+unmodified-sample outputs in all 16 tested cases. The old gradients used all attended response tokens,
+including observations; they were not production-loss or PPO-update checks.
+See [the method audit](verification/rl_acceleration_20260930/method-audit.md)
+for corrected experiments and their limits. The measurements below are retained
+as historical results, not evidence that crop is implemented incorrectly.
+
 Reviewed commit: `56e0fcac41b4c3efa71c02c851b2e2d65298b6ef`.
 The checkout already contains the rollout diagnostics, full-model verification
 script, and the entropy verification gate fix (all reported differences,
@@ -9,10 +20,11 @@ Production code and launcher defaults have not been changed during this review.
 
 ## Findings
 
-1. **P1: full pretrained 8B crop verification does not pass.** The existing
+1. **Unresolved numerical gate: full pretrained 8B crop verification does not pass.** The existing
    production forward, BF16 and FlashAttention2 were tested on the actual
    Qwen3-VL-8B-Instruct checkpoint. Three of four cases exceed the committed
-   numerical limits. This blocks enabling `CROP_COMMON_PADDING` by default.
+   numerical limits. This alone does not justify attributing a defect to crop;
+   the follow-up controls above must be considered before deciding defaults.
    Integer mRoPE equality and small random-model tests do not establish full
    model numerical equivalence. The test establishes a mismatch, not its root
    cause; shape-dependent BF16/kernel behavior still needs to be distinguished
@@ -30,10 +42,10 @@ Production code and launcher defaults have not been changed during this review.
    transformers 4.57.1, flash-attn 2.8.3. Only physical GPU 1 was used.
 
    The optional `--mode rmpad --no-grad` check also failed: three of four
-   numerical comparisons and all three sample-isolation comparisons exceeded
+   numerical comparisons and all three varying-shape comparisons exceeded
    the limits. Isolation max logprob differences were 1.12538 (long tool text
    neighbour), 1.10437 (text neighbour), and 1.39022 (image neighbour). This
-   establishes failure of the isolation gate, not by itself proof of attention
+   establishes failure of the old comparison, not proof of attention
    leaking across samples; shape-dependent numerical effects must also be
    investigated. No rmpad gradient verification was completed. Keep remove
    padding disabled.

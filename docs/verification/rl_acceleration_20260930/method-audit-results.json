@@ -1,0 +1,621 @@
+{
+  "base_commit": "8412508",
+  "production_code_changed": false,
+  "environment": {
+    "model": "Qwen3-VL-8B-Instruct",
+    "gpu": "NVIDIA A800-SXM4-80GB",
+    "gpu_count_used": 1,
+    "gpu_test": {
+      "torch": "2.8.0",
+      "transformers": "4.57.1",
+      "flash_attn": "2.8.3",
+      "vllm": "0.11.0",
+      "dtype": "bfloat16",
+      "attention": "flash_attention_2"
+    },
+    "cpu_test": {
+      "torch": "2.6.0+cu118",
+      "transformers": "4.57.1"
+    }
+  },
+  "limits": {
+    "log_prob_max_abs": 0.05,
+    "log_prob_mean_abs": 0.005,
+    "entropy_max_abs": 0.05,
+    "entropy_mean_abs": 0.005,
+    "gradient_relative_difference": 0.02
+  },
+  "cpu": {
+    "passed": 34,
+    "subtests_passed": 14,
+    "real_processor_tests_skipped": 0,
+    "bidirectional_mutation_followup_passed": 1
+  },
+  "gpu_crop_corrected": {
+    "exit_code": 1,
+    "gradient_objective": "assistant_only_nll",
+    "checks": [
+      {
+        "check": "repeat/text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.0,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/text",
+        "entropy_max_abs": 0.057720184326171875,
+        "entropy_mean_abs": 0.017352819442749023,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.044131087331486935,
+        "log_prob_max_abs": 0.08878326416015625,
+        "log_prob_mean_abs": 0.01890110969543457,
+        "passed": false
+      },
+      {
+        "check": "crop_manual_compact/text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.0,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "crop/text",
+        "entropy_max_abs": 0.057720184326171875,
+        "entropy_mean_abs": 0.017352819442749023,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.044131087331486935,
+        "log_prob_max_abs": 0.08878326416015625,
+        "log_prob_mean_abs": 0.01890110969543457,
+        "passed": false
+      },
+      {
+        "check": "repeat/image",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.00570492982164657,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/image",
+        "entropy_max_abs": 0.03472900390625,
+        "entropy_mean_abs": 0.010853290557861328,
+        "failed": [
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.2397716944631236,
+        "log_prob_max_abs": 0.12405014038085938,
+        "log_prob_mean_abs": 0.03261613845825195,
+        "passed": false
+      },
+      {
+        "check": "crop_manual_compact/image",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.006991384020338927,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "crop/image",
+        "entropy_max_abs": 0.03472900390625,
+        "entropy_mean_abs": 0.010853290557861328,
+        "failed": [
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.24077925085542534,
+        "log_prob_max_abs": 0.12405014038085938,
+        "log_prob_mean_abs": 0.03261613845825195,
+        "passed": false
+      },
+      {
+        "check": "repeat/crop",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [
+          "gradient_relative_difference"
+        ],
+        "gradient_relative_difference": 0.020387884798804424,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": false
+      },
+      {
+        "check": "padding_only/crop",
+        "entropy_max_abs": 0.6690216064453125,
+        "entropy_mean_abs": 0.0747007429599762,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.3852034432066597,
+        "log_prob_max_abs": 1.1043720245361328,
+        "log_prob_mean_abs": 0.14905674755573273,
+        "passed": false
+      },
+      {
+        "check": "crop_manual_compact/crop",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.015289362988953167,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "crop/crop",
+        "entropy_max_abs": 0.6690216064453125,
+        "entropy_mean_abs": 0.0747007429599762,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "gradient_relative_difference",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "gradient_relative_difference": 0.38058566119680354,
+        "log_prob_max_abs": 1.1043720245361328,
+        "log_prob_mean_abs": 0.14905674755573273,
+        "passed": false
+      },
+      {
+        "check": "repeat/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.013465796869333134,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.013696779980461083,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "crop_manual_compact/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.014257979148281872,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "crop/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "gradient_relative_difference": 0.013165363537635822,
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "mode": "crop",
+        "all_passed": false,
+        "gradient_objective": "assistant_only_nll",
+        "optimizer_update_tested": false,
+        "failure_interpretation": "Numerical gate failure alone does not establish an implementation defect."
+      }
+    ]
+  },
+  "gpu_rmpad_corrected": {
+    "exit_code": 1,
+    "with_grad": false,
+    "checks": [
+      {
+        "check": "repeat/text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/text",
+        "entropy_max_abs": 0.057720184326171875,
+        "entropy_mean_abs": 0.017352819442749023,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 0.08878326416015625,
+        "log_prob_mean_abs": 0.01890110969543457,
+        "passed": false
+      },
+      {
+        "check": "rmpad_manual_compact/text",
+        "entropy_max_abs": 7.62939453125e-06,
+        "entropy_mean_abs": 1.430511474609375e-06,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "rmpad/text",
+        "entropy_max_abs": 0.057727813720703125,
+        "entropy_mean_abs": 0.01735377311706543,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 0.08878326416015625,
+        "log_prob_mean_abs": 0.01890110969543457,
+        "passed": false
+      },
+      {
+        "check": "repeat/image",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/image",
+        "entropy_max_abs": 0.03472900390625,
+        "entropy_mean_abs": 0.010853290557861328,
+        "failed": [
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 0.12405014038085938,
+        "log_prob_mean_abs": 0.03261613845825195,
+        "passed": false
+      },
+      {
+        "check": "rmpad_manual_compact/image",
+        "entropy_max_abs": 7.62939453125e-06,
+        "entropy_mean_abs": 1.9073486328125e-06,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "rmpad/image",
+        "entropy_max_abs": 0.03472137451171875,
+        "entropy_mean_abs": 0.010853290557861328,
+        "failed": [
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 0.12405014038085938,
+        "log_prob_mean_abs": 0.03261613845825195,
+        "passed": false
+      },
+      {
+        "check": "repeat/crop",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/crop",
+        "entropy_max_abs": 0.6690216064453125,
+        "entropy_mean_abs": 0.0747007429599762,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 1.1043720245361328,
+        "log_prob_mean_abs": 0.14905674755573273,
+        "passed": false
+      },
+      {
+        "check": "rmpad_manual_compact/crop",
+        "entropy_max_abs": 7.62939453125e-06,
+        "entropy_mean_abs": 1.3275580386107322e-06,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "rmpad/crop",
+        "entropy_max_abs": 0.6690216064453125,
+        "entropy_mean_abs": 0.0747005045413971,
+        "failed": [
+          "entropy_max_abs",
+          "entropy_mean_abs",
+          "log_prob_max_abs",
+          "log_prob_mean_abs"
+        ],
+        "log_prob_max_abs": 1.1043720245361328,
+        "log_prob_mean_abs": 0.14905674755573273,
+        "passed": false
+      },
+      {
+        "check": "repeat/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "padding_only/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "rmpad_manual_compact/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "rmpad/long_tool_text",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/long_tool_text/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/long_tool_text/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/text/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/text/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/image/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/image/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/crop/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/padded/crop/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/long_tool_text/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/long_tool_text/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/text/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/text/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/image/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/image/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/crop/changed_0",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "check": "isolation_fixed_shape/packed/crop/changed_1",
+        "entropy_max_abs": 0.0,
+        "entropy_mean_abs": 0.0,
+        "failed": [],
+        "log_prob_max_abs": 0.0,
+        "log_prob_mean_abs": 0.0,
+        "passed": true
+      },
+      {
+        "mode": "rmpad",
+        "all_passed": false,
+        "gradient_objective": null,
+        "optimizer_update_tested": false,
+        "failure_interpretation": "Numerical gate failure alone does not establish an implementation defect."
+      }
+    ]
+  },
+  "gpu_fp32_padding_reference": {
+    "exit_code": 0,
+    "attention": "sdpa",
+    "tf32": false,
+    "actor_autocast_used": false,
+    "with_grad": false,
+    "checks": [
+      {
+        "check": "fp32_hf_padding/text",
+        "entropy_max_abs": 1.1265277862548828e-05,
+        "entropy_mean_abs": 3.5796952033706475e-06,
+        "log_prob_max_abs": 4.76837158203125e-05,
+        "log_prob_mean_abs": 8.787959814071655e-06
+      },
+      {
+        "check": "fp32_hf_padding/image",
+        "entropy_max_abs": 9.298324584960938e-06,
+        "entropy_mean_abs": 2.674919869605219e-06,
+        "log_prob_max_abs": 6.628036499023438e-05,
+        "log_prob_mean_abs": 1.237343531101942e-05
+      },
+      {
+        "check": "fp32_hf_padding/crop",
+        "entropy_max_abs": 0.00018143653869628906,
+        "entropy_mean_abs": 1.5946850908221677e-05,
+        "log_prob_max_abs": 0.0002040863037109375,
+        "log_prob_mean_abs": 2.774987297016196e-05
+      },
+      {
+        "check": "fp32_hf_padding/long_tool_text",
+        "entropy_max_abs": 6.0558319091796875e-05,
+        "entropy_mean_abs": 2.4562163503105694e-07,
+        "log_prob_max_abs": 0.0001468658447265625,
+        "log_prob_mean_abs": 5.954422022114159e-07
+      }
+    ]
+  },
+  "interpretation": {
+    "crop_forward_matches_manual_compact": true,
+    "crop_manual_compact_nll_gradients_within_limits": true,
+    "repeat_nll_gradients_always_within_limits": false,
+    "fixed_shape_bidirectional_isolation_checks_passed": 16,
+    "original_numerical_gates_passed": false,
+    "ppo_kl_entropy_loss_or_optimizer_update_tested": false,
+    "multi_gpu_fsdp_tested": false,
+    "deterministic_backward_rerun_completed": false,
+    "training_steps_completed": 0,
+    "root_cause": "Original failures are confounded by tensor shape and backward repeatability; these results do not establish a crop indexing defect or packed sample leakage."
+  }
+}

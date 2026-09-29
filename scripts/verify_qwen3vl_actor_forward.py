@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """GPU checks of the production actor forward on a pretrained Qwen3-VL checkpoint.
 
-crop:  crop_common_padding off/on must agree on valid-token log probabilities, entropy and gradients.
-rmpad: use_remove_padding off/on must agree with micro batch 1, and samples packed together
-       must not influence each other (the output for sample A may not depend on sample B).
+crop: compare padding off/on, with repeat and manually compacted input controls.
+rmpad: compare padded/packed micro batches and change neighbours at fixed shape.
+Gradients use assistant-only NLL, not PPO/KL/entropy loss or an optimizer update.
+Numerical gate failures alone do not identify an implementation error: BF16
+outputs can change with tensor shape even when both runs have crop disabled.
 """
 
 import argparse
@@ -25,7 +27,9 @@ CASES = ("text", "image", "crop", "long_tool_text")
 
 
 def build_sample(processor, case, seed):
-    """Return (prompt_length, input_ids, multimodal inputs) encoded like chat_scheduler.postprocess."""
+    """Return prompt length, full ids, multimodal inputs and production response loss mask."""
+    from verl.workers.rollout.chat_scheduler import ToolCompletionCallback
+
     rng = np.random.RandomState(seed)
     image = Image.fromarray(rng.randint(0, 255, (448, 448, 3), dtype=np.uint8))
     question = {"type": "text", "text": f"Question {seed}: which option matches the picture?"}
@@ -50,15 +54,21 @@ def build_sample(processor, case, seed):
     prompt_ids = processor(text=[prompt_text], images=prompt_images or None, return_tensors="pt")["input_ids"][0]
     encoded = processor(text=[full_text], images=images or None, return_tensors="pt")
     multi_modal = {key: encoded[key] for key in ("pixel_values", "image_grid_thw") if key in encoded}
-    return prompt_ids.numel(), encoded["input_ids"][0], multi_modal
+    response_ids = encoded["input_ids"][:, prompt_ids.numel():]
+    callback = ToolCompletionCallback.__new__(ToolCompletionCallback)
+    callback.tokenizer = processor.tokenizer
+    loss_mask = callback._mask_out_tools_calling_tokens(
+        [prompt], [prompt + turns], response_ids, torch.ones_like(response_ids),
+    )[0]
+    return prompt_ids.numel(), encoded["input_ids"][0], multi_modal, loss_mask
 
 
 def collate(model, pad_token_id, samples, device, prompt_pad=5, response_pad=7):
     """Left-pad prompts and right-pad responses to shared widths, as the rollout batch does."""
-    prompt_width = max(prompt_length for prompt_length, _, _ in samples) + prompt_pad
-    response_width = max(ids.numel() - prompt_length for prompt_length, ids, _ in samples) + response_pad
-    rows, masks, positions = [], [], []
-    for prompt_length, ids, multi_modal in samples:
+    prompt_width = max(sample[0] for sample in samples) + prompt_pad
+    response_width = max(ids.numel() - prompt_length for prompt_length, ids, _, _ in samples) + response_pad
+    rows, masks, positions, loss_masks = [], [], [], []
+    for prompt_length, ids, multi_modal, response_loss_mask in samples:
         left = prompt_width - prompt_length
         right = response_width - (ids.numel() - prompt_length)
         row = torch.cat([torch.full((left,), pad_token_id), ids, torch.full((right,), pad_token_id)])
@@ -72,14 +82,16 @@ def collate(model, pad_token_id, samples, device, prompt_pad=5, response_pad=7):
         rows.append(row)
         masks.append(mask)
         positions.append(position[:, 0].cpu())
+        loss_masks.append(torch.cat([torch.zeros(prompt_width), response_loss_mask, torch.zeros(right)]).long())
     input_ids = torch.stack(rows).to(device)
     return {
         "input_ids": input_ids,
         "attention_mask": torch.stack(masks).to(device),
+        "loss_mask": torch.stack(loss_masks).to(device),
         "position_ids": torch.stack(positions).to(device),  # (bsz, 3, seqlen)
         "responses": input_ids[:, prompt_width:],
         "multi_modal_inputs": np.array(
-            [{key: value.to(device) for key, value in multi_modal.items()} for _, _, multi_modal in samples],
+            [{key: value.to(device) for key, value in multi_modal.items()} for _, _, multi_modal, _ in samples],
             dtype=object,
         ),
     }
@@ -104,8 +116,13 @@ def make_actor(model, use_remove_padding, crop_common_padding):
     return actor
 
 
+def masked_nll(log_probs, loss_mask):
+    """Keep a backward graph with zero gradients when no loss tokens remain."""
+    return -(log_probs * loss_mask).sum() / loss_mask.sum().clamp_min(1)
+
+
 def run(actor, batch, with_grad):
-    """Return valid-token log probs and entropy, plus gradients on CPU when requested."""
+    """Compare all attended tokens; differentiate NLL only on production loss tokens."""
     model = actor.actor_module
     model.zero_grad(set_to_none=True)
     with torch.set_grad_enabled(with_grad):
@@ -113,10 +130,21 @@ def run(actor, batch, with_grad):
     mask = batch["attention_mask"][:, -batch["responses"].shape[-1]:].bool()
     gradients = None
     if with_grad:
-        (-(log_probs * mask).sum() / mask.sum()).backward()
+        loss_mask = batch["loss_mask"][:, -batch["responses"].shape[-1]:]
+        masked_nll(log_probs, loss_mask).backward()
         gradients = [parameter.grad.detach().cpu() if parameter.grad is not None else None for parameter in model.parameters()]
         model.zero_grad(set_to_none=True)
     return log_probs.detach().float()[mask].cpu(), entropy.detach().float()[mask].cpu(), gradients
+
+
+def change_neighbour(batch, old_token, new_token, row=1):
+    """Change one row's content, preserving other rows, shapes, grids, masks and positions."""
+    batch["input_ids"][row].masked_fill_(batch["input_ids"][row].eq(old_token), new_token)
+    # responses is a view in collate(), but also support independent response storage.
+    batch["responses"][row].masked_fill_(batch["responses"][row].eq(old_token), new_token)
+    if "pixel_values" in batch["multi_modal_inputs"][row]:
+        # Assign a new tensor: collating the same sample twice can alias image storage.
+        batch["multi_modal_inputs"][row]["pixel_values"] = -batch["multi_modal_inputs"][row]["pixel_values"]
 
 
 def difference(first, second):
@@ -170,6 +198,8 @@ def main():
     parser.add_argument("--entropy-mean-abs", type=float, default=0.005, help="Mean valid-token entropy difference")
     parser.add_argument("--grad-rel", type=float, default=0.02, help="Relative L2 gradient difference")
     args = parser.parse_args()
+    if args.mode == "rmpad" and args.attn != "flash_attention_2":
+        parser.error("rmpad requires --attn flash_attention_2")
     from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
     from verl.models.transformers.monkey_patch import apply_monkey_patch
@@ -190,26 +220,52 @@ def main():
         baseline, cropped = make_actor(model, False, False), make_actor(model, False, True)
         for case in CASES:
             batch = collate(model, pad, [samples[case]], device)
-            results.append(check(f"crop/{case}", difference(run(baseline, batch, with_grad), run(cropped, batch, with_grad)), args))
+            compact = collate(model, pad, [samples[case]], device, prompt_pad=0, response_pad=0)
+            reference = run(baseline, batch, with_grad)
+            results.append(check(f"repeat/{case}", difference(reference, run(baseline, batch, with_grad)), args))
+            manual = run(baseline, compact, with_grad)
+            # A diagnostic control, excluded from the implementation control gates.
+            check(f"padding_only/{case}", difference(reference, manual), args)
+            candidate = run(cropped, batch, with_grad)
+            results.append(check(f"crop_manual_compact/{case}", difference(manual, candidate), args))
+            results.append(check(f"crop/{case}", difference(reference, candidate), args))
     else:
         padded, packed = make_actor(model, False, False), make_actor(model, True, False)
         for case in CASES:
             batch = collate(model, pad, [samples[case]], device)
-            results.append(check(f"rmpad/{case}", difference(run(padded, batch, with_grad), run(packed, batch, with_grad)), args))
+            compact = collate(model, pad, [samples[case]], device, prompt_pad=0, response_pad=0)
+            reference = run(padded, batch, with_grad)
+            results.append(check(f"repeat/{case}", difference(reference, run(padded, batch, with_grad)), args))
+            manual = run(padded, compact, with_grad)
+            check(f"padding_only/{case}", difference(reference, manual), args)
+            candidate = run(packed, batch, with_grad)
+            results.append(check(f"rmpad_manual_compact/{case}", difference(manual, candidate), args))
+            results.append(check(f"rmpad/{case}", difference(reference, candidate), args))
 
-        # Isolation: sample A must not change when its packed neighbour changes.
+        # Test both directions: missing causal boundaries can leak A into B but not B into A.
         sample_a = samples["crop"]
-        alone = collate(model, pad, [sample_a], device)
-        reference = run(packed, alone, False)
-        width = reference[0].numel()
-        for neighbour in ("long_tool_text", "text", "image"):
-            batch = collate(model, pad, [sample_a, samples[neighbour]], device)
-            log_probs, entropy, _ = run(packed, batch, False)
-            # Valid tokens are ordered row by row, so sample A comes first.
-            together = (log_probs[:width], entropy[:width], None)
-            results.append(check(f"isolation/crop+{neighbour}", difference(reference, together), args))
+        old_token, = processor.tokenizer.encode("A", add_special_tokens=False)
+        new_token, = processor.tokenizer.encode("B", add_special_tokens=False)
+        for name, actor in (("padded", padded), ("packed", packed)):
+            for neighbour in ("long_tool_text", "text", "image", "crop"):
+                for changed_row in (0, 1):
+                    batch = collate(model, pad, [sample_a, samples[neighbour]], device)
+                    reference = run(actor, batch, False)
+                    change_neighbour(batch, old_token, new_token, row=changed_row)
+                    changed = run(actor, batch, False)
+                    counts = batch["attention_mask"][:, -batch["responses"].shape[-1]:].sum(-1)
+                    unchanged_row = 1 - changed_row
+                    start = int(counts[:unchanged_row].sum())
+                    end = start + int(counts[unchanged_row])
+                    first = (reference[0][start:end], reference[1][start:end], None)
+                    second = (changed[0][start:end], changed[1][start:end], None)
+                    results.append(check(f"isolation_fixed_shape/{name}/{neighbour}/changed_{changed_row}",
+                                         difference(first, second), args))
 
-    print(json.dumps({"mode": args.mode, "all_passed": all(results)}), flush=True)
+    print(json.dumps({"mode": args.mode, "all_passed": all(results),
+                      "gradient_objective": "assistant_only_nll" if with_grad else None,
+                      "optimizer_update_tested": False,
+                      "failure_interpretation": "Numerical gate failure alone does not establish an implementation defect."}), flush=True)
     sys.exit(0 if all(results) else 1)
 
 
