@@ -23,6 +23,11 @@ MM_PROCESSOR_CACHE_ARGS=()
 if [[ -n "$MM_PROCESSOR_CACHE_GB" ]]; then
     MM_PROCESSOR_CACHE_ARGS=(--mm-processor-cache-gb "$MM_PROCESSOR_CACHE_GB")
 fi
+# Native tool requests need the same parser as the RL rollout server (hermes).
+TOOL_PARSER_ARGS=()
+if [[ -n "${VLLM_TOOL_CALL_PARSER:-}" ]]; then
+    TOOL_PARSER_ARGS=(--enable-auto-tool-choice --tool-call-parser "$VLLM_TOOL_CALL_PARSER")
+fi
 
 # Triton compiles a tiny launcher during the first multimodal profile. Prefer
 # the complete compiler from the active conda environment over the host GCC,
@@ -54,4 +59,5 @@ exec "$VLLM_PYTHON" -m vllm.entrypoints.openai.api_server \
   --max-model-len "$MAX_MODEL_LEN" \
   --limit-mm-per-prompt "$LIMIT_MM_PER_PROMPT" \
   "${MM_PROCESSOR_CACHE_ARGS[@]}" \
+  "${TOOL_PARSER_ARGS[@]}" \
   --trust-remote-code

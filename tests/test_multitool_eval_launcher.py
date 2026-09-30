@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -121,6 +122,93 @@ class MultitoolEvalLauncherTests(unittest.TestCase):
         result = self.run_launcher(EVAL_CHECKPOINTS="unknown")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unsupported checkpoint", result.stdout + result.stderr)
+
+
+VLOCR_LAUNCHER = LAUNCHER.with_name("run_visual_agent_eval_multitool_vlocr_8gpu.sh")
+
+
+class VlocrEvalLauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        pipeline = root / "pipeline"
+        pipeline.mkdir()
+        (pipeline / ".env").write_text(f'VTS_OUTPUT_ROOT="{root}/bridge"\n')
+        scripts = root / "repo/scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "run_visual_agent_eval_qwen3.sh").write_text(
+            '#!/bin/bash\n'
+            'printf "PROTOCOL|%s|%s|%s|%s|%s|%s|%s|%s\\n" '
+            '"$RL_DINO_LATEST_STEP" "$RL_DINO_LATEST_MODEL_PATH" "$VISUAL_AGENT_ALLOWED_TOOL_NAMES" '
+            '"$VISUAL_AGENT_SYSTEM_PROMPT_FILE" "$VTS_VL_OCR" "$VTS_CHART_ENDPOINT" '
+            '"$VISUAL_AGENT_MAX_TURNS" "$VISUAL_AGENT_MAX_TOKENS"\n'
+            'printf "NATIVE|%s|%s\\n" "${VISUAL_AGENT_TOOL_CONFIG_PATH:-}" "${VLLM_TOOL_CALL_PARSER:-}"\n'
+        )
+        self.root = root
+        self.env = dict(os.environ, BASE=str(root), REPO_ROOT=str(scripts.parent),
+                        PIPELINE_ROOT=str(pipeline), RUN_ID="test_run", WORK_ROOT=str(root / "results"),
+                        LOG_DIR=str(root / "logs"), EVAL_PREFLIGHT_ONLY="1",
+                        VLOCR_MODEL_PATH="/ckpt/global_step_40/actor/huggingface", VLOCR_STEP="40")
+
+    def test_protocol_matches_vlocr_training(self):
+        result = subprocess.run(["bash", str(VLOCR_LAUNCHER)], env=self.env,
+                                text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        row = next(line.split("|")[1:] for line in result.stdout.splitlines() if line.startswith("PROTOCOL|"))
+        self.assertEqual(row[:2], ["40", "/ckpt/global_step_40/actor/huggingface"])
+        self.assertEqual(set(row[2].split(",")), {"crop_zoom", "grounding_detect",
+                         "depth_measure", "object_count", "ocr_read"})
+        self.assertTrue(row[3].endswith("prompts/visual_agent_rl_system_multitool_vlocr.txt"))
+        self.assertEqual(row[4:], ["1", "http://127.0.0.1:9007", "8", "512"])
+        self.assertFalse((self.root / "results").exists())
+        native = next(line.split("|")[1:] for line in result.stdout.splitlines() if line.startswith("NATIVE|"))
+        self.assertTrue(native[0].endswith("tool_config/visual_tool_multitool_vlocr_config.yaml"))
+        self.assertEqual(native[1], "hermes")
+
+    def test_prompt_only_protocol_disables_native_tools(self):
+        result = subprocess.run(["bash", str(VLOCR_LAUNCHER)], env=dict(self.env, VLOCR_NATIVE_TOOLS="0"),
+                                text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        native = next(line.split("|")[1:] for line in result.stdout.splitlines() if line.startswith("NATIVE|"))
+        self.assertEqual(native, ["", ""])
+
+    @unittest.skipUnless(shutil.which("setsid"), "requires util-linux setsid")
+    def test_cleanup_stops_processes_under_conda_run(self):
+        fake_bin = self.root / "bin"
+        fake_bin.mkdir()
+        pid_file = self.root / "server.pid"
+        # `conda run` keeps the real server as a child; killing only the wrapper orphans it.
+        wrapper = f'#!/bin/bash\nsleep 300 &\necho $! > "{pid_file}"\nwait\n'
+        (fake_bin / "conda").write_text(wrapper)
+        count_env = self.root / "count_env/bin"
+        count_env.mkdir(parents=True)
+        (count_env / "python3").write_text(wrapper.replace("server.pid", "count.pid"))
+        # Slow health checks give the fake services time to start before the missing
+        # depth service is noticed and cleanup runs.
+        (fake_bin / "curl").write_text("#!/bin/bash\nsleep 2\nexit 7\n")
+        for path in (fake_bin / "conda", count_env / "python3", fake_bin / "curl"):
+            path.chmod(0o755)
+        # A missing depth environment makes that service exit at once and triggers cleanup.
+        env = dict(self.env, EVAL_PREFLIGHT_ONLY="0", EVAL_DATASETS="VStarBench",
+                   VLOCR_DEPTH_ENV=str(self.root / "missing_depth_env"),
+                   VTS_COUNT_ENV=str(self.root / "count_env"), PATH=f"{fake_bin}:{os.environ['PATH']}")
+        result = subprocess.run(["bash", str(VLOCR_LAUNCHER)], env=env,
+                                text=True, capture_output=True, timeout=60)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("VTS service exited", result.stdout + result.stderr)
+        for name in ("server.pid", "count.pid"):
+            child = int((self.root / name).read_text())
+            with self.assertRaises(ProcessLookupError, msg=f"{name} child survived cleanup"):
+                os.kill(child, 0)
+
+    def test_missing_checkpoint_is_rejected(self):
+        env = dict(self.env)
+        env.pop("VLOCR_MODEL_PATH")
+        result = subprocess.run(["bash", str(VLOCR_LAUNCHER)], env=env,
+                                text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("VLOCR_MODEL_PATH", result.stderr)
 
 
 if __name__ == "__main__":

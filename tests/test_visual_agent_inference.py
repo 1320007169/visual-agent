@@ -14,7 +14,8 @@ from visual_agent_inference import (  # noqa: E402
     ToolExecutionResult,
     ToolInvocation,
     VisualAgent,
-    parse_tool_invocation,
+    load_training_tool_schemas,
+    parse_tool_invocations,
 )
 
 
@@ -80,24 +81,29 @@ class FakeSession:
 
 
 class VisualAgentInferenceTest(unittest.TestCase):
-    def test_failure_trace_preserves_prior_tools_and_malformed_assistant(self):
+    def test_malformed_tool_call_ends_like_rl_rollout(self):
         model = FakeModelClient()
         model.responses[1]["content"] = "<tool_call>{bad-json}</tool_call>"
-        trace = {}
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
             image.write(b"image-for-transport")
             image.flush()
-            with self.assertRaisesRegex(InferenceError, "invalid <tool_call> JSON"):
-                VisualAgent(model, tool_executor=FakeToolExecutor()).run(
-                    [image.name], "Read formula", trace_sink=trace,
-                )
-        self.assertEqual(trace["turn"], 2)
-        self.assertEqual(trace["tool_calls"][0]["name"], "grounding_detect")
-        self.assertEqual(trace["messages"][-1]["content"], "<tool_call>{bad-json}</tool_call>")
-        self.assertEqual(trace["last_assistant"]["content"], "<tool_call>{bad-json}</tool_call>")
+            result = VisualAgent(model, tool_executor=FakeToolExecutor()).run([image.name], "Read formula")
+        # The malformed turn is the final response; scoring marks it wrong instead of an API failure.
+        self.assertEqual(result.response, "<tool_call>{bad-json}</tool_call>")
+        self.assertEqual(result.turns, 2)
+        self.assertEqual(result.tool_calls[0]["name"], "grounding_detect")
+
+    def test_parse_skips_text_calls_the_rl_rollout_skips(self):
+        invocations = parse_tool_invocations({"content": (
+            '<tool_call>{bad-json}</tool_call>'
+            '<tool_call>["not", "an", "object"]</tool_call>'
+            '<tool_call>{"name":"crop_zoom","arguments":[1]}</tool_call>'
+            '<tool_call>{"name":"crop_zoom","arguments":{"target_image":0}}</tool_call>'
+        )})
+        self.assertEqual(invocations, [ToolInvocation("crop_zoom", {"target_image": 0})])
 
     def test_parse_xml_tool_call(self):
-        invocation = parse_tool_invocation(
+        [invocation] = parse_tool_invocations(
             {
                 "content": '<tool_call>{"name":"sam3_crop_zoom","arguments":{"query":"sign","target_image":0,"slack_ratio":0.1}}</tool_call>'
             }
@@ -106,13 +112,50 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertEqual(invocation.arguments["target_image"], 0)
 
     def test_parse_qwen_attribute_tool_call(self):
-        invocation = parse_tool_invocation(
+        [invocation] = parse_tool_invocations(
             {
                 "content": '<tool_call function="grounding_detect" arguments="{&quot;query&quot;:&quot;person&quot;,&quot;target_image&quot;:0}"></tool_call>'
             }
         )
         self.assertEqual(invocation.name, "grounding_detect")
         self.assertEqual(invocation.arguments, {"query": "person", "target_image": 0})
+
+    def test_every_text_call_is_answered_in_order(self):
+        model = FakeModelClient()
+        model.responses[0]["content"] = (
+            '<tool_call>{"name":"grounding_detect","arguments":{"query":"car","target_image":0}}</tool_call>'
+            '<tool_call>{"name":"grounding_detect","arguments":{"query":"bus","target_image":0}}</tool_call>'
+        )
+        executor = FakeToolExecutor()
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"image-for-transport")
+            image.flush()
+            result = VisualAgent(model, tool_executor=executor).run([image.name], "Count")
+        self.assertEqual([call[0].arguments["query"] for call in executor.calls], ["car", "bus"])
+        self.assertEqual([message["role"] for message in result.messages[2:]], ["assistant", "user", "user", "assistant"])
+
+    def test_native_bad_arguments_and_unknown_tools_get_error_observations(self):
+        calls = [
+            {"id": "call_0", "type": "function", "function": {"name": "grounding_detect", "arguments": "{bad"}},
+            {"id": "call_1", "type": "function", "function": {"name": "grounding_detect", "arguments": "[1]"}},
+            {"id": "call_2", "type": "function", "function": {"name": "no_such_tool", "arguments": "{}"}},
+        ]
+        model = FakeModelClient()
+        model.responses[0] = {"role": "assistant", "content": None, "tool_calls": calls}
+        executor = FakeToolExecutor()
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"image-for-transport")
+            image.flush()
+            result = VisualAgent(model, tool_executor=executor, use_native_tools=True,
+                                 allowed_tool_names={"grounding_detect"}).run([image.name], "Count")
+        self.assertEqual(result.response, "<answer>2</answer>")
+        self.assertEqual(executor.calls, [])
+        observations = result.messages[3:6]
+        self.assertEqual([message["tool_call_id"] for message in observations], ["call_0", "call_1", "call_2"])
+        self.assertTrue(all(message["role"] == "tool" for message in observations))
+        self.assertIn("JSONDecodeError", observations[0]["content"])
+        self.assertIn("must be a JSON object", observations[1]["content"])
+        self.assertIn("not allowed", observations[2]["content"])
 
     def test_xml_multiturn_agent(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
@@ -129,6 +172,50 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertIn('"labels": ["car", "truck"]', result.messages[-2]["content"])
         self.assertEqual(result.tool_calls[0]["result"]["count"], 2)
         self.assertEqual(result.tool_calls[0]["result"]["source"], "groundingdino")
+
+    def test_native_tools_send_given_schemas_and_use_tool_role_history(self):
+        schemas = [{"type": "function", "function": {"name": "grounding_detect", "description": "d",
+                    "parameters": {"type": "object", "properties": {}, "required": []}}}]
+        call = {"id": "call_0", "type": "function", "function": {
+            "name": "grounding_detect", "arguments": '{"query":"car","target_image":0}'}}
+
+        class NativeModelClient:
+            def __init__(self):
+                self.tools = []
+                self.responses = [{"role": "assistant", "content": "Look.", "tool_calls": [call]},
+                                  {"role": "assistant", "content": "<answer>2</answer>"}]
+
+            def chat(self, messages, **kwargs):
+                self.tools.append(kwargs["tools"])
+                return self.responses.pop(0)
+
+        client = NativeModelClient()
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"not-a-real-jpeg-but-valid-for-transport")
+            image.flush()
+            result = VisualAgent(client, tool_executor=FakeToolExecutor(), use_native_tools=True,
+                                 allowed_tool_names={"grounding_detect"}, tool_schemas=schemas,
+                                 ).run([image.name], "Count cars")
+
+        self.assertEqual(result.response, "<answer>2</answer>")
+        self.assertEqual(client.tools, [schemas, schemas])
+        self.assertEqual(result.messages[2], {"role": "assistant", "content": "Look.", "tool_calls": [call]})
+        observation = result.messages[3]
+        self.assertEqual((observation["role"], observation["tool_call_id"]), ("tool", "call_0"))
+        self.assertNotIn("<tool_response>", observation["content"])
+        self.assertIn('"labels": ["car", "truck"]', observation["content"])
+
+    def test_training_tool_schemas_match_rl_loader_byte_for_byte(self):
+        root = SCRIPTS_DIR.parent
+        sys.path.insert(0, str(root / "reinforcement_learning"))
+        from verl.tools.schemas import load_tool_schemas_from_config
+
+        config = root / "reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml"
+        schemas = load_training_tool_schemas(config)
+        # Key order matters: it changes the rendered <tools> block text.
+        self.assertEqual(json.dumps(schemas), json.dumps(load_tool_schemas_from_config(str(config))))
+        self.assertEqual([schema["function"]["name"] for schema in schemas],
+                         ["grounding_detect", "crop_zoom", "depth_measure", "object_count", "ocr_read"])
 
     def test_compact_observations_keep_full_trace_and_crop_image(self):
         box = [0, 0, 100, 100]

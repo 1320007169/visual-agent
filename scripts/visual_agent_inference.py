@@ -24,9 +24,9 @@ from typing import Any, Protocol
 import requests
 
 try:
-    from .visual_tools import VISUAL_TOOL_NAMES, get_visual_tool_schemas
+    from .visual_tools import get_visual_tool_schemas
 except ImportError:
-    from visual_tools import VISUAL_TOOL_NAMES, get_visual_tool_schemas
+    from visual_tools import get_visual_tool_schemas
 
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -44,6 +44,9 @@ class InferenceError(RuntimeError):
 class ToolInvocation:
     name: str
     arguments: dict[str, Any]
+    call_id: str | None = None
+    # Set when a native call's arguments cannot be used; answered with an error observation.
+    argument_error: str | None = None
 
 
 @dataclass
@@ -104,46 +107,75 @@ def _message_text(message: dict[str, Any]) -> str:
     return "" if content is None else str(content)
 
 
-def parse_tool_invocation(message: dict[str, Any]) -> ToolInvocation | None:
+def parse_tool_invocations(message: dict[str, Any]) -> list[ToolInvocation]:
+    """Parse calls with the RL rollout's rules (chat_scheduler.ToolCompletionCallback).
+
+    Native calls are all kept; bad arguments become an error observation. Text calls
+    that are not a JSON object with a string name and object arguments are skipped.
+    """
     native_calls = message.get("tool_calls") or []
     if native_calls:
-        function = native_calls[-1].get("function", {})
-        name = function.get("name")
-        raw_arguments = function.get("arguments", {})
-        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-        return _validate_tool_invocation(name, arguments)
+        invocations = []
+        for call in native_calls:
+            function = call["function"]
+            try:
+                arguments = json.loads(function["arguments"])
+            except (TypeError, json.JSONDecodeError) as exc:
+                invocations.append(ToolInvocation(function["name"], {}, call["id"], f"{type(exc).__name__}: {exc}"))
+                continue
+            if not isinstance(arguments, dict):
+                invocations.append(ToolInvocation(function["name"], {}, call["id"], "Tool arguments must be a JSON object"))
+                continue
+            invocations.append(ToolInvocation(function["name"], arguments, call["id"]))
+        return invocations
 
     action_text = re.sub(r"<think>.*?</think>", "", _message_text(message), flags=re.DOTALL)
     if "<think>" in action_text:
-        return None
-    matches = TOOL_CALL_RE.findall(action_text)
-    if matches:
+        return []
+    raw_calls = TOOL_CALL_RE.findall(action_text)
+    if raw_calls:
+        payloads = []
+        for raw_call in raw_calls:
+            try:
+                payloads.append(json.loads(raw_call))
+            except json.JSONDecodeError:
+                continue
+        return [
+            ToolInvocation(payload["name"], payload.get("arguments", {}))
+            for payload in payloads
+            if isinstance(payload, dict) and isinstance(payload.get("name"), str)
+            and isinstance(payload.get("arguments", {}), dict)
+        ]
+
+    # Qwen attribute-style calls are an evaluation-only fallback; the RL rollout never parses them.
+    invocations = []
+    for name, raw_arguments in TOOL_CALL_ATTR_RE.findall(action_text):
         try:
-            payload = json.loads(matches[-1])
-        except json.JSONDecodeError as exc:
-            raise InferenceError(f"Model returned invalid <tool_call> JSON: {exc}") from exc
-        return _validate_tool_invocation(payload.get("name"), payload.get("arguments", {}))
-
-    attribute_calls = TOOL_CALL_ATTR_RE.findall(action_text)
-    if not attribute_calls:
-        return None
-    name, raw_arguments = attribute_calls[-1]
-    try:
-        arguments = json.loads(html.unescape(raw_arguments))
-    except json.JSONDecodeError as exc:
-        raise InferenceError(f"Model returned invalid tool-call arguments: {exc}") from exc
-    return _validate_tool_invocation(html.unescape(name), arguments)
+            arguments = json.loads(html.unescape(raw_arguments))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(arguments, dict):
+            invocations.append(ToolInvocation(html.unescape(name), arguments))
+    return invocations
 
 
-def _validate_tool_invocation(name: Any, arguments: Any) -> ToolInvocation:
-    if not isinstance(name, str) or not name:
-        raise InferenceError("Tool call is missing a non-empty name")
-    if not isinstance(arguments, dict):
-        raise InferenceError(f"Tool arguments for {name!r} must be a JSON object")
-    known_names = VISUAL_TOOL_NAMES
-    if name not in known_names:
-        raise InferenceError(f"Model requested unsupported tool {name!r}")
-    return ToolInvocation(name=name, arguments=arguments)
+def load_training_tool_schemas(path: str | Path) -> list[dict[str, Any]]:
+    """Dump tool-config schemas exactly as the RL rollout does, without importing the verl package."""
+    import importlib.util
+
+    import yaml
+
+    schemas_file = Path(__file__).resolve().parents[1] / "reinforcement_learning/verl/tools/schemas.py"
+    spec = importlib.util.spec_from_file_location("verl_tool_schemas", schemas_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    tools = yaml.safe_load(Path(path).read_text(encoding="utf-8"))["tools"]
+    return [
+        module.OpenAIFunctionToolSchema.model_validate(tool["tool_schema"]).model_dump(
+            exclude_unset=True, exclude_none=True
+        )
+        for tool in tools
+    ]
 
 
 def _xml_tool_call(invocation: ToolInvocation) -> str:
@@ -327,6 +359,7 @@ class VisualAgent:
         use_native_tools: bool = False,
         system_prompt: str | None = None,
         allowed_tool_names: list[str] | tuple[str, ...] | set[str] | None = None,
+        tool_schemas: list[dict[str, Any]] | None = None,
     ) -> None:
         self.model_client = model_client
         self.tool_executor = tool_executor
@@ -339,6 +372,7 @@ class VisualAgent:
         )
         if self.allowed_tool_names is not None:
             get_visual_tool_schemas(self.allowed_tool_names)
+        self.tool_schemas = tool_schemas or get_visual_tool_schemas(self.allowed_tool_names)
         self.system_prompt = system_prompt or build_system_prompt(self.allowed_tool_names)
 
     def run(
@@ -369,11 +403,7 @@ class VisualAgent:
                 trace_sink["turn"] = turn
             assistant = self.model_client.chat(
                 messages,
-                tools=(
-                    get_visual_tool_schemas(self.allowed_tool_names)
-                    if self.use_native_tools
-                    else None
-                ),
+                tools=self.tool_schemas if self.use_native_tools else None,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
@@ -381,112 +411,25 @@ class VisualAgent:
             messages.append({"role": "assistant", "content": response_text})
             if trace_sink is not None:
                 trace_sink["last_assistant"] = assistant
-            invocation = parse_tool_invocation(assistant)
-            if invocation and not response_text:
-                response_text = _xml_tool_call(invocation)
+            invocations = parse_tool_invocations(assistant)
+            native_calls = assistant.get("tool_calls")
+            if native_calls:
+                # Keep structured calls so the chat template renders history as the RL rollout does.
+                messages[-1]["tool_calls"] = native_calls
+            elif invocations and not response_text:
+                response_text = "".join(_xml_tool_call(invocation) for invocation in invocations)
                 messages[-1]["content"] = response_text
 
-            if invocation is None:
+            if not invocations:
                 return InferenceResult(
                     response=response_text,
                     turns=turn,
                     tool_calls=trace,
                     messages=messages,
                 )
-            if (
-                self.allowed_tool_names is not None
-                and invocation.name not in self.allowed_tool_names
-            ):
-                allowed = sorted(self.allowed_tool_names)
-                error = f"Tool {invocation.name!r} is not allowed; available tools: {allowed}"
-                trace.append({
-                    "name": invocation.name,
-                    "arguments": invocation.arguments,
-                    "error": error,
-                    "returned_images": 0,
-                })
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "<tool_response>\n"
-                        f"{json.dumps({'status': 'error', 'error': error}, ensure_ascii=False)}\n"
-                        "</tool_response>"
-                    ),
-                })
-                continue
-            if self.tool_executor is None:
-                raise InferenceError(
-                    f"Model requested {invocation.name!r}, but no visual tool service is configured. "
-                    "Set --tool-api-base or VISUAL_TOOL_API_BASE."
-                )
-
-            try:
-                tool_result = self.tool_executor.execute(invocation, images)
-            except InferenceError as exc:
-                error_result = {"status": "error", "error": str(exc)}
-                trace.append({
-                    "name": invocation.name,
-                    "arguments": invocation.arguments,
-                    "error": str(exc),
-                    "returned_images": 0,
-                })
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "<tool_response>\n"
-                        f"{json.dumps(error_result, ensure_ascii=False)}\n"
-                        "</tool_response>"
-                    ),
-                })
-                continue
-
-            trace.append({
-                "name": invocation.name,
-                "arguments": invocation.arguments,
-                "result": tool_result.output,
-                "returned_images": len(tool_result.images),
-            })
-            output = tool_result.output
-            if isinstance(output, dict) and output.get("status") not in {"error", "failed"}:
-                if invocation.name == "grounding_detect":
-                    output = {key: output[key] for key in ("boxes", "confidence", "labels") if key in output}
-                elif invocation.name == "crop_zoom":
-                    output = {"target_image": output["crop_zoom"]["target_image"]}
-                elif invocation.name == "depth_measure":
-                    if "depths_m" in output:
-                        output = {"regions": [
-                            {"bbox_2d": box, "depth_m": depth}
-                            for box, depth in zip(output["bboxes_2d"], output["depths_m"], strict=True)
-                        ]}
-                    else:
-                        output = {"regions": [{key: output[key] for key in ("bbox_2d", "depth_m")}]}
-                elif invocation.name == "object_count":
-                    output = {"count": output["count"]}
-                elif invocation.name == "ocr_read" and output.get("source") == "paddleocr_vl":
-                    output = {key: output[key] for key in ("text", "truncated") if key in output}
-                elif invocation.name == "chart_parse":
-                    output = {key: output[key] for key in ("text", "truncated") if key in output}
-                elif invocation.name in {"text_detect", "text_recognize"}:
-                    keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
-                    output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
-            serialized = (
-                output
-                if isinstance(output, str)
-                else json.dumps(output, ensure_ascii=False)
-            )
-            tool_text = f"<tool_response>\n{serialized}\n</tool_response>"
-            if tool_result.images:
-                images.extend(tool_result.images)
-                content: str | list[dict[str, Any]] = [
-                    {"type": "text", "text": tool_text},
-                    *[
-                        {"type": "image_url", "image_url": {"url": image}}
-                        for image in tool_result.images
-                    ],
-                ]
-            else:
-                content = tool_text
-            messages.append({"role": "user", "content": content})
+            # Like the RL rollout, answer every call, in order, before the next model turn.
+            for invocation in invocations:
+                messages.append(self._execute_tool(invocation, images, trace))
 
         return InferenceResult(
             response=f"Agent exceeded the maximum of {self.max_turns} turns",
@@ -494,6 +437,96 @@ class VisualAgent:
             tool_calls=trace,
             messages=messages,
         )
+
+    def _execute_tool(
+        self, invocation: ToolInvocation, images: list[str], trace: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        error = invocation.argument_error
+        if (
+            error is None
+            and self.allowed_tool_names is not None
+            and invocation.name not in self.allowed_tool_names
+        ):
+            allowed = sorted(self.allowed_tool_names)
+            error = f"Tool {invocation.name!r} is not allowed; available tools: {allowed}"
+        if error is not None:
+            trace.append({
+                "name": invocation.name,
+                "arguments": invocation.arguments,
+                "error": error,
+                "returned_images": 0,
+            })
+            return _observation(json.dumps({"status": "error", "error": error}, ensure_ascii=False), invocation)
+        if self.tool_executor is None:
+            raise InferenceError(
+                f"Model requested {invocation.name!r}, but no visual tool service is configured. "
+                "Set --tool-api-base or VISUAL_TOOL_API_BASE."
+            )
+
+        try:
+            tool_result = self.tool_executor.execute(invocation, images)
+        except InferenceError as exc:
+            error_result = {"status": "error", "error": str(exc)}
+            trace.append({
+                "name": invocation.name,
+                "arguments": invocation.arguments,
+                "error": str(exc),
+                "returned_images": 0,
+            })
+            return _observation(json.dumps(error_result, ensure_ascii=False), invocation)
+
+        trace.append({
+            "name": invocation.name,
+            "arguments": invocation.arguments,
+            "result": tool_result.output,
+            "returned_images": len(tool_result.images),
+        })
+        output = tool_result.output
+        if isinstance(output, dict) and output.get("status") not in {"error", "failed"}:
+            if invocation.name == "grounding_detect":
+                output = {key: output[key] for key in ("boxes", "confidence", "labels") if key in output}
+            elif invocation.name == "crop_zoom":
+                output = {"target_image": output["crop_zoom"]["target_image"]}
+            elif invocation.name == "depth_measure":
+                if "depths_m" in output:
+                    output = {"regions": [
+                        {"bbox_2d": box, "depth_m": depth}
+                        for box, depth in zip(output["bboxes_2d"], output["depths_m"], strict=True)
+                    ]}
+                else:
+                    output = {"regions": [{key: output[key] for key in ("bbox_2d", "depth_m")}]}
+            elif invocation.name == "object_count":
+                output = {"count": output["count"]}
+            elif invocation.name == "ocr_read" and output.get("source") == "paddleocr_vl":
+                output = {key: output[key] for key in ("text", "truncated") if key in output}
+            elif invocation.name == "chart_parse":
+                output = {key: output[key] for key in ("text", "truncated") if key in output}
+            elif invocation.name in {"text_detect", "text_recognize"}:
+                keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
+                output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
+        serialized = (
+            output
+            if isinstance(output, str)
+            else json.dumps(output, ensure_ascii=False)
+        )
+        message = _observation(serialized, invocation)
+        if tool_result.images:
+            images.extend(tool_result.images)
+            message["content"] = [
+                {"type": "text", "text": message["content"]},
+                *[
+                    {"type": "image_url", "image_url": {"url": image}}
+                    for image in tool_result.images
+                ],
+            ]
+        return message
+
+
+def _observation(text: str, invocation: ToolInvocation) -> dict[str, Any]:
+    if invocation.call_id is not None:
+        # Native call: the chat template adds <tool_response> tags to tool-role messages.
+        return {"role": "tool", "tool_call_id": invocation.call_id, "content": text}
+    return {"role": "user", "content": f"<tool_response>\n{text}\n</tool_response>"}
 
 
 def build_parser() -> argparse.ArgumentParser:

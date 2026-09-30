@@ -25,6 +25,7 @@ from visual_agent_inference import (  # noqa: E402
     OpenAICompatibleModelClient,
     VisualAgent,
     image_to_data_url,
+    load_training_tool_schemas,
 )
 
 
@@ -111,7 +112,9 @@ class VisualAgentAPI(BaseAPI):
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.use_tools = use_tools
-        self.use_native_tools = use_native_tools
+        tool_config_path = os.getenv("VISUAL_AGENT_TOOL_CONFIG_PATH")
+        self.tool_schemas = load_training_tool_schemas(tool_config_path) if tool_config_path else None
+        self.use_native_tools = use_native_tools or self.tool_schemas is not None
         resolved_system_prompt = _resolve_agent_system_prompt(
             system_prompt, system_prompt_file
         )
@@ -240,6 +243,7 @@ class VisualAgentAPI(BaseAPI):
             use_native_tools=self.use_native_tools,
             system_prompt=self.system_prompt,
             allowed_tool_names=self.allowed_tool_names,
+            tool_schemas=self.tool_schemas,
         )
         result = agent.run(images, question, trace_sink=state)
         match = ANSWER_RE.search(result.response)
