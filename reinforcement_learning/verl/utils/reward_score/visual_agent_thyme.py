@@ -7,6 +7,7 @@ import os
 import re
 from collections import Counter
 from functools import lru_cache
+from math import isfinite
 from threading import Lock
 
 
@@ -245,6 +246,16 @@ def rule_match(prediction: str, ground_truth: str) -> bool:
     return False
 
 
+def chart_match(prediction: str, ground_truth: str) -> bool:
+    prediction, ground_truth = prediction.strip(), ground_truth.strip()
+    try:
+        pred = float(prediction.rstrip("%")) / (100 if prediction.endswith("%") else 1)
+        gold = float(ground_truth.rstrip("%")) / (100 if ground_truth.endswith("%") else 1)
+    except ValueError:
+        return prediction.lower() == ground_truth.lower()
+    return isfinite(pred) and isfinite(gold) and abs(pred - gold) <= abs(gold) * 0.05
+
+
 def multiple_choice_match(prediction: str, ground_truth: str) -> bool:
     """Match a closed A-D answer, optionally followed by its option text."""
     gold = normalize_answer(ground_truth).upper()
@@ -417,6 +428,16 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         )
     elif (extra_info or {}).get("data_source") == "visual-agent-tallyqa":
         correct = answer.strip() == ground_truth.strip()
+    elif (extra_info or {}).get("data_source") == "visual-agent-ocr":
+        correct = any(
+            normalize_answer(answer) == normalize_answer(alias)
+            for alias in [ground_truth, *extra_info.get("answer_aliases", [])]
+        )
+    elif (extra_info or {}).get("data_source") == "visual-agent-chartqa":
+        correct = any(
+            chart_match(answer, alias)
+            for alias in [ground_truth, *extra_info.get("answer_aliases", [])]
+        )
     else:
         question = str((extra_info or {}).get("question", ""))
         correct = rule_match(answer, ground_truth)

@@ -16,6 +16,32 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
+    def test_ocr_aliases_use_text_matching_without_judge(self):
+        extra = {"data_source": "visual-agent-ocr", "answer_aliases": ["New York", "NYC"]}
+        with patch.object(reward, "judge_match") as judge:
+            for answer, expected in ((" NYC. ", 1), ("new  york", 1), ("York", 0), ("Boston", 0)):
+                with self.subTest(answer=answer):
+                    result = reward.compute_score(f"<answer>{answer}</answer>", "New York", extra)
+                    self.assertEqual(result["acc"], expected)
+            self.assertEqual(reward.compute_score("<answer>A. apple</answer>", "A", extra)["acc"], 0)
+            judge.assert_not_called()
+
+    def test_chart_numeric_tolerance_and_text_without_judge(self):
+        extra = {"data_source": "visual-agent-chartqa"}
+        cases = [("105", "100", 1), ("106", "100", 0), ("95", "100", 1),
+                 ("-105", "-100", 1), ("-106", "-100", 0),
+                 ("0.0", "0", 1), ("0.01", "0", 0), ("50%", "0.5", 1),
+                 ("52%", "50%", 1), ("53%", "50%", 0),
+                 ("BLUE", "blue", 1), ("blueish", "blue", 0),
+                 ("inf", "100", 0), ("1", "inf", 0), ("nan", "nan", 0)]
+        with patch.object(reward, "judge_match") as judge:
+            for answer, gold, expected in cases:
+                with self.subTest(answer=answer, gold=gold):
+                    self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", gold, extra)["acc"], expected)
+            extra["answer_aliases"] = ["navy"]
+            self.assertEqual(reward.compute_score("<answer>navy</answer>", "blue", extra)["acc"], 1)
+            judge.assert_not_called()
+
     def test_chart_parse_is_valid_in_both_strict_protocol_switches(self):
         call = '<tool_call>{"name":"chart_parse","arguments":{"target_image":0,"bbox_2d":[0,0,1000,1000]}}</tool_call>'
         observation = '<|im_end|>\n<|im_start|>user\n<tool_response>{"text":"A | 4","truncated":false}</tool_response><|im_end|>\n<|im_start|>assistant\n'

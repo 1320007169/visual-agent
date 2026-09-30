@@ -54,6 +54,25 @@ direct 关闭工具并使用原简洁回答提示词；tool_first 仅在 auto �
 详细协议、补测原因及结果目录见
 [三项 Benchmark 评测汇总](../../docs/three_benchmark_evaluation_summary.md#16-卡混合数据-rl-step160工具使用诊断2026-09-17)。
 
+## 多工具 RL 数据版本记录（2026-10-01）
+
+八节点 VL-OCR 启动配置新增 OCR、Chart 原图 QA，各 1,600 条，其中各 1,440 条训练、160 条验证。
+旧版数据目录为 `data/zwz_deepeyesv2_depth_tallyqa5k_multitool_20260924`，
+新版为 `data/zwz_deepeyesv2_depth_tallyqa5k_ocr_chart_multitool_20261001`。
+
+| 数据版本 | 训练集 | 验证集 | 总计 |
+|---|---:|---:|---:|
+| 旧版混合数据 | 30,808 | 992 | 31,800 |
+| 新版追加 OCR、Chart | 33,688 | 1,312 | 35,000 |
+
+运行名改为 `qwen3base_multitool_vlocr_ocr_chart1600_n16_8node`，追加任务已注册到数据加载器和奖励入口。
+旧来源及其划分保留；OCR 使用多答案文本匹配，Chart 使用文本匹配或 5% 数值容差。
+新版验证宏平均从 3 个来源增为 5 个来源，不能直接与旧版宏平均比较。
+本记录说明数据和代码准备情况，尚无本版新增训练或 Benchmark 成绩。
+
+完整来源分布、OCR 配额、评分差异、启动配置及核验范围见
+[多工具 RL 数据版本对照](../../docs/rl_multitool_training.md#ocr-and-chart-data-version-record-2026-10-01)。
+
 ## 快速开始
 
 ```bash
