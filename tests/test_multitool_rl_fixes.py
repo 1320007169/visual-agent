@@ -47,8 +47,9 @@ tool_config = yaml.safe_load((
 
 
 def tool_schema(name):
-    if name == "chart_parse":
-        config = yaml.safe_load((ROOT / "reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_text_rec_chart_config.yaml").read_text())
+    if name in {"chart_parse", "ocr_read"}:
+        filename = "visual_tool_multitool_vlocr_config.yaml" if name == "ocr_read" else "visual_tool_multitool_text_rec_chart_config.yaml"
+        config = yaml.safe_load((ROOT / "reinforcement_learning/examples/sglang_multiturn/config/tool_config" / filename).read_text())
         row = next(row for row in config["tools"] if row["tool_schema"]["function"]["name"] == name)
         return schemas.OpenAIFunctionToolSchema.model_validate(row["tool_schema"])
     row = next(row for row in tool_config["tools"] if row["tool_schema"]["function"]["name"] == name)
@@ -253,6 +254,10 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         boxes = [[0, 0, 100, 100], [100, 100, 200, 200]]
         crop_image = "data:image/jpeg;base64,eA=="
         cases = [
+            ("ocr_read", {"target_image": 0, "mode": "chart"},
+             {"text": "A | 10", "truncated": False, "mode": "chart", "bbox_2d": boxes[0],
+              "target_image": 0, "source": "paddleocr_vl"},
+             {"text": "A | 10", "truncated": False}, []),
             ("chart_parse", {"target_image": 0},
              {"text": "A | 10", "truncated": True, "source": "paddleocr_vl_chart", "target_image": 0},
              {"text": "A | 10", "truncated": True}, []),
@@ -268,7 +273,7 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
              {"regions": [{"bbox_2d": box, "depth_m": depth} for box, depth in zip(boxes, [1.0, 2.0])]}, []),
             ("object_count", {"query": "cars", "target_image": 0},
              {"count": 2, "boxes": boxes, "points_2d": [[50, 50], [150, 150]], "source": "object_count"},
-             {"count": 2, "boxes": boxes}, []),
+             {"count": 2}, []),
         ]
         for name, arguments, original, expected, images in cases:
             with self.subTest(tool=name), patch("builtins.print"):

@@ -62,8 +62,8 @@ if [[ "${RL_SPLIT_OCR:-0}" == "1" ]]; then
 fi
 if [[ "${RL_CHART_PARSE:-0}" == "1" ]]; then
     export VTS_CHART_ENDPOINT="${VTS_CHART_ENDPOINT:-http://127.0.0.1:9007}"
-    export PADDLEOCR_VL_MODEL_ROOT="${PADDLEOCR_VL_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models/PaddleOCR-VL}"
-    export VTS_CHART_ENV="${VTS_CHART_ENV:-${RL_ENV_DIR:-$BASE/conda_envs/visual-agent-eval}}"
+    export PADDLEOCR_VL_MODEL_ROOT="${PADDLEOCR_VL_MODEL_ROOT:-$BASE/visual-tools/paddlex-cache/official_models/PaddleOCR-VL-1.6}"
+    export VTS_CHART_ENV="${VTS_CHART_ENV:-$BASE/conda_envs/qwen38-vllm-clean}"
 fi
 
 export VTS_TOOL_BRIDGE_ROOT="${VTS_TOOL_BRIDGE_ROOT:-${VTS_OUTPUT_ROOT:-$BASE/outputs}/visual_agent_bridge/$RUN_ID/${HOSTNAME:-node}}"
@@ -162,6 +162,24 @@ if [[ "$START_VTS_SERVICES" == "1" ]]; then
             echo "error: chart_parse Python environment or local model is missing" >&2
             exit 2
         }
+        chart_library_path="$VTS_CHART_ENV/lib"
+        for torch_library in "$VTS_CHART_ENV"/lib/python*/site-packages/torch/lib; do
+            [[ ! -d "$torch_library" ]] || chart_library_path+=":$torch_library"
+        done
+        chart_library_path+="${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        if [[ -n "${RL_ENV_DIR:-}" ]]; then
+            CUDA_VISIBLE_DEVICES="${RL_CUDA_VISIBLE_DEVICES%%,*}" \
+                LD_LIBRARY_PATH="$RL_ENV_DIR/lib:${CUDA_LIBRARY_DIR:-${CUDA_HOME:-/usr/local/cuda}/lib64}:${LD_LIBRARY_PATH:-}" \
+                "$RL_ENV_DIR/bin/python3" "$REPO_ROOT/scripts/check_visual_agent_cuda.py" RL
+        fi
+        # This conda environment overrides LD_LIBRARY_PATH; restore platform driver paths after activation.
+        CUDA_VISIBLE_DEVICES="$TOOL_GPU" conda run --no-capture-output -p "$VTS_CHART_ENV" \
+            env LD_LIBRARY_PATH="$chart_library_path" \
+            python3 "$REPO_ROOT/scripts/check_visual_agent_cuda.py" PaddleOCR-VL \
+            >"$VTS_SERVICE_DIR/chart-cuda-preflight.log" 2>&1 || {
+                cat "$VTS_SERVICE_DIR/chart-cuda-preflight.log" >&2
+                exit 2
+            }
     fi
     "$VTS_DEPTH_ENV/bin/python3" - "${vts_ports[@]}" <<'PY'
 import socket
@@ -223,6 +241,7 @@ PY
         setsid env CUDA_VISIBLE_DEVICES="$TOOL_GPU" PYTHONUNBUFFERED=1 \
             HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
             conda run --no-capture-output -p "$VTS_CHART_ENV" \
+                env LD_LIBRARY_PATH="$chart_library_path" \
                 python3 "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
                 --model-root "$PADDLEOCR_VL_MODEL_ROOT" --allowed-root "$VTS_TOOL_BRIDGE_ROOT" \
                 --max-new-tokens "${CHART_PARSE_MAX_NEW_TOKENS:-1024}" --port 9007 \
@@ -243,9 +262,13 @@ for index in "${!vts_endpoints[@]}"; do
   endpoint="${vts_endpoints[index]}"
   deadline=$((SECONDS + VTS_SERVICE_STARTUP_TIMEOUT))
   until curl --noproxy '*' --fail --silent --max-time 5 "$endpoint/health" >/dev/null; do
-    if [[ "$START_VTS_SERVICES" == "1" ]] && ! kill -0 "${VTS_SERVICE_PIDS[index]}" 2>/dev/null; then
-      echo "error: VTS service exited before becoming healthy: $endpoint" >&2
-      exit 2
+    if [[ "$START_VTS_SERVICES" == "1" ]]; then
+        for service_index in "${!VTS_SERVICE_PIDS[@]}"; do
+            if ! kill -0 "${VTS_SERVICE_PIDS[service_index]}" 2>/dev/null; then
+                echo "error: VTS service exited during startup: ${vts_endpoints[service_index]}; logs: $VTS_SERVICE_DIR" >&2
+                exit 2
+            fi
+        done
     fi
     (( SECONDS < deadline )) || { echo "error: VTS service did not become healthy: $endpoint" >&2; exit 2; }
     sleep 5

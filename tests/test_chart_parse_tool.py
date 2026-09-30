@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from contextlib import nullcontext
+from dataclasses import dataclass
+from unittest.mock import patch
 
 import numpy as np
 
@@ -60,8 +62,39 @@ class ChartParseTest(unittest.TestCase):
         self.assertEqual(recognizer.processor.generated, [[4, 2]])
         self.assertEqual(recognizer.processor.messages[0]["content"][1]["text"], "Chart Recognition:")
         self.assertFalse(recognizer.model.options["do_sample"])
+        recognizer.read(Image.new("RGB", (100, 60)), mode="text")
+        self.assertEqual(recognizer.processor.messages[0]["content"][1]["text"], "OCR:")
         recognizer.model.generation_config.eos_token_id = [3]
         self.assertTrue(recognizer.read(Image.new("RGB", (100, 60)))["truncated"])
+
+    def test_vl_ocr_routes_text_and_chart_to_one_backend(self):
+        @dataclass(frozen=True)
+        class Bridge:
+            tool_name: str
+            calls: list
+
+            def execute(self, **kwargs):
+                self.calls.append((self.tool_name, kwargs))
+                return SimpleNamespace(result={"status": "success", "structured": {
+                    "text": "A | 10", "truncated": False,
+                }}, images=[])
+
+        calls = []
+        service = ToolService(None, None, chart_bridge=Bridge("chart_parse", calls))
+        image = Image.new("RGB", (200, 100))
+        with patch.dict("os.environ", {"VTS_VL_OCR": "1"}):
+            for mode in ("text", "chart"):
+                result, returned = service.execute(
+                    "ocr_read", {"target_image": 0, "bbox_2d": [250, 200, 750, 800], "mode": mode}, [image],
+                )
+                self.assertEqual(result["text"], "A | 10")
+                self.assertEqual(result["mode"], mode)
+                self.assertEqual(returned, [])
+            with self.assertRaises(ToolServerError):
+                service.execute("ocr_read", {"target_image": 0, "mode": "formula"}, [image])
+        self.assertEqual([tool for tool, _ in calls], ["ocr_read", "ocr_read"])
+        self.assertEqual([call["arguments"]["mode"] for _, call in calls], ["text", "chart"])
+        self.assertEqual(calls[0][1]["images"][0].size, (100, 60))
 
     def test_crop_only_selected_image_and_preserve_coordinate_reference(self):
         bridge = Bridge()
@@ -131,11 +164,34 @@ class ChartParseTest(unittest.TestCase):
             result = execute(payload)
             self.assertEqual(result["structured"], {"text": "A | 10", "truncated": False})
             self.assertEqual(recognizer.size, (100, 60))
-            for bad in ({"tool": "ocr_read"}, {"args": {"image_id": -1}},
+            for bad in ({"tool": "text_recognize"}, {"args": {"image_id": -1}},
                         {"args": {"image_id": 0, "query": "answer this"}},
                         {"context": {"images": [{"path": "/etc/passwd"}]}}):
                 with self.subTest(bad=bad), self.assertRaises(HTTPException):
                     execute({**payload, **bad})
+
+    def test_vl_ocr_service_accepts_both_modes(self):
+        from fastapi import HTTPException
+
+        class Recognizer:
+            def read(self, image, mode="chart"):
+                self.mode = mode
+                return {"text": "recognized", "truncated": False}
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image.png"
+            Image.new("RGB", (100, 60)).save(path)
+            recognizer = Recognizer()
+            app = create_app(recognizer, Path(directory))
+            execute = next(route.endpoint for route in app.routes if route.path == "/execute")
+            payload = {"tool": "ocr_read", "args": {"image_id": 0},
+                       "context": {"images": [{"path": str(path)}]}}
+            self.assertEqual(execute(payload)["structured"]["text"], "recognized")
+            self.assertEqual(recognizer.mode, "text")
+            execute({**payload, "args": {"image_id": 0, "mode": "chart"}})
+            self.assertEqual(recognizer.mode, "chart")
+            with self.assertRaises(HTTPException):
+                execute({**payload, "args": {"image_id": 0, "mode": "formula"}})
 
 
 if __name__ == "__main__":

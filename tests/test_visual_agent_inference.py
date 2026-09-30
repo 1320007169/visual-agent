@@ -134,6 +134,10 @@ class VisualAgentInferenceTest(unittest.TestCase):
         box = [0, 0, 100, 100]
         crop_image = "data:image/jpeg;base64,eA=="
         cases = [
+            ("ocr_read", {"target_image": 0, "mode": "chart"},
+             {"text": "A | 10", "truncated": False, "mode": "chart", "bbox_2d": box,
+              "target_image": 0, "source": "paddleocr_vl"},
+             {"text": "A | 10", "truncated": False}, []),
             ("chart_parse", {"target_image": 0},
              {"text": "A | 10", "truncated": True, "source": "paddleocr_vl_chart", "target_image": 0},
              {"text": "A | 10", "truncated": True}, []),
@@ -145,7 +149,7 @@ class VisualAgentInferenceTest(unittest.TestCase):
              {"regions": [{"bbox_2d": box, "depth_m": 1.5}]}, []),
             ("object_count", {"query": "cars", "target_image": 0},
              {"count": 2, "boxes": [box], "points_2d": [[50, 50]], "query": "cars", "source": "object_count"},
-             {"count": 2, "boxes": [box]}, []),
+             {"count": 2}, []),
             ("text_detect", {"target_image": 0},
              {"regions": [{"bbox_2d": box, "confidence": 0.9}], "count": 1},
              {"regions": [{"bbox_2d": box}]}, []),

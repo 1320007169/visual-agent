@@ -503,6 +503,34 @@ class ToolService:
             result["annotated_image"] = len(images)
         return result, returned_images
 
+    def _execute_vl_ocr(
+        self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        if self.chart_bridge is None:
+            raise ToolServerError("PaddleOCR-VL service is not configured")
+        if set(arguments) - {"target_image", "bbox_2d", "mode"}:
+            raise ToolServerError("ocr_read accepts only target_image, bbox_2d, and mode")
+        mode = arguments.get("mode", "text")
+        if mode not in {"text", "chart"}:
+            raise ToolServerError("ocr_read.mode must be text or chart")
+        target = _target_image(arguments, images)
+        pixels = _relative_box_to_pixels(arguments.get("bbox_2d", [0, 0, 1000, 1000]), images[target].size)
+        crop = images[target].crop((math.floor(pixels[0]), math.floor(pixels[1]),
+                                   math.ceil(pixels[2]), math.ceil(pixels[3])))
+        response = replace(self.chart_bridge, tool_name="ocr_read").execute(
+            images=[crop], arguments={"image_id": 0, "mode": mode}, instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, "ocr_read"):
+            return error, []
+        structured = response.result.get("structured") or {}
+        text = structured.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return {"status": "error", "tool": "ocr_read", "code": "empty_ocr",
+                    "message": "PaddleOCR-VL returned no content", "recoverable": True}, []
+        return {"text": text.strip(), "truncated": bool(structured.get("truncated", False)),
+                "mode": mode, "bbox_2d": _pixel_box_to_relative(pixels, images[target].size),
+                "target_image": target, "source": "paddleocr_vl"}, []
+
     def _execute_text_locate(
         self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
     ) -> tuple[dict, list[str]]:
@@ -711,6 +739,8 @@ class ToolService:
                 raise ToolServerError(str(exc)) from exc
         if name == "ocr_read":
             try:
+                if os.getenv("VTS_VL_OCR") == "1":
+                    return self._execute_vl_ocr(arguments, images, instance_id)
                 return self._execute_ocr(arguments, images, instance_id)
             except VtsBridgeError as exc:
                 raise ToolServerError(str(exc)) from exc

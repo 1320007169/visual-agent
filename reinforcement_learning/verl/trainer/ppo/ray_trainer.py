@@ -197,7 +197,7 @@ def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="
         ) / len(rows)
         if accuracies is not None:
             metrics[f"{root}/acc_mean"] = sum(float(accuracies[i]) for i, _ in rows) / len(rows)
-        for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse"):
+        for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse", "ocr_read"):
             tool_calls = [call for _, calls in rows for call in calls if call.get("tool") == tool]
             metrics[f"{root}/{tool}/trajectory_rate"] = sum(
                 any(call.get("tool") == tool for call in calls) for _, calls in rows
@@ -1212,6 +1212,7 @@ class RayPPOTrainer:
         critic_path = os.path.join(global_step_folder, "critic")
         # load actor
         self.actor_rollout_wg.load_checkpoint(actor_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load)
+        self._loaded_checkpoint_path = global_step_folder
         # load critic
         if self.use_critic:
             self.critic_wg.load_checkpoint(critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load)
@@ -1329,7 +1330,11 @@ class RayPPOTrainer:
                 record_best_checkpoint(
                     step=best_val_step,
                     metric_value=best_val_metric,
-                    checkpoint_path=self.config.actor_rollout_ref.model.path,
+                    checkpoint_path=(
+                        os.path.join(self._loaded_checkpoint_path, "actor", "huggingface")
+                        if getattr(self, "_loaded_checkpoint_path", None)
+                        else self.config.actor_rollout_ref.model.path
+                    ),
                 )
             if self.config.trainer.get("val_only", False):
                 return
@@ -1339,7 +1344,6 @@ class RayPPOTrainer:
         run_start_step = self.global_steps
         run_start_time = time.time()
         stop_after_seconds = int(self.config.trainer.get("stop_after_seconds", 0))
-        wait_for_checkpoint = None
 
         # we start from step 1
         self.global_steps += 1
@@ -1690,6 +1694,8 @@ class RayPPOTrainer:
                     should_save = should_save or (track_best_checkpoint and is_best_val_step)
                     if save_best_only:
                         should_save = is_best_val_step or is_last_step
+                    time_limit_reached = stop_after_seconds > 0 and time.time() - run_start_time >= stop_after_seconds
+                    should_save = should_save or time_limit_reached
                     if should_save:
                         with marked_timer("save_checkpoint", timing_raw, color="green"):
                             self._save_checkpoint()
@@ -1790,13 +1796,10 @@ class RayPPOTrainer:
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
-                if stop_after_seconds and elapsed_seconds >= stop_after_seconds:
-                    if wait_for_checkpoint is None:
-                        wait_for_checkpoint = (self.global_steps - 1) % self.config.trainer.save_freq >= self.config.trainer.save_freq // 2
-                    if not wait_for_checkpoint or should_save:
-                        pprint(
-                            f"Stopping at step {self.global_steps - 1}: {elapsed_seconds:.0f}s elapsed, "
-                            f"checkpoint saved: {should_save}"
-                        )
-                        progress_bar.close()
-                        return
+                if time_limit_reached:
+                    pprint(
+                        f"Stopping at step {self.global_steps - 1}: {elapsed_seconds:.0f}s elapsed, "
+                        f"checkpoint saved: {should_save}"
+                    )
+                    progress_bar.close()
+                    return

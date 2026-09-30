@@ -11,23 +11,22 @@ from PIL import Image
 class ChartRecognizer:
     def __init__(self, model_root: Path, device: str, max_new_tokens: int):
         import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers import AutoModelForImageTextToText, AutoProcessor
 
         self.torch = torch
         self.device = device
         self.max_new_tokens = max_new_tokens
-        self.model = AutoModelForCausalLM.from_pretrained(
-            str(model_root), trust_remote_code=True, local_files_only=True,
-            torch_dtype=torch.bfloat16, attn_implementation="sdpa",
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            str(model_root), local_files_only=True, dtype=torch.bfloat16,
         ).to(device).eval()
         self.processor = AutoProcessor.from_pretrained(
-            str(model_root), trust_remote_code=True, local_files_only=True,
+            str(model_root), local_files_only=True,
         )
 
-    def read(self, image: Image.Image) -> dict:
+    def read(self, image: Image.Image, mode: str = "chart") -> dict:
         messages = [{"role": "user", "content": [
             {"type": "image", "image": image},
-            {"type": "text", "text": "Chart Recognition:"},
+            {"type": "text", "text": "OCR:" if mode == "text" else "Chart Recognition:"},
         ]}]
         inputs = self.processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True,
@@ -55,17 +54,20 @@ def create_app(recognizer, allowed_root: Path):
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "tools": ["chart_parse"], "backend": "paddleocr_vl"}
+        return {"status": "ok", "tools": ["chart_parse", "ocr_read"], "backend": "paddleocr_vl"}
 
     @app.post("/execute")
     def execute(payload: dict):
-        if payload.get("tool") != "chart_parse":
-            raise HTTPException(status_code=422, detail="Only chart_parse is supported")
+        tool = payload.get("tool")
+        if tool not in {"chart_parse", "ocr_read"}:
+            raise HTTPException(status_code=422, detail="Unsupported PaddleOCR-VL tool")
         try:
             arguments = payload["args"]
             index = arguments["image_id"]
-            if type(index) is not int or index < 0 or set(arguments) != {"image_id"}:
-                raise ValueError("Expected a nonnegative image_id only")
+            allowed = {"image_id", "mode"} if tool == "ocr_read" else {"image_id"}
+            mode = arguments.get("mode", "text") if tool == "ocr_read" else "chart"
+            if type(index) is not int or index < 0 or set(arguments) - allowed or mode not in {"text", "chart"}:
+                raise ValueError("Invalid image_id or mode")
             path = Path(payload["context"]["images"][index]["path"]).resolve()
             path.relative_to(allowed_root)
             with Image.open(path) as source:
@@ -73,10 +75,13 @@ def create_app(recognizer, allowed_root: Path):
         except (KeyError, IndexError, TypeError, ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail="Invalid chart image or arguments") from exc
         with lock:
-            result = recognizer.read(image)
+            result = recognizer.read(image) if tool == "chart_parse" else recognizer.read(image, mode=mode)
         if not result["text"].strip():
-            return {"status": "failed", "error_code": "empty_chart",
-                    "error_message": "Chart parser returned no content", "images": []}
+            if tool == "chart_parse":
+                return {"status": "failed", "error_code": "empty_chart",
+                        "error_message": "Chart parser returned no content", "images": []}
+            return {"status": "failed", "error_code": "empty_ocr",
+                    "error_message": "PaddleOCR-VL returned no content", "images": []}
         return {"status": "success", "structured": result, "images": []}
 
     return app

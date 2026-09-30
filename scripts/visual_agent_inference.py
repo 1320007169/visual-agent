@@ -461,12 +461,9 @@ class VisualAgent:
                     else:
                         output = {"regions": [{key: output[key] for key in ("bbox_2d", "depth_m")}]}
                 elif invocation.name == "object_count":
-                    count_output = {"count": output["count"]}
-                    if output.get("boxes"):
-                        count_output["boxes"] = output["boxes"]
-                    elif output.get("points_2d"):
-                        count_output["points_2d"] = output["points_2d"]
-                    output = count_output
+                    output = {"count": output["count"]}
+                elif invocation.name == "ocr_read" and output.get("source") == "paddleocr_vl":
+                    output = {key: output[key] for key in ("text", "truncated") if key in output}
                 elif invocation.name == "chart_parse":
                     output = {key: output[key] for key in ("text", "truncated") if key in output}
                 elif invocation.name in {"text_detect", "text_recognize"}:
