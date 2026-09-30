@@ -401,7 +401,7 @@ fi
 }
 [[ "$WARM_START_GLOBAL_STEP" =~ ^[0-9]+$ ]] || die "WARM_START_GLOBAL_STEP must be a non-negative integer"
 if [[ -n "$TRAINER_STOP_AFTER_SECONDS" ]]; then
-  [[ "$TRAINER_STOP_AFTER_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "TRAINER_STOP_AFTER_SECONDS must be a positive integer"
+  [[ "$TRAINER_STOP_AFTER_SECONDS" =~ ^(0|[1-9][0-9]*)$ ]] || die "TRAINER_STOP_AFTER_SECONDS must be a nonnegative integer (0 disables the time limit)"
 fi
 if [[ -n "$WARM_START_DATA_PATH" ]]; then
   [[ -f "$WARM_START_DATA_PATH" || -f "$WARM_START_DATA_PATH/data.pt" ]] || {
