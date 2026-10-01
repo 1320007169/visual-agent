@@ -146,6 +146,21 @@ OCR and Chart tools were already enabled in that version; enabling a tool
 does not itself add questions to the dataset. More data changes the number
 of updates under the default one-epoch schedule, even with the same batch.
 
+The eight-node VL-OCR launchers default to `SAVE_FREQ=10` and
+`TRAINER_STOP_AFTER_SECONDS=36000`. The timer starts after initial validation.
+Once ten hours have elapsed, the current training step finishes, its complete
+checkpoint is saved even outside the regular ten-step interval, and training
+exits normally. A checkpoint write that crosses the deadline also triggers
+this exit. The final training step can end the run earlier; this is not a
+hard job timeout. Model loading and initial validation are outside the timer.
+
+Signal interruption is handled separately: SIGINT exits with code 130 and
+SIGTERM with code 143. The common launcher runs cleanup once through its EXIT
+trap and writes the same status to the node-0 completion file, so worker nodes
+recognize interruption as a failure. Signal handling does not guarantee saving
+an in-progress training step; the ten-hour trainer deadline uses the checkpoint
+and normal-exit path described above.
+
 ### Checks and comparison limits
 
 Dataset validation counts, image overlap checks, source totals, parent paths,

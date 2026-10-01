@@ -9,7 +9,7 @@ import pytest
 TRAINER = Path(__file__).resolve().parents[1] / "reinforcement_learning/verl/trainer/ppo/ray_trainer.py"
 
 
-def run_checkpoint_stage(*, elapsed, limit=36000, step=25, save_freq=20, best_only=False, fail_save=False):
+def run_checkpoint_stage(*, elapsed, limit=36000, step=25, save_freq=20, best_only=False, fail_save=False, save_duration=0):
     tree = ast.parse(TRAINER.read_text())
     fit = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "fit")
     stage = next(node.body for node in ast.walk(fit) if isinstance(node, ast.With) and any(
@@ -29,9 +29,11 @@ def run_checkpoint_stage(*, elapsed, limit=36000, step=25, save_freq=20, best_on
     runner = SimpleNamespace(global_steps=step, config=SimpleNamespace(trainer=SimpleNamespace(save_freq=save_freq)))
 
     def save_checkpoint():
+        nonlocal elapsed
         events.append(("save", runner.global_steps))
         if fail_save:
             raise RuntimeError("checkpoint write failed")
+        elapsed += save_duration
 
     runner._save_checkpoint = save_checkpoint
     namespace = {
@@ -50,7 +52,7 @@ def run_checkpoint_stage(*, elapsed, limit=36000, step=25, save_freq=20, best_on
     return events
 
 
-@pytest.mark.parametrize("step,best_only,save_freq", [(25, False, 20), (35, False, 20), (25, True, 20), (25, False, 0)])
+@pytest.mark.parametrize("step,best_only,save_freq", [(23, False, 10), (27, False, 10), (25, False, 20), (35, False, 20), (25, True, 20), (25, False, 0)])
 def test_deadline_saves_current_step_before_exit(step, best_only, save_freq):
     events = run_checkpoint_stage(elapsed=36605, step=step, best_only=best_only, save_freq=save_freq)
     assert events[0] == ("save", step)
@@ -72,3 +74,14 @@ def test_no_early_exit_or_extra_save(elapsed, limit):
 def test_checkpoint_failure_propagates_instead_of_reporting_success():
     with pytest.raises(RuntimeError, match="checkpoint write failed"):
         run_checkpoint_stage(elapsed=36605, fail_save=True)
+
+
+def test_deadline_during_checkpoint_write_stops_without_another_step():
+    events = run_checkpoint_stage(elapsed=35999, step=30, save_freq=10, save_duration=2)
+    assert events[0] == ("save", 30)
+    assert events[-1] == ("close", 31)
+    assert "checkpoint saved: True" in events[1][1]
+
+
+def test_disabled_deadline_does_not_stop_after_checkpoint_write():
+    assert run_checkpoint_stage(elapsed=35999, limit=0, step=30, save_freq=10, save_duration=2) == [("save", 30)]

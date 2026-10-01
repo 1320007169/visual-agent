@@ -1712,6 +1712,9 @@ class RayPPOTrainer:
                                 best_checkpoint_path = best_hf_model_dir
                             record_best_checkpoint(best_val_step, best_val_metric, best_checkpoint_path)
 
+                        # A checkpoint write may itself cross the deadline.
+                        time_limit_reached = stop_after_seconds > 0 and time.time() - run_start_time >= stop_after_seconds
+
                 # training metrics
                 metrics.update(
                     {

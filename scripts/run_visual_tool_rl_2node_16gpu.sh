@@ -560,7 +560,9 @@ cleanup() {
   "$RAY_BIN" stop --force >/dev/null 2>&1 || true
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "============================================================"
 echo "Visual-agent VLM RL ${NNODES}-node run"
