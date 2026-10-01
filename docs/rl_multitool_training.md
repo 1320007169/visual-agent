@@ -64,6 +64,9 @@ needed to measure their effect. Existing rollout files are historical results.
 
 ## OCR and Chart data version record (2026-10-01)
 
+Launcher defaults, actual run IDs, observed progress and checkpoint retention
+are tracked in the [experiment execution record](../experiments/visual_agent_execution_plan/README.md#vl-ocr-脚本配置与运行记录2026-10-01).
+
 ### Continuing the original 24-GPU run on 16 GPUs
 
 Use `scripts/run_visual_agent_multitool_vlocr_2node_16gpu_modelarts.sh` on
@@ -157,9 +160,12 @@ preservation, and rejection of a wrong seed or changed original rows. Actual
 data preparation also verified all 2,016 step-60 rollout records against the
 replayed batch. This branch has not yet run GPU training.
 
-This records the previous and new datasets for the eight-node VL-OCR run.
-The new version is prepared for training; no new training or benchmark score
-is reported here. The two-node entrypoint described above retains its old data.
+This compares the previous and new datasets for the eight-node VL-OCR run.
+The experiment execution record now confirms training through step 10 and a
+complete 56-rank checkpoint; no new benchmark score is recorded.
+`run_visual_agent_multitool_vlocr_2node_16gpu_modelarts.sh` retains the original
+data; the separate `ocr_chart_resume` entrypoint uses the mixed continuation
+schedule described above.
 
 | Item | Previous version | New version |
 |---|---|---|
