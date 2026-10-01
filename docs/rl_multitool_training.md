@@ -104,6 +104,59 @@ scheduler step 60 at learning rate 1e-6. These checks do not constitute a
 
 ### Dataset changes
 
+#### Mixing new data after step 60
+
+The separate entrypoint
+`scripts/run_visual_agent_multitool_vlocr_ocr_chart_resume_2node_16gpu_modelarts.sh`
+continues the original step-60 model and optimizer on 14 training GPUs using
+`data/vlocr_ocr_chart_continuation_step60_20261001`. The original 16-GPU
+entrypoint continues to use only the original data.
+
+The prepared train file contains 33,688 rows. Its first 7,560 rows reproduce
+the consumed sample indices; a new sequential dataloader cursor skips this
+prefix. The remaining old rows and all 2,880 added training QA are shuffled
+offline with seed 20261001. `TRAIN_SHUFFLE=False` prevents a second shuffle
+from invalidating that cursor; it does not mean the future QA is grouped by
+source. The 207 future batches contain 6–25 new QA each, and finish at global
+step 267. The 46-row `drop_last` tail consists only of samples from the old
+run's original 64-row unused tail, so every originally scheduled old QA and
+every added training QA is retained. Original duplicate rows remain distinct
+dataset indices. All 320 added validation QA stay in the 1,312-row validation
+split, with per-source metrics; the new five-source macro mean is not directly
+comparable to the old three-source mean.
+
+`resume/global_step_60/actor` links to the original checkpoint's actor files;
+only `data.pt` is newly generated. Keep that original checkpoint directory.
+Model, Adam and scheduler files are not modified or copied. The manifest
+records the exact schedule and input/output hashes. The launcher checks the
+prepared data and initial cursor hashes before starting services. It uses a
+separate run ID and output directory, the same base/KL reference model, tools,
+prompt, global batch 126, mini-batch 42, rollout 16 and ten-hour save-and-exit
+policy. Future checkpoints contain the new sequential cursor and 14-rank
+model/optimizer shards; set `RESUME_FROM_PATH` to a later checkpoint from this
+same data branch when continuing it.
+
+Preparation requires the actual source rollout as independent evidence of
+the replayed sampler seed and dataset ordering. A plain PyTorch RandomSampler
+cursor alone does not certify the seed. Reproduce the artifacts with Python
+from the RL environment (CPU only):
+
+```bash
+CUDA_VISIBLE_DEVICES='' python3 scripts/prepare_rl_data_continuation.py \
+    --source-checkpoint saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_n16_3node_resume_step44_20260930T190545597224_5a18e952/global_step_60 \
+    --source-rollout ../rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_n16_3node_resume_step44_20260930T190545597224_5a18e952/60.jsonl \
+    --old-data-dir data/zwz_deepeyesv2_depth_tallyqa5k_multitool_20260924 \
+    --new-data-dir data/zwz_deepeyesv2_depth_tallyqa5k_ocr_chart_multitool_20261001 \
+    --output-dir data/vlocr_ocr_chart_continuation_step60_20261001
+```
+
+Preparation refuses to overwrite an existing output directory. The new test
+`tests/test_rl_data_continuation.py` covers consumed-prefix exclusion, complete
+new-QA coverage, deterministic mixing, subsequent cursor resume, source-file
+preservation, and rejection of a wrong seed or changed original rows. Actual
+data preparation also verified all 2,016 step-60 rollout records against the
+replayed batch. This branch has not yet run GPU training.
+
 This records the previous and new datasets for the eight-node VL-OCR run.
 The new version is prepared for training; no new training or benchmark score
 is reported here. The two-node entrypoint described above retains its old data.
