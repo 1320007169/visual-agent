@@ -403,6 +403,9 @@ fi
 if [[ -n "$TRAINER_STOP_AFTER_SECONDS" ]]; then
   [[ "$TRAINER_STOP_AFTER_SECONDS" =~ ^(0|[1-9][0-9]*)$ ]] || die "TRAINER_STOP_AFTER_SECONDS must be a nonnegative integer (0 disables the time limit)"
 fi
+if [[ -n "${ALLOW_FSDP_WORLD_SIZE_CHANGE:-}" ]]; then
+    [[ "$ALLOW_FSDP_WORLD_SIZE_CHANGE" == "True" || "$ALLOW_FSDP_WORLD_SIZE_CHANGE" == "False" ]] || die "ALLOW_FSDP_WORLD_SIZE_CHANGE must be True or False"
+fi
 if [[ -n "$WARM_START_DATA_PATH" ]]; then
   [[ -f "$WARM_START_DATA_PATH" || -f "$WARM_START_DATA_PATH/data.pt" ]] || {
     die "warm-start dataloader state not found: $WARM_START_DATA_PATH"
@@ -1048,6 +1051,9 @@ TRAIN_ARGS=(
 )
 if [[ "$SAVE_HF_MODEL" == "1" ]]; then
   TRAIN_ARGS+=("actor_rollout_ref.actor.checkpoint.save_contents=['model','hf_model','optimizer','extra']")
+fi
+if [[ -n "${ALLOW_FSDP_WORLD_SIZE_CHANGE:-}" ]]; then
+    TRAIN_ARGS+=("+actor_rollout_ref.actor.checkpoint.allow_world_size_change=$ALLOW_FSDP_WORLD_SIZE_CHANGE")
 fi
 if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
   TRAIN_ARGS+=("trainer.max_actor_ckpt_to_keep=$MAX_ACTOR_CKPT_TO_KEEP")

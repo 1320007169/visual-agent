@@ -64,6 +64,46 @@ needed to measure their effect. Existing rollout files are historical results.
 
 ## OCR and Chart data version record (2026-10-01)
 
+### Continuing the original 24-GPU run on 16 GPUs
+
+Use `scripts/run_visual_agent_multitool_vlocr_2node_16gpu_modelarts.sh` on
+both eight-GPU nodes. Its default source is the complete `global_step_60`
+checkpoint in
+`qwen3base_multitool_vlocr_n16_3node_resume_step44_20260930T190545597224_5a18e952`.
+It resumes at step 61 with 14 training GPUs and two tool GPUs, using a new
+output directory. The original data, model path (including KL reference),
+tool schemas, prompt, global batch 126, PPO mini-batch 42 and rollout 16 stay
+the same. Each training GPU processes 50% more trajectories; this is not a
+promise of equal step time or memory use. Checkpoints are saved every ten
+steps; after ten hours the current step is saved before exiting.
+
+`ALLOW_FSDP_WORLD_SIZE_CHANGE=True` opts this entrypoint into loading the
+21-rank DTensor model shards and raw Adam moment shards on 14 ranks. The
+loader reads the source without modifying it, copies only each destination
+rank's tensor intervals, and removes old flat-parameter padding before adding
+the new padding. Model precision, Adam moments/counters, scheduler, global
+step and dataloader state are retained. Destination rank N restores source
+rank N's RNG state; changed rank assignment and reduction order mean the
+continued run is not bitwise identical to a 24-GPU run. The next saved
+checkpoint uses 14 ranks and can use the ordinary same-world-size loader.
+
+This path supports FSDP1 with `use_orig_params=False`, a one-dimensional
+`Shard(0)` model mesh, unchanged model/wrap policy, Adam/AdamW without AMSGrad,
+and a reduction in rank count. It is disabled by default; existing launchers
+retain their ordinary loading path. Increasing rank count, FSDP2, hybrid
+sharding and changing the model/wrap policy are outside this conversion.
+
+Validation uses real CPU FSDP collectives: three ranks save, two ranks restore,
+and the next model/Adam update is compared with continuation on three ranks.
+The default same-rank loader and saving/reloading the reduced-rank checkpoint
+are also exercised in `tests/test_fsdp_reshard.py`. The actual Qwen3-VL step-60
+checkpoint has 750 matching model entries and 64 optimizer parameter groups;
+all 21 optimizer layouts matched the model's wrapping, with Adam step 180 and
+scheduler step 60 at learning rate 1e-6. These checks do not constitute a
+16-GPU Qwen3-VL forward/backward or end-to-end training validation.
+
+### Dataset changes
+
 This records the previous and new datasets for the eight-node VL-OCR run.
 The new version is prepared for training; no new training or benchmark score
 is reported here. The two-node entrypoint described above retains its old data.
