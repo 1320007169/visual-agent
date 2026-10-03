@@ -11,7 +11,7 @@ export RUN_ID=qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=36000
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
 export ALLOW_FSDP_WORLD_SIZE_CHANGE=True
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
@@ -40,7 +40,7 @@ export TOTAL_EPOCHS=1
 export TRAIN_SHUFFLE=False
 export DATALOADER_NUM_WORKERS=2
 export RESUME_MODE=resume_path
-export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$MULTITOOL_DATA_DIR/resume/global_step_60}"
+export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261001T042830523880_74d4f11e/global_step_79}"
 export TEST_FREQ="${TEST_FREQ:-40}"
 export SAVE_FREQ="${SAVE_FREQ:-10}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
@@ -79,7 +79,7 @@ export RUN_ID=qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=36000
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
 export ALLOW_FSDP_WORLD_SIZE_CHANGE=True
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
@@ -93,7 +93,7 @@ if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
     TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
     ROLLOUT_N TOTAL_TRAINING_STEPS TEST_FREQ SAVE_FREQ BEST_METRIC VAL_BEFORE_TRAIN \
     VISUAL_AGENT_IMAGE_TRANSPORT MAX_CONCURRENT_REQUESTS RL_SPLIT_OCR TOOL_CONFIG_PATH \
-    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH ALLOW_FSDP_WORLD_SIZE_CHANGE TRAIN_SHUFFLE DATALOADER_NUM_WORKERS; do
+    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH ALLOW_FSDP_WORLD_SIZE_CHANGE TRAIN_SHUFFLE DATALOADER_NUM_WORKERS SYNC_DIR; do
     printf '%s=%s\n' "$key" "${!key:-}"
   done
   printf 'LAUNCHER=%s\n' "$launcher"

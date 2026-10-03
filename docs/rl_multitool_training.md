@@ -135,7 +135,16 @@ records the exact schedule and input/output hashes. The launcher checks the
 prepared data and initial cursor hashes before starting services. It uses a
 separate run ID and output directory, the same base/KL reference model, tools,
 prompt, global batch 126, mini-batch 42, rollout 16 and ten-hour save-and-exit
-policy. Future checkpoints contain the new sequential cursor and 14-rank
+policy for its first run. On 2026-10-03, this entrypoint and its external copy
+changed the default deadline to zero and the restore source to `global_step_79`
+in `qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261001T042830523880_74d4f11e`.
+That run exited with status 0 at 2026-10-01 23:39:17 after reaching the timer;
+its 42 FSDP shard files and `data.pt` are complete. Resubmitting the same
+entrypoint restores the full training state, skips the first 9,954 rows,
+and continues at step 80 toward step 267, with 188 batches remaining.
+The default save interval remains ten steps; fresh job output and synchronization
+paths preserve the source checkpoint and avoid the previous completion file.
+Future checkpoints contain the new sequential cursor and 14-rank
 model/optimizer shards; set `RESUME_FROM_PATH` to a later checkpoint from this
 same data branch when continuing it.
 
@@ -245,19 +254,38 @@ OCR and Chart tools were already enabled in that version; enabling a tool
 does not itself add questions to the dataset. More data changes the number
 of updates under the default one-epoch schedule, even with the same batch.
 
-The eight-node VL-OCR launchers default to `SAVE_FREQ=10` and
-`TRAINER_STOP_AFTER_SECONDS=36000`. The timer starts after initial validation.
-Once ten hours have elapsed, the current training step finishes, its complete
-checkpoint is saved even outside the regular ten-step interval, and training
-exits normally. A checkpoint write that crosses the deadline also triggers
-this exit. The final training step can end the run earlier; this is not a
-hard job timeout. Model loading and initial validation are outside the timer.
+On 2026-10-01, the eight-node VL-OCR launchers changed their default
+`TRAINER_STOP_AFTER_SECONDS` from `36000` to `0`, disabling time-based stopping.
+The original run stopped at step 14 after 37,670 training seconds and saved
+its checkpoint; the shell launcher then reported an unmatched quote and exited
+with status 2. The current common launcher passes `bash -n`; the cause of that
+run's shell error has not been established. Both ModelArts entrypoint copies
+and the eight-node wrapper now default to zero. `SAVE_FREQ=10` and the default
+one-epoch, 100-step training schedule remain in effect.
+
+The same eight-node ModelArts entrypoint now defaults to `RESUME_MODE=resume_path`
+and the complete `global_step_14` checkpoint from
+`qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20260930T195425656668_e9c99c3c`.
+It restores all 56 ranks' model, Adam, scheduler and dataloader state, then
+continues at step 15 toward step 100. The source checkpoint must remain present.
+A new job token creates fresh output, log, rollout and synchronization paths;
+the source artifacts and old completion status are preserved. Both entrypoint
+copies check `data.pt` and all 168 FSDP shards before starting services.
+`RESUME_FROM_PATH` can select a later complete 56-rank checkpoint. At the observed
+mean of 44.6 minutes per step, the remaining 86 steps take roughly 64 hours;
+this estimate excludes restart initialization and repeated initial validation.
+
+An explicitly positive `TRAINER_STOP_AFTER_SECONDS` enables the timer after
+initial validation. When the deadline is reached, the current step finishes,
+its complete checkpoint is saved even outside the regular save interval, and
+training exits normally. A checkpoint write that crosses the deadline also
+triggers this exit. Model loading and initial validation are outside the timer.
 
 Signal interruption is handled separately: SIGINT exits with code 130 and
 SIGTERM with code 143. The common launcher runs cleanup once through its EXIT
 trap and writes the same status to the node-0 completion file, so worker nodes
 recognize interruption as a failure. Signal handling does not guarantee saving
-an in-progress training step; the ten-hour trainer deadline uses the checkpoint
+an in-progress training step; an enabled trainer deadline uses the checkpoint
 and normal-exit path described above.
 
 ### Checks and comparison limits

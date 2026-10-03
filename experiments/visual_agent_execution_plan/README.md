@@ -175,3 +175,41 @@ R4 step10 的日志快照：`rollout/truncated_rate=0.000`、`actor/entropy=0.07
 这不替代 Qwen3-VL 16 卡完整训练更新验证；R5 尚未记录完成 step，混合续训分支尚未上 GPU。
 实现细节和可复现的数据准备命令见
 [多工具 RL 技术记录](../../docs/rl_multitool_training.md#continuing-the-original-24-gpu-run-on-16-gpus)。
+
+### 16 卡混合数据断点续训更新（2026-10-03）
+
+混合数据任务 `qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261001T042830523880_74d4f11e`
+在北京时间 2026-10-01 23:39:17 因 10 小时时限正常退出，退出码 0。
+最后完成并保存 step79，14 个 rank 的 model、optim、extra_state 共 42 个分片及 `data.pt` 齐全。
+
+同一个 `run_visual_agent_multitool_vlocr_ocr_chart_resume_2node_16gpu_modelarts.sh`
+入口及外部副本默认改为从该任务的 `global_step_79` 完整恢复，
+`TRAINER_STOP_AFTER_SECONDS` 从 36000 改为 0，关闭按时间自动停止。
+模型、Adam、scheduler、随机状态及数据游标随 checkpoint 恢复；从 step80 继续到 step267，
+剩余 188 个 batch。数据、batch126、mini-batch42、rollout16、`TRAIN_SHUFFLE=False`
+和每 10 步保存的配置保持一致。新任务使用独立输出及同步目录，原 step79 必须保留。
+本次只修改重新提交时使用的默认配置，尚未启动新的 16 卡任务。
+
+### VL-OCR 最新 checkpoint 双权重评测入口（2026-10-03）
+
+新增单节点 8 卡入口
+`run_visual_agent/eval/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh`，
+依次评测以下两个运行的最新完整 HF checkpoint：
+
+- 64 卡：`qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c`。
+- 16 卡：`qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261002T170651989009_040bfc67`。
+
+添加入口时磁盘最新保存步数分别为 step70、step100；正式启动时重新读取各自的保存标记。
+两份权重均为 Qwen3-VL，HF 导出各有 8 个非空分片，大小约 32.66 GiB。
+用硬链接固定评测权重，使训练 checkpoint 轮转不影响评测；源路径和实际评测路径记录在 `checkpoints.tsv`。
+沿用现有 VL-OCR 单节点入口的五工具、native/hermes、8 轮、每轮 512 token、PaddleOCR-VL-1.6
+和默认 10 项 benchmark，包含 OCRBench、ChartQA_TEST；ChartQA 使用规则评分。
+两边结果独立保存，退出状态汇总到 `status.tsv`。当前只准备入口，未启动 GPU 评测，尚无新 benchmark 成绩。
+环境与 9 月 29 日的 ModelArts 评测入口及 9 月 30 日的 VL-OCR 入口一致：
+模型/VLMEval 使用 `qwenvl3_xmx_vLLM`，CUDA/GCC/G++ 使用 `spacetools-rl`；
+补齐新入口的 `CUDA_LIBRARY_DIR`、`CC`、`CXX`、`CUDAHOSTCXX`，直接调用仓库入口也使用相同设置。
+工具环境沿用公共 VL-OCR 脚本：depth 为 `starVLA_flash_dzw1`，count 为 `.env` 中的 `VTS_COUNT_ENV`，
+PaddleOCR-VL 为 `qwen38-vllm-clean`，GroundingDINO 为 `visual-tools`，工具 CUDA 为 `cuda118`。
+针对两个 checkpoint 的环境传递及评测入口执行 17 项测试，全部通过；Bash 语法检查及真实 checkpoint 配置检查通过。
+配置预检、结果目录和单独指定两项 benchmark 的方式见
+[脚本说明](../../scripts/README.md#vl-ocr-两个最新-checkpoint-评测)。

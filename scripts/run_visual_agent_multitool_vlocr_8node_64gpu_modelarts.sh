@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Start from the base model; the 21-rank step-44 FSDP checkpoint cannot resume on 56 ranks.
+# Continue the completed 56-rank checkpoint at step 14.
 export NNODES=8
 export TRAIN_BATCH_SIZE=336
 export PPO_MINI_BATCH_SIZE=112
@@ -12,8 +12,8 @@ export RUN_ID=qwen3base_multitool_vlocr_ocr_chart1600_n16_8node
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=36000
-export RESUME_MODE=disable
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
+export RESUME_MODE=resume_path
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
 
@@ -37,7 +37,8 @@ export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-112}"
 export ROLLOUT_N="${ROLLOUT_N:-8}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
-export RESUME_MODE="${RESUME_MODE:-disable}"
+export RESUME_MODE=resume_path
+export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20260930T195425656668_e9c99c3c/global_step_14}"
 export TEST_FREQ="${TEST_FREQ:-40}"
 export SAVE_FREQ="${SAVE_FREQ:-10}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
@@ -76,19 +77,21 @@ export RUN_ID=qwen3base_multitool_vlocr_ocr_chart1600_n16_8node
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=36000
-export RESUME_MODE=disable
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
+export RESUME_MODE=resume_path
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
 
 launcher="$REPO_ROOT"/scripts/run_visual_agent_multitool_vlocr_8node_64gpu.sh
 if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
+  export RESUME_MODE=disable
   source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+  export RESUME_MODE=resume_path
   for key in RL_ENV_DIR MODEL_PATH TRAIN_FILES VAL_FILES COUNT_SERVICE_CONFIG NNODES RL_CUDA_VISIBLE_DEVICES \
     TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
     ROLLOUT_N TOTAL_TRAINING_STEPS TEST_FREQ SAVE_FREQ BEST_METRIC VAL_BEFORE_TRAIN \
     VISUAL_AGENT_IMAGE_TRANSPORT MAX_CONCURRENT_REQUESTS RL_SPLIT_OCR TOOL_CONFIG_PATH \
-    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS; do
+    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH SYNC_DIR; do
     printf '%s=%s\n' "$key" "${!key:-}"
   done
   printf 'LAUNCHER=%s\n' "$launcher"
@@ -106,7 +109,18 @@ ensure_symlink /opt/huawei/dataset /opt/huawei/explorer-env/dataset
 ensure_symlink /opt/huawei/dataset /home/ma-user/work/dataset
 ensure_symlink /opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink /opt/huawei/quoteModel/xiaoyi_tmpstorage /home/ma-user/work/model/xiaoyi_tmpstorage
+# Use fresh output and synchronization paths while restoring the source checkpoint.
+export RESUME_MODE=disable
 source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+export RESUME_MODE=resume_path
+
+[[ -s "$RESUME_FROM_PATH/data.pt" ]] || { echo "error: missing resume dataloader state: $RESUME_FROM_PATH/data.pt" >&2; exit 2; }
+for ((rank = 0; rank < 56; rank++)); do
+    for component in model optim extra_state; do
+        checkpoint_file="$RESUME_FROM_PATH/actor/${component}_world_size_56_rank_${rank}.pt"
+        [[ -s "$checkpoint_file" ]] || { echo "error: missing resume shard: $checkpoint_file" >&2; exit 2; }
+    done
+done
 
 if [[ -z "${MULTITOOL_RL_ENV_DIR:-}" && ! -x "$RL_ENV_DIR/bin/python" ]]; then
   for dataset_root in /home/ma-user/work/dataset /opt/huawei/dataset; do
