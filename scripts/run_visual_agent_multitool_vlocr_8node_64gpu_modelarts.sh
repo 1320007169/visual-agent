@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Continue the 56-rank step-80 checkpoint with filtered data and its prepared cursor.
+# Continue step 80 with the original step-83 batch excluded from the prepared data.
 export NNODES=8
 export TRAIN_BATCH_SIZE=336
 export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_quality_n16_8node_from_step80
+export RUN_ID=qwen3base_multitool_vlocr_quality_skip83_n16_8node_from_step80
 export TRAIN_SHUFFLE=False
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
@@ -26,7 +26,7 @@ export PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorag
 export COUNT_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
 export RL_ENV_DIR="${MULTITOOL_RL_ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/visual-agent-qwen3vl-rl}"
 export MODEL_PATH="${MODEL_PATH:-$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct}"
-export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/vlocr_quality_continuation_step80_20261003}"
+export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/vlocr_quality_skip_step83_continuation_step80_20261004}"
 export TRAIN_FILES="${TRAIN_FILES:-$MULTITOOL_DATA_DIR/train.parquet}"
 export VAL_FILES="${VAL_FILES:-$MULTITOOL_DATA_DIR/val.parquet}"
 export NNODES="${NNODES:-2}"
@@ -41,7 +41,7 @@ export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export RESUME_MODE=resume_path
 export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$MULTITOOL_DATA_DIR/resume/global_step_80}"
 export TEST_FREQ="${TEST_FREQ:-40}"
-export SAVE_FREQ="${SAVE_FREQ:-10}"
+export SAVE_FREQ="${SAVE_FREQ:-1}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
 export MAX_CHECKPOINTS_TO_KEEP="${MAX_CHECKPOINTS_TO_KEEP:-1}"
 export SAVE_BEST_ONLY=False
@@ -74,7 +74,7 @@ export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_quality_n16_8node_from_step80
+export RUN_ID=qwen3base_multitool_vlocr_quality_skip83_n16_8node_from_step80
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
