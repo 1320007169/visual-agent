@@ -246,13 +246,15 @@ def rule_match(prediction: str, ground_truth: str) -> bool:
     return False
 
 
-def chart_match(prediction: str, ground_truth: str) -> bool:
+def chart_match(prediction: str, ground_truth: str, question: str = "") -> bool:
     prediction, ground_truth = prediction.strip(), ground_truth.strip()
     try:
         pred = float(prediction.rstrip("%")) / (100 if prediction.endswith("%") else 1)
         gold = float(ground_truth.rstrip("%")) / (100 if ground_truth.endswith("%") else 1)
     except ValueError:
         return prediction.lower() == ground_truth.lower()
+    if re.search(r"\b(?:which|what)\s+year\b|^\s*when\b", question, flags=re.IGNORECASE):
+        return isfinite(pred) and isfinite(gold) and pred == gold
     return isfinite(pred) and isfinite(gold) and abs(pred - gold) <= abs(gold) * 0.05
 
 
@@ -435,7 +437,7 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         )
     elif (extra_info or {}).get("data_source") == "visual-agent-chartqa":
         correct = any(
-            chart_match(answer, alias)
+            chart_match(answer, alias, extra_info.get("question", ""))
             for alias in [ground_truth, *extra_info.get("answer_aliases", [])]
         )
     else:

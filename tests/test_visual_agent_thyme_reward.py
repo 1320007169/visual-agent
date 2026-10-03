@@ -42,6 +42,26 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
             self.assertEqual(reward.compute_score("<answer>navy</answer>", "blue", extra)["acc"], 1)
             judge.assert_not_called()
 
+    def test_chart_year_answers_require_exact_numeric_match(self):
+        questions = (
+            "Which year recorded the lowest number of Natural gas consumption per capita in Romania?",
+            "In what year the gap between the two countries was greatest?",
+            "When did Life expectancy(years) peak?",
+        )
+        with patch.object(reward, "judge_match") as judge:
+            for question in questions:
+                extra = {"data_source": "visual-agent-chartqa", "question": question,
+                         "answer_aliases": ["1965"]}
+                for answer, expected in (("1965", 1), ("1965.0", 1), ("1966", 0), ("1982", 0)):
+                    with self.subTest(question=question, answer=answer):
+                        result = reward.compute_score(f"<answer>{answer}</answer>", "1965.0", extra)
+                        self.assertEqual(result["acc"], expected)
+                        self.assertAlmostEqual(result["score"], 1.0 if expected else 0.1)
+            extra = {"data_source": "visual-agent-chartqa",
+                     "question": "What was the population in the year 1965?"}
+            self.assertEqual(reward.compute_score("<answer>2100</answer>", "2000", extra)["acc"], 1)
+            judge.assert_not_called()
+
     def test_chart_parse_is_valid_in_both_strict_protocol_switches(self):
         call = '<tool_call>{"name":"chart_parse","arguments":{"target_image":0,"bbox_2d":[0,0,1000,1000]}}</tool_call>'
         observation = '<|im_end|>\n<|im_start|>user\n<tool_response>{"text":"A | 4","truncated":false}</tool_response><|im_end|>\n<|im_start|>assistant\n'

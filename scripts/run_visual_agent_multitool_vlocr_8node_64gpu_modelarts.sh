@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Continue the completed 56-rank checkpoint at step 14.
+# Continue the 56-rank step-80 checkpoint with filtered data and its prepared cursor.
 export NNODES=8
 export TRAIN_BATCH_SIZE=336
 export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_ocr_chart1600_n16_8node
+export RUN_ID=qwen3base_multitool_vlocr_quality_n16_8node_from_step80
+export TRAIN_SHUFFLE=False
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
@@ -25,7 +26,7 @@ export PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorag
 export COUNT_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
 export RL_ENV_DIR="${MULTITOOL_RL_ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/visual-agent-qwen3vl-rl}"
 export MODEL_PATH="${MODEL_PATH:-$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct}"
-export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/zwz_deepeyesv2_depth_tallyqa5k_ocr_chart_multitool_20261001}"
+export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/vlocr_quality_continuation_step80_20261003}"
 export TRAIN_FILES="${TRAIN_FILES:-$MULTITOOL_DATA_DIR/train.parquet}"
 export VAL_FILES="${VAL_FILES:-$MULTITOOL_DATA_DIR/val.parquet}"
 export NNODES="${NNODES:-2}"
@@ -38,7 +39,7 @@ export ROLLOUT_N="${ROLLOUT_N:-8}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export RESUME_MODE=resume_path
-export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20260930T195425656668_e9c99c3c/global_step_14}"
+export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$MULTITOOL_DATA_DIR/resume/global_step_80}"
 export TEST_FREQ="${TEST_FREQ:-40}"
 export SAVE_FREQ="${SAVE_FREQ:-10}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
@@ -73,7 +74,7 @@ export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_ocr_chart1600_n16_8node
+export RUN_ID=qwen3base_multitool_vlocr_quality_n16_8node_from_step80
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
@@ -88,7 +89,7 @@ if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
   source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
   export RESUME_MODE=resume_path
   for key in RL_ENV_DIR MODEL_PATH TRAIN_FILES VAL_FILES COUNT_SERVICE_CONFIG NNODES RL_CUDA_VISIBLE_DEVICES \
-    TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
+    TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_SHUFFLE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
     ROLLOUT_N TOTAL_TRAINING_STEPS TEST_FREQ SAVE_FREQ BEST_METRIC VAL_BEFORE_TRAIN \
     VISUAL_AGENT_IMAGE_TRANSPORT MAX_CONCURRENT_REQUESTS RL_SPLIT_OCR TOOL_CONFIG_PATH \
     VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH SYNC_DIR; do
