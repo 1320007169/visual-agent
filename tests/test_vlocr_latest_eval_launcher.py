@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
@@ -97,6 +98,50 @@ def test_failed_first_evaluation_records_status_and_attempts_second(evaluation):
     assert len([line for line in result.stdout.splitlines() if line.startswith("EVAL|")]) == 2
     status = (Path(env["WORK_ROOT"]) / "status.tsv").read_text().splitlines()
     assert [line.split("\t")[:2] for line in status[1:]] == [["64gpu_step70", "17"], ["16gpu_step100", "0"]]
+
+
+def test_chart_service_starts_without_conda_on_path(evaluation):
+    env, sources = evaluation
+    base = Path(env["BASE"])
+    pipeline = base / "pipeline"
+    pipeline.mkdir()
+    service_env = base / "service_env"
+    (service_env / "bin").mkdir(parents=True)
+    (service_env / "bin/python3").write_text("#!/bin/bash\nexec /bin/sleep 300\n")
+    (service_env / "bin/python3").chmod(0o755)
+    chart_env = base / "chart_env"
+    (chart_env / "bin").mkdir(parents=True)
+    (chart_env / "lib/python3.10/site-packages/torch/lib").mkdir(parents=True)
+    (chart_env / "bin/python3").write_text(
+        '#!/bin/bash\n'
+        'printf "CHART|%s|%s|%s|%s|%s|%s\\n" "$0" "$CUDA_VISIBLE_DEVICES" '
+        '"$HF_HUB_OFFLINE" "$TRANSFORMERS_OFFLINE" "$LD_LIBRARY_PATH" "$*"\n'
+        'touch "$TEST_CHART_STARTED"\n'
+        'exec /bin/sleep 300\n')
+    (chart_env / "bin/python3").chmod(0o755)
+    (pipeline / ".env").write_text(
+        f'VTS_OUTPUT_ROOT="{base}/bridge"\nVTS_COUNT_ENV="{service_env}"\n')
+    fake_bin = base / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "curl").write_text('#!/bin/bash\nsleep 0.1\ntest -f "$TEST_CHART_STARTED"\n')
+    (fake_bin / "curl").chmod(0o755)
+    repo = Path(env["REPO_ROOT"])
+    (repo / "scripts/run_visual_agent_eval_qwen3.sh").write_text('echo "EVALUATION_STARTED"\n')
+    assert shutil.which("conda", path=f"{fake_bin}:/usr/bin:/bin") is None
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/run_visual_agent_eval_multitool_vlocr_8gpu.sh")],
+        env={**env, "PATH": f"{fake_bin}:/usr/bin:/bin", "PIPELINE_ROOT": str(pipeline),
+             "VLOCR_DEPTH_ENV": str(service_env), "VTS_CHART_ENV": str(chart_env),
+             "VLOCR_STEP": "70", "VLOCR_MODEL_PATH": str(sources[0]),
+             "EVAL_DATASETS": "VStarBench", "LOG_DIR": str(base / "logs"),
+             "LD_LIBRARY_PATH": "/platform/driver/lib", "TEST_CHART_STARTED": str(base / "chart.started")},
+        capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "EVALUATION_STARTED" in result.stdout
+    chart_log = (Path(env["WORK_ROOT"]) / "services/chart.log").read_text()
+    expected_libraries = f"{chart_env}/lib:{chart_env}/lib/python3.10/site-packages/torch/lib:/platform/driver/lib"
+    assert f"CHART|{chart_env}/bin/python3|7|1|1|{expected_libraries}|" in chart_log
+    assert "paddleocr_vl_chart_server.py" in chart_log
 
 
 @pytest.mark.parametrize("mode", ["CHECKPOINT_EVAL_CONFIG_ONLY", "EVAL_PREFLIGHT_ONLY"])

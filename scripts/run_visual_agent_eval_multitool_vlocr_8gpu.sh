@@ -91,8 +91,7 @@ service_pids=()
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    # Each service is a setsid group leader; signal the whole group so the Python
-    # server under `conda run` exits and releases the GPU and port.
+    # Signal each service group so all subprocesses release their GPU and port.
     for pid in "${service_pids[@]}"; do
         kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     done
@@ -119,16 +118,15 @@ setsid env CUDA_VISIBLE_DEVICES=7 "$VTS_COUNT_ENV/bin/python3" \
     -m vts.tool_server --config "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml" \
     >"$WORK_ROOT/services/count.log" 2>&1 &
 service_pids+=("$!")
-# Same library path fix as training: this conda environment overrides LD_LIBRARY_PATH.
+# Keep the chart environment libraries and inherited platform driver paths.
 chart_library_path="$VTS_CHART_ENV/lib"
 for torch_library in "$VTS_CHART_ENV"/lib/python*/site-packages/torch/lib; do
     [[ ! -d "$torch_library" ]] || chart_library_path+=":$torch_library"
 done
 chart_library_path+="${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 setsid env CUDA_VISIBLE_DEVICES=7 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-    conda run --no-capture-output -p "$VTS_CHART_ENV" \
-    env LD_LIBRARY_PATH="$chart_library_path" \
-    python3 "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
+    LD_LIBRARY_PATH="$chart_library_path" \
+    "$VTS_CHART_ENV/bin/python3" "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
     --model-root "$PADDLEOCR_VL_MODEL_ROOT" --allowed-root "$VTS_TOOL_BRIDGE_ROOT" \
     --max-new-tokens "${CHART_PARSE_MAX_NEW_TOKENS:-1024}" --port 9007 \
     >"$WORK_ROOT/services/chart.log" 2>&1 &

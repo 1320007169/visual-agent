@@ -174,25 +174,28 @@ class VlocrEvalLauncherTests(unittest.TestCase):
         self.assertEqual(native, ["", ""])
 
     @unittest.skipUnless(shutil.which("setsid"), "requires util-linux setsid")
-    def test_cleanup_stops_processes_under_conda_run(self):
+    def test_cleanup_stops_service_subprocesses(self):
         fake_bin = self.root / "bin"
         fake_bin.mkdir()
         pid_file = self.root / "server.pid"
-        # `conda run` keeps the real server as a child; killing only the wrapper orphans it.
+        # Killing only the service parent would orphan its subprocess.
         wrapper = f'#!/bin/bash\nsleep 300 &\necho $! > "{pid_file}"\nwait\n'
-        (fake_bin / "conda").write_text(wrapper)
+        chart_env = self.root / "chart_env/bin"
+        chart_env.mkdir(parents=True)
+        (chart_env / "python3").write_text(wrapper)
         count_env = self.root / "count_env/bin"
         count_env.mkdir(parents=True)
         (count_env / "python3").write_text(wrapper.replace("server.pid", "count.pid"))
         # Slow health checks give the fake services time to start before the missing
         # depth service is noticed and cleanup runs.
         (fake_bin / "curl").write_text("#!/bin/bash\nsleep 2\nexit 7\n")
-        for path in (fake_bin / "conda", count_env / "python3", fake_bin / "curl"):
+        for path in (chart_env / "python3", count_env / "python3", fake_bin / "curl"):
             path.chmod(0o755)
         # A missing depth environment makes that service exit at once and triggers cleanup.
         env = dict(self.env, EVAL_PREFLIGHT_ONLY="0", EVAL_DATASETS="VStarBench",
                    VLOCR_DEPTH_ENV=str(self.root / "missing_depth_env"),
-                   VTS_COUNT_ENV=str(self.root / "count_env"), PATH=f"{fake_bin}:{os.environ['PATH']}")
+                   VTS_COUNT_ENV=str(self.root / "count_env"), VTS_CHART_ENV=str(chart_env.parent),
+                   PATH=f"{fake_bin}:{os.environ['PATH']}")
         result = subprocess.run(["bash", str(VLOCR_LAUNCHER)], env=env,
                                 text=True, capture_output=True, timeout=60)
         self.assertNotEqual(result.returncode, 0)
