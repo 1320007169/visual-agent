@@ -56,15 +56,9 @@ fi
 if [[ "${EVAL_PREFLIGHT_ONLY:-0}" != 1 ]]; then
     mkdir -p "$(dirname "$group_root")"
     mkdir "$group_root"
-    mkdir "$group_root/checkpoints"
-    printf 'checkpoint\tstep\tsource_model\teval_model\n' > "$group_root/checkpoints.tsv"
-    # Hard links keep selected weights available when training rotates checkpoints.
-    # WORK_ROOT must use the same filesystem as the training model directories.
+    printf 'checkpoint\tstep\tmodel_path\n' > "$group_root/checkpoints.tsv"
     for index in "${!labels[@]}"; do
-        snapshot="$group_root/checkpoints/${labels[$index]}_step${steps[$index]}"
-        cp -al "${models[$index]}" "$snapshot"
-        printf '%s\t%s\t%s\t%s\n' "${labels[$index]}" "${steps[$index]}" "${models[$index]}" "$snapshot" >> "$group_root/checkpoints.tsv"
-        models[$index]="$snapshot"
+        printf '%s\t%s\t%s\n' "${labels[$index]}" "${steps[$index]}" "${models[$index]}" >> "$group_root/checkpoints.tsv"
     done
     printf 'checkpoint\texit_code\tseconds\tresult_dir\n' > "$group_root/status.tsv"
 fi

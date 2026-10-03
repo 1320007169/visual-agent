@@ -35,9 +35,6 @@ def evaluation(tmp_path):
         'set -eu\n'
         'printf "EVAL|%s|%s|%s|%s\\n" "$VLOCR_STEP" "$VLOCR_MODEL_PATH" "$WORK_ROOT" "${EVAL_DATASETS:-default}"\n'
         'cat "$VLOCR_MODEL_PATH/model.safetensors"\n'
-        'if [[ "$VLOCR_STEP" == 70 && -n "${TEST_ROTATE_MODEL:-}" ]]; then\n'
-        '    mv "$TEST_ROTATE_MODEL" "$TEST_ROTATE_MODEL.retired"\n'
-        'fi\n'
         'if [[ "$VLOCR_STEP" == 70 ]]; then exit "${TEST_FIRST_EXIT:-0}"; fi\n'
     )
     env = {"PATH": os.environ["PATH"], "BASE": str(tmp_path), "REPO_ROOT": str(repo),
@@ -50,23 +47,21 @@ def run_launcher(env, **changes):
                           capture_output=True, text=True, timeout=30)
 
 
-def test_latest_checkpoints_are_pinned_and_evaluated_in_separate_outputs(evaluation):
+def test_latest_checkpoints_are_read_directly_and_evaluated_in_separate_outputs(evaluation):
     env, sources = evaluation
-    result = run_launcher(env, TEST_ROTATE_MODEL=str(sources[1]), EVAL_DATASETS="OCRBench ChartQA_TEST")
+    result = run_launcher(env, EVAL_DATASETS="OCRBench ChartQA_TEST")
     assert result.returncode == 0, result.stdout + result.stderr
     rows = [line.split("|")[1:] for line in result.stdout.splitlines() if line.startswith("EVAL|")]
     assert [row[0] for row in rows] == ["70", "100"]
     output = Path(env["WORK_ROOT"])
-    for row, label in zip(rows, ("64gpu_step70", "16gpu_step100")):
-        assert row[1] == str(output / "checkpoints" / label)
+    for row, label, source in zip(rows, ("64gpu_step70", "16gpu_step100"), sources):
+        assert row[1] == str(source)
         assert row[2] == str(output / label)
         assert row[3] == "OCRBench ChartQA_TEST"
         assert (Path(row[1]) / "tokenizer.json").is_file()
-    assert not sources[1].exists()
-    assert (output / "checkpoints/16gpu_step100/model.safetensors").stat().st_ino == (
-        Path(str(sources[1]) + ".retired") / "model.safetensors").stat().st_ino
-    assert (output / "checkpoints/64gpu_step70/model.safetensors").stat().st_ino == (
-        sources[0] / "model.safetensors").stat().st_ino
+    assert not (output / "checkpoints").exists()
+    for source, step in zip(sources, (70, 100)):
+        assert (source / "model.safetensors").read_text() == f"weights_step_{step}\n"
     status = (output / "status.tsv").read_text().splitlines()
     assert [line.split("\t")[:2] for line in status[1:]] == [["64gpu_step70", "0"], ["16gpu_step100", "0"]]
     assert str(sources[1]) in (output / "checkpoints.tsv").read_text()

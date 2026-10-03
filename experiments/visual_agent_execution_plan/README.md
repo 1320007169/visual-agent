@@ -201,7 +201,7 @@ R4 step10 的日志快照：`rollout/truncated_rate=0.000`、`actor/entropy=0.07
 
 添加入口时磁盘最新保存步数分别为 step70、step100；正式启动时重新读取各自的保存标记。
 两份权重均为 Qwen3-VL，HF 导出各有 8 个非空分片，大小约 32.66 GiB。
-用硬链接固定评测权重，使训练 checkpoint 轮转不影响评测；源路径和实际评测路径记录在 `checkpoints.tsv`。
+与其他评测入口一致，直接读取原始 HF 模型目录；步数及模型源路径记录在 `checkpoints.tsv`，评测期间需保留选中的 checkpoint。
 沿用现有 VL-OCR 单节点入口的五工具、native/hermes、8 轮、每轮 512 token、PaddleOCR-VL-1.6
 和默认 10 项 benchmark，包含 OCRBench、ChartQA_TEST；ChartQA 使用规则评分。
 两边结果独立保存，退出状态汇总到 `status.tsv`。当前只准备入口，未启动 GPU 评测，尚无新 benchmark 成绩。

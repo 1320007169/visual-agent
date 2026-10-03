@@ -104,10 +104,8 @@ ModelArts 入口：`run_visual_agent/eval/run_visual_agent_eval_multitool_vlocr_
 PaddleOCR-VL 使用 `$BASE/conda_envs/qwen38-vllm-clean`，GroundingDINO 使用 `$BASE/conda_envs/visual-tools`。
 
 结果分别保存在 `outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/<run_id>/64gpu_step<N>/dino_latest/`
-及 `16gpu_step<N>/dino_latest/`，`checkpoints.tsv` 记录源路径及评测权重，`status.tsv` 记录两边退出码及耗时。
-入口在首次评测前通过硬链接保留两份 HF 权重，训练后续轮转旧 checkpoint 不会破坏评测。
-默认输出和训练位于同一文件系统；如覆盖 `WORK_ROOT`，仍需使用该文件系统。
-硬链接无需复制约 65 GiB 的权重，但评测引用存在期间，对应文件不会因训练清理旧目录而释放。
+及 `16gpu_step<N>/dino_latest/`，`checkpoints.tsv` 记录步数及模型源路径，`status.tsv` 记录两边退出码及耗时。
+与其他评测入口一致，直接读取原始 HF 模型目录；评测期间需保留选中的 checkpoint。
 两个模型依次调用现有评测入口，各自启动并清理工具服务；第一份失败仍尝试第二份，整体返回非零状态。
 已有结果目录拒绝复用；`CHECKPOINT_EVAL_CONFIG_ONLY=1` 只检查选中的 checkpoint，不启动服务或创建结果目录。
 
