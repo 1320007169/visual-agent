@@ -9,6 +9,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from visual_tool_extensions import EXTENSION_TOOL_NAMES, EXTENSION_TOOL_SCHEMAS
+
 
 VISUAL_TOOL_NAMES = {
     "crop_zoom",
@@ -24,7 +26,7 @@ VISUAL_TOOL_NAMES = {
     "depth_measure",
     "ground_depth",
     "object_count",
-}
+} | EXTENSION_TOOL_NAMES
 
 DEFAULT_VISUAL_TOOL_NAMES = {
     "crop_zoom",
@@ -323,6 +325,9 @@ VISUAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+VISUAL_TOOL_SCHEMAS.extend(EXTENSION_TOOL_SCHEMAS)
 
 
 def get_visual_tool_schemas(tool_names: list[str] | tuple[str, ...] | set[str] | None = None) -> list[dict[str, Any]]:

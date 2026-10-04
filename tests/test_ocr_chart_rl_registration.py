@@ -42,7 +42,7 @@ class OcrChartRegistrationTest(unittest.TestCase):
                     self.assertEqual(row["extra_info"]["original_source"], "textvqa")
                     self.assertEqual(row["extra_info"]["uid"], "sample1")
 
-    def test_reward_dispatch_reaches_ocr_and_chart_rules(self):
+    def test_reward_dispatch_reaches_ocr_and_chart_judge_fallback(self):
         import_utils = ModuleType("verl.utils.import_utils")
         import_utils.deprecated = lambda name: lambda function: function
         name = "_ocr_chart_registered_rewards"
@@ -57,15 +57,16 @@ class OcrChartRegistrationTest(unittest.TestCase):
         reward = importlib.util.module_from_spec(reward_spec)
         reward_spec.loader.exec_module(reward)
         modules = {import_utils.__name__: import_utils, name: registry, reward_spec.name: reward}
-        with patch.dict(sys.modules, modules), patch.object(reward, "judge_match") as judge:
+        with patch.dict(sys.modules, modules), patch.object(reward, "judge_match", return_value=False) as judge:
             spec.loader.exec_module(registry)
             cases = [("visual-agent-ocr", "NYC", "New York", ["NYC"], 1),
                      ("visual-agent-ocr", "Boston", "New York", ["NYC"], 0),
-                     ("visual-agent-chartqa", "105", "100", [], 1),
+                     ("visual-agent-chartqa", "100.0", "100", [], 1),
+                     ("visual-agent-chartqa", "105", "100", [], 0),
                      ("visual-agent-chartqa", "106", "100", [], 0)]
             for source, answer, gold, aliases, expected in cases:
                 with self.subTest(source=source, answer=answer):
                     extra = {"data_source": source, "answer_aliases": aliases}
                     result = registry.default_compute_score(source, f"<answer>{answer}</answer>", gold, extra)
                     self.assertEqual(result["acc"], expected)
-            judge.assert_not_called()
+            self.assertEqual(judge.call_count, 3)

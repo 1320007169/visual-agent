@@ -214,6 +214,268 @@ PaddleOCR-VL 为 `qwen38-vllm-clean`，GroundingDINO 为 `visual-tools`，工具
 配置预检、结果目录和单独指定两项 benchmark 的方式见
 [脚本说明](../../scripts/README.md#vl-ocr-两个最新-checkpoint-评测)。
 
+### 多工具、OCR/Chart 数据和计数评测核对（2026-10-04）
+
+本节更新前文的磁盘快照；只记录本次实际核对和完成的工作。
+
+#### 合成管线与 RL 工具
+
+合成目录为 `../../groundingdino_offline_pipeline`（相对仓库根目录），RL 为本仓库。
+合成管线原生产配置有 12 个工具，定位走 LocateAnything，使用像素坐标及
+`image_id/bbox/bboxes`；当前 VL-OCR RL 使用
+`grounding_detect/crop_zoom/depth_measure/object_count/ocr_read` 五工具，
+使用 `target_image/bbox_2d/bboxes_2d` 和 0–1000 相对坐标。
+RL 的 depth、CountGD++ 接入合成侧服务，OCR 使用 RL 的 PaddleOCR-VL 服务。
+因此两侧工具库此前并不一致，不能直接互换配置或调用参数。
+
+按“现有 RL 工具不动，只补齐其他工具”的要求，已新增
+`image_resize/image_enhance/image_rotate/image_flip/image_draw/sam_segment/bbox_geometry`
+七个 RL 接口。原五工具 schema 和执行逻辑保持原样，新工具沿用 RL 相对坐标协议；
+新图像追加到 image list，`sam_segment` 经 `VTS_SEGMENT_ENDPOINT` 接入已有 SAM3 服务。
+新增完整 12 工具配置和提示词，启用时需显式选择，现有入口仍使用各自原配置。
+本次没有改动合成管线。接口、服务启动和启用方法见
+[完整 RL 工具说明](../../docs/rl_full_visual_tools.md)。
+
+#### 新下载的数据
+
+| 数据 | 本地目录（相对 gx） | 官方 train | 官方 val | 官方 test | 内容 |
+| --- | --- | ---: | ---: | ---: | --- |
+| HME100K | `datasets/hme100k` | 74,502 | — | 24,607 | 手写数学公式图像及 LaTeX 转写；图像嵌在 Parquet 中 |
+| ChartQA | `datasets/chartqa/ChartQA Dataset` | 28,299 QA / 18,316 图 | 1,920 QA / 1,056 图 | 2,500 QA / 1,509 图 | PNG、human/augmented 问答、表格和标注 |
+
+HME100K 的 train 为两个各 37,251 行的 Parquet shard，下载 manifest 记录校验通过。
+ChartQA train 的 human/augmented 分别为 7,398 / 20,901 QA。
+此前 RL 的 OCR 来自 TextVQA、DocVQA、SROIE、InfographicsVQA，Chart 来自
+CodeVision RL；下述两个旧版本尚未包含新下载的 HME100K 和官方 ChartQA train。
+
+#### 加入 OCR 后的最新两个续训数据版本
+
+质量清理基准为 `data/zwz_deepeyesv2_depth_tallyqa5k_ocr_chart_multitool_quality_20261003`，
+从 10 月 1 日的 33,688 条训练 QA 中移除 12 个指定 UID，得到 33,676 条；验证仍为 1,312 条。
+
+| 数据目录（相对仓库） | train | val | step80 已消费前缀 | 后续实际训练行 | 剩余更新 | 最终 step |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `data/vlocr_quality_continuation_step80_20261003` | 33,676 | 1,312 | 26,880 | 6,720 | 20 | 100 |
+| `data/vlocr_quality_skip_step83_continuation_step80_20261004` | 33,340 | 1,312 | 26,880 | 6,384 | 19 | 99 |
+
+两者 batch336、`TRAIN_SHUFFLE=False`，从同一个 64 卡运行的 step80 完整 checkpoint 恢复。
+最新版本精确移除旧版原计划 step83 的 336 条，即零基切片 `[27552:27888]`：
+关系 187、计数 55、depth 44、DeepEyes 19、OCR 15、Chart 16。
+核对 JSONL 逐行内容及 manifest 的 schedule indices，最新版本恰等于旧版去掉该切片，
+前 26,880 条顺序保持一致，两份验证文件逐字节相同，各自 train/val Parquet 的 SHA256
+与 manifest 一致。新 step83 对应旧 step84，新 step99 对应旧 step100。
+原始 step83 rollout 在 manifest 对应路径未找到，step83 的来源依据为已有 manifest 和调度索引，
+不能声称本次重新核对了原始 step83 rollout。逐行与哈希核对结果保存在
+[两个续训版本审计](ocr_chart_dataset_audit_20261004.json)。
+
+| 来源 | quality step80 续训版 | skip-step83 版 |
+| --- | ---: | ---: |
+| 位置关系 | 18,518 | 18,331 |
+| depth | 4,386 | 4,342 |
+| TallyQA 计数 | 4,892 | 4,837 |
+| DeepEyesV2 | 3,000 | 2,981 |
+| OCR | 1,440 | 1,425 |
+| Chart | 1,440 | 1,424 |
+
+两版验证构成为 HRBench800、depth84、计数108、OCR160、Chart160。
+核对时 64 卡 VL-OCR ModelArts 入口的默认数据已为 skip-step83 版，仍选择原五工具。
+
+#### 新实验：替换 20% 位置关系题，增加 HME100K 和 ChartQA
+
+用户确认采用新实验数据，不作为 step80 的延续调度。
+以 skip-step83 版的全部 33,340 行为基底，对 18,331 条位置关系题随机替换约 20%，
+向下取偶数共 3,666 条，增加 1,833 条 HME100K 和 1,833 条官方 ChartQA train。
+seed 为 20261004，混合后重新打乱整个训练集，原验证文件逐字节复制。
+
+新数据目录：`data/zwz_multitool_relation20_hme_chartqa_20261004`。
+
+| 来源 | 原 skip-step83 数据 | 新实验数据 |
+| --- | ---: | ---: |
+| 位置关系 | 18,331 | 14,665 |
+| depth | 4,342 | 4,342 |
+| TallyQA 计数 | 4,837 | 4,837 |
+| DeepEyesV2 | 2,981 | 2,981 |
+| OCR | 1,425 | 3,258 |
+| Chart | 1,424 | 3,257 |
+| **train 合计** | **33,340** | **33,340** |
+| **val 合计** | **1,312** | **1,312** |
+
+新增题只取官方 train，排除与原验证图像、OCRBench、ChartQA_TEST 以及官方 ChartQA
+val/test 图像重合的候选，并在新增来源内部按图像去重；Chart 摘要覆盖旋转及镜像。
+此检查按解码 RGB 像素进行，不覆盖缩放、裁剪等变体。已有基底训练题只移除抽中的关系题。
+HME100K 答案中含字面 `<` / `>` 的候选被排除，避免与现有 answer 标签解析冲突。
+HME 图像导出至新数据目录，Chart 图像引用 `gx/datasets/chartqa` 下的绝对路径，
+迁移到其他环境时须保留对应共享路径或重建数据。
+
+HME100K 使用手写公式转写问题；新增 `original_source=hme100k` 的规则匹配保留大小写和
+LaTeX 命令边界，忽略 token 间空白和外围数学定界符。
+当前工作区其他奖励改动包含 Chart 数值精确匹配，以及非关系任务规则失败后使用语义 judge；
+HME100K 同样沿用这个 fallback，judge 提示要求转写保留文本和数学符号。
+不能把整个奖励过程描述为只做 token 匹配。旧数据文件和旧恢复游标未改写。
+
+可复现准备命令（仓库根目录）：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 ../conda_envs/visual-agent-eval/bin/python3 \
+    scripts/prepare_rl_ocr_chart_replacement.py \
+    --base-data-dir data/vlocr_quality_skip_step83_continuation_step80_20261004 \
+    --hme-root ../datasets/hme100k \
+    --chart-root ../datasets/chartqa \
+    --eval-dir ../DeepEyesV2/evaluation/VLMEvalKit/evaluation/VLMEvalKit/LMUData \
+    --output-dir data/zwz_multitool_relation20_hme_chartqa_20261004
+```
+
+新目录提供 `train.parquet/train.jsonl/val.parquet/val.jsonl/manifest.json`，
+并单独保存移出的 `removed_relations.jsonl` 和新增的 `added_ocr_chart.jsonl`，便于追踪。
+实际抽取的 ChartQA 为 human495、augmented1,338。
+候选筛选记录：HME100K 有 3,600 条答案协议不兼容，候选图像重合 1 条；
+ChartQA 抽样过程中排除图像重合或重复候选 62 条。这些数字不表示全部来源的重复率。
+验证集按 645 张独立图像计算摘要，避免同一图像的多道题重复进行旋转、镜像计算。
+生成文件和核对结果见 [新数据 manifest](../../data/zwz_multitool_relation20_hme_chartqa_20261004/manifest.json)
+及 [实际数据完整性审计](../../data/zwz_multitool_relation20_hme_chartqa_20261004/validation_audit.json)。
+该目录不带旧 checkpoint 的 `data.pt` 游标；新实验需从新的数据调度开始。
+如初始化时复用某份权重，也不能原样恢复 step80 的完整训练状态和数据游标。
+原验证集用于对照，未新增 HME100K 专用验证；公式识别能力需要另用官方 test 评测。
+本次只准备数据，未启动 GPU 训练。
+
+未来提交新实验时，可直接使用基础 VL-OCR 入口，并设置：
+
+```bash
+export MULTITOOL_DATA_DIR="$PWD/data/zwz_multitool_relation20_hme_chartqa_20261004"
+export TRAIN_FILES="$MULTITOOL_DATA_DIR/train.parquet"
+export VAL_FILES="$MULTITOOL_DATA_DIR/val.parquet"
+export RESUME_MODE=disable
+export TRAIN_SHUFFLE=True
+export RUN_ID=qwen3base_multitool_vlocr_relation20_hme_chartqa_n16_8node
+# Submit on all eight nodes when ready:
+# bash scripts/run_visual_agent_multitool_vlocr_8node_64gpu.sh
+```
+
+这里使用基础 `.sh` 入口，不能直接替换旧 skip-step83 ModelArts 入口的 DATA_DIR，
+因为后者硬编码了 step80 断点续训。上述参数默认仍为五工具；完整 12 工具需按工具说明另行显式启用。
+
+#### 计数效果核对
+
+最新评测目录为
+`outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343`。
+`checkpoints.tsv` 实际选择 64 卡 step80 和 16 卡 step110。
+64 卡在 `status.tsv` 有退出码 0；16 卡已有 CV-Bench 成绩，但此快照没有完成状态行，
+也没有 FSC147 成绩，不能标注双权重评测全部完成。
+
+| 模型 | CV-Bench-2D 计数（788题） | CV-Bench-2D 关系（650题） | FSC147 精确正确率 | FSC147 MAE |
+| --- | ---: | ---: | ---: | ---: |
+| 64 卡 step80 | 562/788 = 71.32% | 615/650 = 94.62% | 48/1,190 = 4.03% | 有效答案 MAE 17.04 |
+| 16 卡 step110 | 576/788 = 73.10% | 614/650 = 94.46% | 暂无结果 | 暂无结果 |
+
+FSC147 的 1,190 题中有效 1,188、无效 2、API failure 0，`RMSE_valid=120.12`；
+CSV 的总体 MAE/RMSE 因无效答案为空，不能把 valid 指标称为全量指标。
+有效答案绝对误差中位数为 3，90 分位为 25，密集场景有大误差：
+marker 实际 3,704、回答 100；yellow lego stud 实际 2,563、回答 1,000。
+因此计数确实较弱，尤其密集精确计数；CV 的 Count 和 Relation 难度不同，差值不是严格的任务能力归因。
+
+进一步检查 XLSX 的工具轨迹：1,186 条可读取完整 tool_calls（其中 1 条从截断 JSON 前缀恢复），
+975 条具有 `object_count` 返回值，933 条最终答案等于首次工具 count（95.69%）。
+这些题首次计数均作用于原图，只有 45/975 的工具 count 精确匹配标签。
+这提示计数工具误差及模型直接采纳工具结果都值得排查；它不是独立的纯工具评测，
+查询词由模型选择，无法仅凭这些轨迹认定后端本身有 bug。
+另有 4 条轨迹不可恢复，统计不覆盖它们。
+
+9 月 29 日旧评测的 FSC147：64 卡 step20 MAE15.82、精确4.37%，24 卡 step40
+MAE15.46、精确4.12%，两者均 1,190 有效答案。最新 step80 的精确计数没有显示明显改善；
+旧评测与 VL-OCR 的工具协议及配置不同，不能直接将差异归因于 OCR/Chart 数据或 RL 更新。
+本次替换没有增加计数题，不能预期它会直接解决计数弱项。
+指标、样本和轨迹统计保存于 [计数审计结果](counting_eval_audit_20261004.json)。
+
+本次执行数据替换、OCR/Chart 注册、当前奖励规则和新增工具相关测试，
+47 项测试、172 个子用例全部通过；验证图像摘要改为并行去重后，另行重跑数据替换的
+2 项测试、4 个子用例，全部通过。
+实际数据核对通过：训练行集合精确等于基底减去 3,666 条关系题再加上 3,666 条新题，
+其余题的完整行内容保留，JSONL 与 Parquet 一致，Parquet schema 相同；
+新增 UID 唯一且不与基底冲突，3,666 条新增图片路径全部存在，原验证文件逐字节不变，
+基底及新数据 Parquet SHA256 校验通过。
+新 train SHA256：`876b616a8e7fab6b643597a25a0c389a5fae6aa9e8bb1455038b0ae91a6033d7`；
+val SHA256：`5a23cb23492426272a58e778afaf561d6c226fc342cd68575ca2e6300c7b29ee`。
+
+### 从 step80 续训的实时状态核对（2026-10-04 约 03:00，北京时间）
+
+发现两次独立的 64 卡续训运行：
+
+| 运行 | 数据版本 | 最后确认完成更新 | 当前可恢复的新 checkpoint | 状态 |
+| --- | --- | ---: | --- | --- |
+| `qwen3base_multitool_vlocr_quality_n16_8node_from_step80_20261003T112455929638_cc497bb8` | quality step80 续训版 | 82 | 未发现新完整 checkpoint | step83 阶段 NCCL collective timeout、Ray actor died，10月3日22:36:44退出，exit1 |
+| `qwen3base_multitool_vlocr_quality_skip83_n16_8node_from_step80_20261003T164815747596_68f808a0` | skip-step83 版 | 81 | `global_step_81` | 仍有实时 GPU 监控；step82 rollout及奖励计算已完成，尚未见完成更新的 step82 日志 |
+
+新运行的 `latest_checkpointed_iteration.txt=81`，step81 有 56 份 model、56 份 optim、
+56 份 extra_state，均非空，`data.pt` 存在，HF 导出有 8 个分片。
+该 checkpoint 在 10月4日约02:10–02:13保存，step81 日志的训练平均 reward0.695，
+`rollout/truncated_rate=0.000`，单步耗时约3,261秒（54.35分钟）。
+截至本次核对，八个节点的 GPU CSV 仍在持续更新，训练 GPU 有高利用率；
+没有新任务正常结束或失败退出的记录。这些是当前快照，不能据此保证任务之后不会失败。
+
+两次运行目前都只有恢复时 step80 的验证结果。
+最新 skip-step83 运行的宏平均为0.7136177248677249（71.36%），best记录仍指向原step80；
+旧运行对应为0.711765873015873（71.18%）。这些都是同一起点权重的重新验证结果，
+不能将差异当作续训提升；尚无step81及之后的验证成绩。
+
+最新日志出现 Ray 累计 spilled 1,049,575 MiB（约1 TiB）的记录，提示内存和I/O压力，
+需要继续关注训练速度。该值是日志中的累计溢写量，不表示单时刻内存占用，也不能据此认定挂死。
+主judge的训练请求返回403，备用judge成功完成评分：两个训练batch分别fallback281、278次，
+`final_unresolved=0`，奖励计算分别约9.805秒、7.813秒。403本身没有导致这两批评分中断。
+本次仅检查运行和保存状态，未重启、停止或更改训练任务。
+
+#### 续训速度对照与原因核对
+
+按原64卡运行与新skip-step83续训的同一个step81对照：
+
+| 阶段 | 原64卡 step81（秒） | skip-step83 step81（秒） | 新减原（秒） |
+| --- | ---: | ---: | ---: |
+| rollout，`timing_s/gen` | 625.055 | 598.378 | -26.677 |
+| 奖励计算 | 14.901 | 15.217 | +0.316 |
+| old log-prob | 565.315 | 646.513 | +81.198 |
+| reference log-prob | 556.821 | 586.311 | +29.490 |
+| actor更新 | 1,239.452 | 1,205.672 | -33.780 |
+| 检查点保存 | 本步未保存 | 127.638 | +127.638 |
+| **整个step** | **3,078.600 / 51.31分钟** | **3,260.986 / 54.35分钟** | **+182.386 / +5.92%** |
+
+新续训每步保存，原任务每10步保存；新增保存耗时解释了step81差额的约70%。
+扣除本步保存，新续训耗时3,133.348秒（52.22分钟），比原step81只慢1.78%。
+剩余净增加主要体现在log-prob计算，rollout与actor更新在该步反而较快；
+原、新token总量分别19,889,395与19,851,804，接近一致，不能解释成新样本或输出总量大幅增加。
+这里只完成了一个新续训step，尚不足以判断稳定吞吐率下降或其具体系统原因。
+
+若与上一轮未skip83的续训比较，它的step81为56.06分钟、step82为58.83分钟，
+当前skip版本的step81并没有比这次重启更慢。
+若与原任务step70–79比较，扣除验证及保存的平均耗时为43.54分钟；
+但原任务后来的step81–82本身已达平均52.79分钟，不能把此前所有差额都归因于恢复或skip83。
+
+原任务也有大量Ray溢写记录，因此新任务出现约1TiB累计spill，不能单独作为
+“这次恢复变慢的原因”的证据。主judge403已由备用judge完成评分，奖励阶段只多0.316秒，
+也不是本步变慢的主要来源。计时原始指标及差额见
+[续训计时审计](step80_resume_timing_audit_20261004.json)。
+
+#### 与完整前80步平均耗时比较
+
+补齐9月30日运行 `qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20260930T195425656668_e9c99c3c`
+的step1–14，与10月1日从step14恢复运行的step15–80合并，80步计时全部齐全。
+当前skip-step83续训已有step81、82两步完成更新，比较结果如下：
+
+| 口径 | 原完整step1–80平均 | 当前step81–82平均 | 当前增幅 |
+| --- | ---: | ---: | ---: |
+| `timing_s/step`，含该步验证和保存 | 43.62分钟 | 54.52分钟 | +25.01% |
+| 扣除验证和保存的训练时间 | 42.89分钟 | 52.42分钟 | +22.23% |
+
+因此，相对完整前80步均值，当前每步多10.91分钟；扣除验证、保存仍多9.54分钟。
+前20步、21–40、41–60、61–80的总耗时平均分别43.77、43.11、41.78、45.80分钟。
+不能把“与原step81单步比较慢5.92%”替代为“与完整前80步比较慢5.92%”，两者基准不同。
+
+与前80步均值相比，当前old log-prob增加171.42秒、reference log-prob增加145.28秒，
+actor更新增加166.78秒，三项合计增加约8.06分钟；检查点保存平均增加111.96秒。
+这说明与长期均值的差距主要体现在模型前向和参数更新阶段，不能仅用每步保存解释。
+目前只有两步新续训样本，尚不足以判断稳定速度，或区分批次形状、系统资源、缓存和通信的具体影响。
+本统计使用每步日志计时，不含进程启动、加载checkpoint和训练循环前的初始验证。
+全部80步及新续训两步的原始计时见
+[前80步平均耗时审计](step80_average_timing_audit_20261004.json)。
+
 ## 最新双权重评测与工具轨迹分析（2026-10-04）
 
 核对时间：北京时间 2026-10-04 13:26。本节更新前文的历史快照。
@@ -382,3 +644,13 @@ LaTeX 输出格式、Chart 模式选择和裁剪坐标，避免只用整体工�
 每 step 保存，时间限制关闭。前11步平均 40.40 分钟；原版前11步 43.95 分钟，
 原版前80步 43.62 分钟，最近 skip83 续训 step81–82 为 54.52 分钟。
 速度统计不含初始化和训练前验证，仅表示这些完成 step 的日志耗时。
+
+### 64 卡 step80 API 失败补测准备（2026-10-04）
+
+ModelArts 提交入口开头已写入 `export VLOCR_RETRY_FAILED_ONLY=1`，直接提交同一个脚本即可补测。
+补测固定读取原评测 `checkpoints.tsv` 中的 64 卡 step80 权重，复用成功预测，结果写入新目录。
+现有 VLMEvalKit 缓存筛选逻辑核对：HRBench4K 重试10条、HRBench8K 22条、
+MME-RealWorld-Lite 7条、MME-RealWorld-CN 16条，共55条。
+9项补测测试、9项既有入口用例、Bash语法检查及真实 step80 八分片权重预检通过。
+当前仅完成补测准备与配置预检，未启动 GPU 推理，尚无补测后成绩。
+恢复双权重完整评测时，将 ModelArts 外部入口开头该变量改为 `0`。

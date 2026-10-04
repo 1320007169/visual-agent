@@ -100,9 +100,21 @@ def test_failed_first_evaluation_records_status_and_attempts_second(evaluation):
     assert [line.split("\t")[:2] for line in status[1:]] == [["64gpu_step70", "17"], ["16gpu_step100", "0"]]
 
 
-def test_chart_service_starts_without_conda_on_path(evaluation):
+@pytest.mark.parametrize("reuse_same_checkpoint", [True, False])
+def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_checkpoint):
     env, sources = evaluation
     base = Path(env["BASE"])
+    previous = base / "previous_eval"
+    previous_predictions = previous / "64gpu_step70/dino_latest/VisualAgent-vllm/T20261003_G"
+    previous_predictions.mkdir(parents=True)
+    reuse_model = sources[0] if reuse_same_checkpoint else sources[1]
+    (previous / "checkpoints.tsv").write_text(
+        f"checkpoint\tstep\tmodel_path\n64gpu\t70\t{reuse_model}\n")
+    prediction = previous_predictions / "VisualAgent-vllm_VStarBench.xlsx"
+    prediction.write_bytes(b"previous successful predictions")
+    partial = previous_predictions / "VisualAgent-vllm_VStarBench_supp.pkl"
+    partial.write_bytes(b"partial predictions")
+    (previous_predictions / "VisualAgent-vllm_VStarBench_acc.csv").write_text("old scores")
     pipeline = base / "pipeline"
     pipeline.mkdir()
     service_env = base / "service_env"
@@ -133,11 +145,20 @@ def test_chart_service_starts_without_conda_on_path(evaluation):
         env={**env, "PATH": f"{fake_bin}:/usr/bin:/bin", "PIPELINE_ROOT": str(pipeline),
              "VLOCR_DEPTH_ENV": str(service_env), "VTS_CHART_ENV": str(chart_env),
              "VLOCR_STEP": "70", "VLOCR_MODEL_PATH": str(sources[0]),
+             "VLOCR_REUSE_GROUP_ROOT": str(previous),
              "EVAL_DATASETS": "VStarBench", "LOG_DIR": str(base / "logs"),
              "LD_LIBRARY_PATH": "/platform/driver/lib", "TEST_CHART_STARTED": str(base / "chart.started")},
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "EVALUATION_STARTED" in result.stdout
+    cached = Path(env["WORK_ROOT"]) / "dino_latest/VisualAgent-vllm" / env["RUN_ID"]
+    assert (cached / prediction.name).exists() == reuse_same_checkpoint
+    assert (cached / partial.name).exists() == reuse_same_checkpoint
+    assert not (cached / "VisualAgent-vllm_VStarBench_acc.csv").exists()
+    assert prediction.read_bytes() == b"previous successful predictions"
+    if reuse_same_checkpoint:
+        assert (cached / prediction.name).read_bytes() == prediction.read_bytes()
+        assert (cached / partial.name).read_bytes() == partial.read_bytes()
     chart_log = (Path(env["WORK_ROOT"]) / "services/chart.log").read_text()
     expected_libraries = f"{chart_env}/lib:{chart_env}/lib/python3.10/site-packages/torch/lib:/platform/driver/lib"
     assert f"CHART|{chart_env}/bin/python3|7|1|1|{expected_libraries}|" in chart_log

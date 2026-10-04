@@ -83,6 +83,38 @@ fi
 mkdir -p "$(dirname "$WORK_ROOT")"
 mkdir "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/services" "$VTS_TOOL_BRIDGE_ROOT"
+if [[ -n "${VLOCR_REUSE_GROUP_ROOT:-}" ]]; then
+    export VLMEVAL_EVAL_ID="${VLMEVAL_EVAL_ID:-$RUN_ID}"
+    python3 - "$VLOCR_REUSE_GROUP_ROOT" "$VLOCR_MODEL_PATH" \
+        "$WORK_ROOT/dino_latest/VisualAgent-vllm/$VLMEVAL_EVAL_ID" <<'PY'
+import csv
+import os
+from pathlib import Path
+import shutil
+import sys
+
+previous, model, destination = map(Path, sys.argv[1:])
+with (previous / "checkpoints.tsv").open() as stream:
+    for checkpoint in csv.DictReader(stream, delimiter="\t"):
+        if Path(checkpoint["model_path"]).resolve() != model.resolve():
+            continue
+        label = f'{checkpoint["checkpoint"]}_step{checkpoint["step"]}'
+        source = previous / label / "dino_latest/VisualAgent-vllm"
+        if not source.is_dir():
+            continue
+        prediction_roots = sorted(path for path in source.iterdir() if path.is_dir())
+        if not prediction_roots:
+            continue
+        destination.mkdir(parents=True, exist_ok=True)
+        # Seed predictions only; VLMEvalKit retries API failures and recomputes scores.
+        for dataset in os.environ["EVAL_DATASETS"].split():
+            for suffix in (".xlsx", "_supp.pkl"):
+                cached = prediction_roots[-1] / f"VisualAgent-vllm_{dataset}{suffix}"
+                if cached.is_file():
+                    shutil.copy2(cached, destination / cached.name)
+                    print(f"Reusing predictions: {cached}", flush=True)
+PY
+fi
 if [[ " $EVAL_DATASETS " == *" FSC147_TEST "* ]]; then
     "$ENV_DIR/bin/python" "$REPO_ROOT/scripts/prepare_fsc147_eval.py" \
         --annotation-file "$FSC147_ANNOTATION_FILE" --image-root "$FSC147_IMAGE_ROOT" \

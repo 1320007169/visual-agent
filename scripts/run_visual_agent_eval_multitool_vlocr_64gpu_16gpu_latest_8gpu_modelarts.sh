@@ -19,12 +19,40 @@ runs=(
 )
 steps=()
 models=()
-for run in "${runs[@]}"; do
-    step="$(cat "$run/latest_checkpointed_iteration.txt")"
-    [[ "$step" =~ ^[1-9][0-9]*$ ]] || { echo "error: invalid saved checkpoint step in $run" >&2; exit 2; }
-    steps+=("$step")
-    models+=("$run/global_step_$step/actor/huggingface")
-done
+case "${VLOCR_RETRY_FAILED_ONLY:-0}" in
+    0)
+        for run in "${runs[@]}"; do
+            step="$(cat "$run/latest_checkpointed_iteration.txt")"
+            [[ "$step" =~ ^[1-9][0-9]*$ ]] || { echo "error: invalid saved checkpoint step in $run" >&2; exit 2; }
+            steps+=("$step")
+            models+=("$run/global_step_$step/actor/huggingface")
+        done
+        ;;
+    1)
+        [[ -n "${VLOCR_REUSE_GROUP_ROOT:-}" ]] || {
+            echo "error: set VLOCR_REUSE_GROUP_ROOT to the evaluation being retried" >&2
+            exit 2
+        }
+        labels=()
+        while IFS=$'\t' read -r label step model; do
+            [[ "$label" == 64gpu ]] || continue
+            [[ "$step" =~ ^[1-9][0-9]*$ && -n "$model" ]] || {
+                echo "error: invalid row in $VLOCR_REUSE_GROUP_ROOT/checkpoints.tsv" >&2
+                exit 2
+            }
+            labels+=("$label")
+            steps+=("$step")
+            models+=("$model")
+        done < "$VLOCR_REUSE_GROUP_ROOT/checkpoints.tsv"
+        [[ "${labels[*]}" == 64gpu ]] || {
+            echo "error: retry checkpoints.tsv must contain one 64gpu checkpoint" >&2
+            exit 2
+        }
+        export EVAL_DATASETS="${EVAL_DATASETS:-HRBench4K HRBench8K MME-RealWorld-Lite MME-RealWorld-CN}"
+        printf 'Retrying 64gpu API failures from: %s\n' "$VLOCR_REUSE_GROUP_ROOT"
+        ;;
+    *) echo "error: VLOCR_RETRY_FAILED_ONLY must be 0 or 1" >&2; exit 2 ;;
+esac
 
 # Check every HF shard before creating output or starting any GPU service.
 python3 - "${models[@]}" <<'PY'
@@ -70,6 +98,10 @@ for index in "${!labels[@]}"; do
     label="${labels[$index]}_step${steps[$index]}"
     export RUN_ID="${group_run_id}_${label}"
     export WORK_ROOT="$group_root/$label"
+    if [[ "${VLOCR_RETRY_FAILED_ONLY:-0}" == 1 ]]; then
+        export VISUAL_AGENT_FAILURE_TRACE_DIR="${VISUAL_AGENT_FAILURE_TRACE_DIR:-$WORK_ROOT/failure_traces}"
+        printf 'Failure traces: %s\n' "$VISUAL_AGENT_FAILURE_TRACE_DIR"
+    fi
     export VLOCR_STEP="${steps[$index]}" VLOCR_MODEL_PATH="${models[$index]}"
     started=$SECONDS
     status=0

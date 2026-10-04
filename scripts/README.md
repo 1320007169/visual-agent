@@ -113,6 +113,23 @@ PaddleOCR-VL 使用 `$BASE/conda_envs/qwen38-vllm-clean`，GroundingDINO 使用 
 CHECKPOINT_EVAL_CONFIG_ONLY=1 bash scripts/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh
 ```
 
+同一入口支持 `VLOCR_RETRY_FAILED_ONLY=1` 仅补测 64 卡任务的 API 失败。
+仓库入口默认值为 `0`，沿用双权重完整评测流程；当前 ModelArts 外部入口在开头显式设置为 `1`。
+直接提交外部入口即可补测；恢复完整评测时，将外部入口该行的 `1` 改为 `0`。
+补测从 `VLOCR_REUSE_GROUP_ROOT/checkpoints.tsv` 读取 64 卡原权重，不读取训练任务的最新 step；
+复用成功预测，只重试 API 失败题，重新生成评分文件，结果写入新的目录。
+默认选择 HRBench4K、HRBench8K、MME-RealWorld-Lite、MME-RealWorld-CN，
+可用 `EVAL_DATASETS` 覆盖；某项无失败题时只复用其预测并重新评分。
+ModelArts 外部入口在补测模式下默认复用 `20261003T194114860354878_343` 对应的双权重评测，
+仅处理其中的 64 卡 step80，共 55 条 API 失败；此数量是补测前记录，不保证一次补测全部成功。
+
+```bash
+bash /home/ma-user/work/algorithm/codebkp/run_visual_agent/eval/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh
+```
+
+补测其他结果时显式设置 `VLOCR_REUSE_GROUP_ROOT`。不要将 `WORK_ROOT` 设为旧结果目录；
+配置预检可同时设置 `CHECKPOINT_EVAL_CONFIG_ONLY=1`，无需启动 GPU 服务。
+
 ### 六工具双权重评测
 
 入口：[run_visual_agent_eval_multitool_ocr_step20_8gpu.sh](run_visual_agent_eval_multitool_ocr_step20_8gpu.sh)。
