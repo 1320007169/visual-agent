@@ -262,6 +262,8 @@ class OCRBench(ImageBaseDataset):
         }
 
         data = load(eval_file)
+        if isinstance(data, list):
+            data = pd.DataFrame(data)
         lt = len(data)
         lines = [data.iloc[i] for i in range(lt)]
         for i in tqdm(range(len(lines))):
