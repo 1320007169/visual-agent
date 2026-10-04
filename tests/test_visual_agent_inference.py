@@ -1,7 +1,9 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -264,6 +266,49 @@ class VisualAgentInferenceTest(unittest.TestCase):
                     self.assertEqual(result.tool_calls[0]["result"], original)
                     if returned_images:
                         self.assertEqual(content[1]["image_url"]["url"], crop_image)
+
+    def test_raw_ocr_backslashes_keep_newline_and_quote_escapes(self):
+        text = '\\neq \\frac{a}{b}\n"中文"\t'
+        output = {"text": text, "truncated": False, "source": "paddleocr_vl"}
+        for raw in ("0", "1"):
+            for call_id in (None, "ocr_0"):
+                with self.subTest(raw=raw, native=call_id is not None):
+                    executor = FakeToolExecutor()
+                    executor.execute = lambda invocation, images: ToolExecutionResult(output=output)
+                    with patch.dict(os.environ, {"VISUAL_AGENT_OCR_RAW_BACKSLASH": raw}):
+                        agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+                    trace = []
+                    observation = agent._execute_tool(
+                        ToolInvocation("ocr_read", {"target_image": 0}, call_id), [], trace,
+                    )
+                    content = observation["content"]
+                    if call_id is None:
+                        content = content.removeprefix("<tool_response>\n").removesuffix("\n</tool_response>")
+                    if raw == "1":
+                        self.assertEqual(content, r'{"text": "\neq \frac{a}{b}\n\"中文\"\t", "truncated": false}')
+                        self.assertIn(r'\neq', content)
+                        self.assertNotIn(r'\\neq', content)
+                    else:
+                        self.assertEqual(json.loads(content), {"text": text, "truncated": False})
+                        self.assertIn(r'\\frac', content)
+                    self.assertIn(r'\n\"中文\"\t', content)
+                    self.assertNotIn('\n', content)
+                    self.assertNotIn('\t', content)
+                    self.assertEqual(trace[0]["result"], output)
+                    self.assertEqual(json.loads(json.dumps(observation)), observation)
+
+    def test_raw_ocr_observation_does_not_change_other_tools_or_errors(self):
+        for name, output in [
+            ("chart_parse", {"text": r"\\frac{a}{b}", "truncated": False}),
+            ("ocr_read", {"status": "error", "text": r"bad \\input"}),
+        ]:
+            with self.subTest(tool=name):
+                executor = FakeToolExecutor()
+                executor.execute = lambda invocation, images: ToolExecutionResult(output=output)
+                with patch.dict(os.environ, {"VISUAL_AGENT_OCR_RAW_BACKSLASH": "1"}):
+                    agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+                observation = agent._execute_tool(ToolInvocation(name, {}, "call_0"), [], [])
+                self.assertEqual(json.loads(observation["content"]), output)
 
     def test_agent_recovers_from_tool_error(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:

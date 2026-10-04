@@ -366,6 +366,7 @@ class VisualAgent:
         self.max_turns = max_turns
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.ocr_raw_backslash = os.getenv("VISUAL_AGENT_OCR_RAW_BACKSLASH", "0") == "1"
         self.use_native_tools = use_native_tools
         self.allowed_tool_names = (
             set(allowed_tool_names) if allowed_tool_names is not None else None
@@ -509,6 +510,18 @@ class VisualAgent:
             if isinstance(output, str)
             else json.dumps(output, ensure_ascii=False)
         )
+        if (
+            self.ocr_raw_backslash and invocation.name == "ocr_read"
+            and isinstance(output, dict) and "text" in output
+            and output.get("status") not in {"error", "failed"}
+        ):
+            # Undo only doubled backslashes in the text field; keep other JSON escapes.
+            encoded_text = json.dumps(output["text"], ensure_ascii=False)
+            serialized = serialized.replace(
+                '"text": ' + encoded_text,
+                '"text": ' + encoded_text.replace("\\\\", "\\"),
+                1,
+            )
         message = _observation(serialized, invocation)
         if tool_result.images:
             images.extend(tool_result.images)
