@@ -285,6 +285,88 @@ tool_first 相比 auto 的三榜提升约为 0.52 / 1.12 / 0.38 个百分点（�
 direct 与两组 agent 的提示词及回合预算不同；这些结果也不能与历史 KL-step130 旧口径
 直接作为严格控制变量的比较。
 
+## VL-OCR 最新十榜评测：64 卡 step80、16 卡 step110 / step150（截至 2026-10-05）
+
+三组均已生成全部十榜评分与最终预测。以下成绩直接取评分文件，API failed 和空预测
+逐条检查最终预测 XLSX；每组共 16,955 条预测。64 卡、16 卡指训练规模，评测使用
+8 卡入口。这里的 OCRBench 成绩属于原 observation 协议，与下一节两卡 A/B 重跑分别记录。
+
+64 卡权重来自
+`qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c/global_step_80`；
+16 卡两份权重来自
+`qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261002T170651989009_040bfc67/global_step_110`
+及同一训练目录的 `global_step_150`。上述路径均以
+`saves/visual_agent_zwz_rl/qwen3/` 为前缀，以 `/actor/huggingface` 为后缀。
+step150 是本次查到最新的完整十榜评测，不表示当前训练最新保存步数。
+
+### 成绩
+
+除手写公式正确数和 FSC147 误差外，表内均为百分制。HRBench 取 `Average / all`，
+MME-RealWorld 取 `Overall`，CV-Bench 取各自 `Overall`，ChartQA 取规则评分 `Overall`；
+OCRBench 原始总分分别为 854、850、850（满分 1000）。
+
+| 指标 | 样本数 | 64 卡 step80 | 16 卡 step110 | 16 卡 step150 |
+|---|---:|---:|---:|---:|
+| VStarBench | 191 | 87.96 | 86.39 | 87.96 |
+| HRBench4K | 800 | 83.63 | 79.75 | 80.75 |
+| HRBench8K | 800 | 79.13 | 78.00 | 77.00 |
+| OCRBench | 1000 | 85.40 | 85.00 | 85.00 |
+| MME-RealWorld-Lite | 1919 | 55.50 | 55.08 | 55.81 |
+| MME-RealWorld-CN | 5917 | 68.19 | 67.21 | 68.38 |
+| CV-Bench-2D | 1438 | 81.32 | 82.30 | 82.35 |
+| CV-Bench-3D | 1200 | 91.08 | 90.33 | 90.42 |
+| ChartQA_TEST | 2500 | 76.96 | 77.36 | 74.92 |
+| OCRBench 手写公式（子项） | 100 | 45/100 | 44/100 | 43/100 |
+
+FSC147_TEST 共 1190 题，三组都有无法解析为有效计数的输出，因此全量 `MAE`、`RMSE`
+字段为空。下列误差仅针对各组有效输出，不能当作全量误差或忽略有效率直接比较。
+
+| FSC147 指标 | 64 卡 step80 | 16 卡 step110 | 16 卡 step150 |
+|---|---:|---:|---:|
+| MAE_valid（越低越好） | 17.04 | 16.53 | 17.15 |
+| RMSE_valid（越低越好） | 120.12 | 116.42 | 134.72 |
+| 有效输出数 / 1190 | 1188 | 1189 | 1102 |
+| 有效输出率 | 99.83% | 99.92% | 92.61% |
+| 无效输出数 | 2 | 1 | 88 |
+| exact_accuracy | 4.03% | 4.12% | 3.61% |
+
+### 失败数与比较限制
+
+| 残留 API failed | 64 卡 step80 | 16 卡 step110 | 16 卡 step150 |
+|---|---:|---:|---:|
+| HRBench4K | 10 | 0 | 0 |
+| HRBench8K | 22 | 6 | 4 |
+| MME-RealWorld-Lite | 7 | 5 | 6 |
+| MME-RealWorld-CN | 16 | 8 | 9 |
+| 其余六榜 | 0 | 0 | 0 |
+| 合计 / 16955 | 55（0.32%） | 19（0.11%） | 19（0.11%） |
+
+step110 的 OCRBench 另有 1 条空预测，不计入 API failed；另外两组没有空预测。
+FSC147 的无效计数也不等于 API failed。step150 目录保留 39 个失败轨迹文件，包含调用
+尝试的失败记录，不能将文件数作为最终失败样本数。
+
+64 卡 step80 的十榜运行包含历史成功预测复用和失败补测，不是全部样本重新推理。
+2026-10-04 16:26 启动的最新四榜补测（HR4K、HR8K、MME-Lite、MME-CN）退出码为 0，
+但四榜分数及 55 条残留 API failed 均未改变；正常退出不表示失败样本已解决。
+本节分数包含这些失败预测，不能作为无故障的严格优劣结论。
+
+同一 16 卡训练从 step110 到 step150，VStar 上升约 1.57 个百分点，HR4K 上升 1.00，
+HR8K 下降 1.00，ChartQA 下降 2.44，OCRBench 总分不变，手写公式 44→43。
+FSC147 无效输出从 1 条增加到 88 条，原因尚未逐例归因。因此，现有结果不支持
+“继续训练后各项能力都提升”的结论，也不能仅凭保存步数选择 step150。
+
+### 产物位置
+
+- [64 卡 step80 与 16 卡 step110 十榜运行](../outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/)：
+  分别位于 `64gpu_step80/`、`16gpu_step110/`；`checkpoints.tsv` 记录权重，
+  `status.tsv` 中两组退出码均为 0，耗时分别为 6086、20368 秒。
+  其中 6086 秒包含缓存复用，不能用来估计十榜全量重跑耗时。
+- [64 卡 step80 最新四榜补测](../outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261004T162605972167401_313/)：
+  `status.tsv` 记录耗时 707 秒、退出码 0。
+- [16 卡 step150 最新十榜运行](../outputs/vlmeval/multitool_vlocr_16gpu_latest_8gpu/multitool_vlocr_16gpu_step150_20261004T170810303152388_335/)：
+  最终预测与评分位于 `dino_latest/VisualAgent-vllm/T20261004_G/`；
+  最后一项 FSC147 评分文件修改时间为 2026-10-04 23:29（北京时间）。
+
 ## 64 卡训练 step80：OCR observation 反斜杠消融（2026-10-04）
 
 本实验在本地两张 A800 80GB 上评测同一份 64 卡训练 step80 权重，验证 OCR observation
@@ -351,6 +433,8 @@ direct 与两组 agent 的提示词及回合预算不同；这些结果也不能
 
 ## 当前结论
 
+- VL-OCR 的 64 卡 step80、16 卡 step110 / step150 十榜成绩已补齐，API failed 分别为
+  55 / 19 / 19；step150 相比 step110 有升有降，且 FSC147 无效输出增至 88/1190。
 - 64 卡训练 step80 的 OCR 反斜杠消融已完成：OCRBench 856→860，手写公式 47→51，
   其他 900 题正确性无变化，两组 API failed 均为 0；尚不能确认反斜杠转义是主要根因。
 
