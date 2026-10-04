@@ -433,6 +433,7 @@ class ToolCompletionCallback(CompletionCallback):
         tools_enabled: bool = True,
         response_budgets=None,
         sampled_turns=None,
+        forced_decisions=None,
     ) -> DataProto:
         # NOTE: consistent with batch version of generate_sequences in vllm_rollout_spmd.py
         # prompts: left pad
@@ -559,6 +560,22 @@ class ToolCompletionCallback(CompletionCallback):
             batch["rollout_logprob_mask"] = rollout_logprob_mask
             for key in stats[0]:
                 non_tensor_batch[f"__rollout_{key}__"] = np.array([row[key] for row in stats], dtype=np.int64)
+        if forced_decisions is not None:
+            from verl.workers.rollout.decision_branch import decision_mask, first_decision
+
+            state = self.scheduler.decision_branch
+            decision_ids = [
+                forced or first_decision(conversation[len(raw_prompts[index]):], state["decisions"])
+                for index, (forced, conversation) in enumerate(zip(forced_decisions, batch_conversations))
+            ]
+            masks = torch.zeros_like(response_mask)
+            for index, decision in enumerate(decision_ids):
+                row = decision_mask(response_input_ids[index], state["prefix_ids"].get(decision), self.tokenizer.eos_token_id)
+                masks[index, : row.numel()] = row
+            # Truncated or masked samples carry no decision gradient either.
+            batch["decision_mask"] = masks * response_mask
+            non_tensor_batch["decision_id"] = np.array(decision_ids, dtype=object)
+            non_tensor_batch["decision_forced"] = np.array([forced is not None for forced in forced_decisions], dtype=bool)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
     def _mask_out_tools_calling_tokens(
@@ -677,6 +694,25 @@ class ChatCompletionScheduler:
             module = importlib.import_module(module_path)
             self.completion_callback = getattr(module, class_name)(config, self)
 
+        # Counterfactual first-decision branches; None keeps the rollout unchanged.
+        self.decision_branch = None
+        decision_config = config.algorithm.get("decision_branch", {})
+        if decision_config.get("enable", False):
+            from verl.workers.rollout import decision_branch
+
+            tokenizer = self.completion_callback.tokenizer
+            tool_names = list(self.completion_callback.tools)
+            prefixes = decision_branch.decision_prefixes(tokenizer, tool_names)
+            self.decision_branch = {
+                "decisions": [decision_branch.DIRECT, *tool_names],
+                "prefixes": prefixes,
+                "prefix_ids": {
+                    name: tokenizer.encode(prefix, add_special_tokens=False) for name, prefix in prefixes.items()
+                },
+                "forced_per_decision": int(decision_config.get("forced_per_decision", 1)),
+            }
+            print(f"Decision branches: {self.decision_branch['decisions']}, prefixes: {prefixes}", flush=True)
+
     def submit_chat_completions(self, *, messages: List[Dict[str, str]], request_id: str, info: Dict[str, Any]):
         """Submit chat completion request without wait, completion_callback will be called when the request is done.
 
@@ -739,6 +775,14 @@ class ChatCompletionScheduler:
         }
         if info.get("tools_enabled", True):
             request["tools"] = self.completion_callback.tool_schemas
+        forced = info.pop("forced_decision", None)
+        if forced is not None:
+            # Prefill the first assistant turn; the rest of the turn stays on-policy.
+            request["messages"] = [*messages, {"role": "assistant", "content": self.decision_branch["prefixes"][forced]}]
+            request["continue_final_message"] = True
+            request["add_generation_prompt"] = False
+            # Keep the turn's total length (prefix + continuation) within the same budget.
+            request["max_tokens"] = max(1, request["max_tokens"] - len(self.decision_branch["prefix_ids"][forced]))
         try:
             for attempt in range(self.max_completion_retries + 1):
                 request["extra_headers"] = {"x-request-id": request_id}
@@ -778,6 +822,12 @@ class ChatCompletionScheduler:
             self.request_id_to_address.pop(request_id, None)
             logger.exception(f"chat completion failed with exception: {exception}")
         else:
+            if forced is not None:
+                from verl.workers.rollout.decision_branch import merge_forced_completion
+
+                completions = ChatCompletion(**merge_forced_completion(
+                    completions.model_dump(exclude_unset=True), self.decision_branch["prefixes"][forced]
+                ))
             try:
                 await self.completion_callback(messages, completions, info)
             except Exception as e:
@@ -836,6 +886,14 @@ class ChatCompletionScheduler:
         # validation dataset has already been repeated in `PPOTrainer._validate`.
         n = 1 if batch.meta_info.get("validate", False) else int(batch.meta_info.get("rollout_n", self.config.n))
         tools_enabled = not bool(batch.meta_info.get("disable_tools", False))
+        # Validation and tool-free rollouts stay on-policy.
+        decision_plan = None
+        if self.decision_branch is not None and tools_enabled and not batch.meta_info.get("validate", False):
+            from verl.workers.rollout.decision_branch import assign_forced_decisions
+
+            decision_plan = assign_forced_decisions(
+                n, self.decision_branch["decisions"], self.decision_branch["forced_per_decision"]
+            )
         tasks, batch_conversations = [], [None] * len(batch) * n
         image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
         encoded_image_cache: Dict[int, List[str]] = {}
@@ -883,6 +941,7 @@ class ChatCompletionScheduler:
                         sampling_params=kwargs,
                         images=images,
                         tools_enabled=tools_enabled,
+                        forced_decision=decision_plan[batch_index % n] if decision_plan is not None else None,
                     )
                 )
             )
@@ -897,6 +956,10 @@ class ChatCompletionScheduler:
             tools_enabled=tools_enabled,
             response_budgets=response_budgets,
             sampled_turns=sampled_turns,
+            forced_decisions=(
+                [decision_plan[index % n] for index in range(len(batch_conversations))]
+                if decision_plan is not None else None
+            ),
         )
         turns = output_batch.non_tensor_batch["__num_turns__"]
         for trace, budget, retained_turns in zip(trajectory_traces, response_budgets, turns):
@@ -914,6 +977,7 @@ class ChatCompletionScheduler:
         sampling_params: Dict[str, Any],
         images: List[Any] | None = None,
         tools_enabled: bool = True,
+        forced_decision: str | None = None,
     ):
         # Hold one slot for the full trajectory, including all recursive tool
         # turns. This bounds vLLM and visual-tool load while allowing a large
@@ -946,6 +1010,9 @@ class ChatCompletionScheduler:
                 "max_tokens_per_turn": sampling_params.get("max_tokens", self.config.response_length),
                 "sampled_turns": [],
             }
+            if forced_decision is not None:
+                info["forced_decision"] = forced_decision
+                trace["forced_decision"] = forced_decision
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
 

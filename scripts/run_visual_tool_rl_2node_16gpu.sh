@@ -51,6 +51,14 @@ ACTOR_LOSS_AGG_MODE="${ACTOR_LOSS_AGG_MODE:-token-mean}"
 DUAL_STREAM_ENABLE="${DUAL_STREAM_ENABLE:-False}"
 AGENT_ROLLOUT_N="${AGENT_ROLLOUT_N:-$ROLLOUT_N}"
 NATIVE_ROLLOUT_N="${NATIVE_ROLLOUT_N:-0}"
+# Counterfactual first-decision branches. DECISION_BRANCH_ADV=grpo keeps the forced
+# branches but uses plain GRPO advantages (ablation).
+DECISION_BRANCH_ENABLE="${DECISION_BRANCH_ENABLE:-False}"
+DECISION_BRANCH_ADV="${DECISION_BRANCH_ADV:-decision_branch}"
+DECISION_BRANCH_FORCED_PER_DECISION="${DECISION_BRANCH_FORCED_PER_DECISION:-1}"
+DECISION_BRANCH_FORCED_POSITIVE_WEIGHT="${DECISION_BRANCH_FORCED_POSITIVE_WEIGHT:-1.0}"
+DECISION_BRANCH_FORCED_NEGATIVE_WEIGHT="${DECISION_BRANCH_FORCED_NEGATIVE_WEIGHT:-0.0}"
+DECISION_BRANCH_DECISION_WEIGHT="${DECISION_BRANCH_DECISION_WEIGHT:-1.0}"
 MAX_TURNS="${MAX_TURNS:-6}"
 TOOL_CALL_FORMAT="${TOOL_CALL_FORMAT:-hermes}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
@@ -470,6 +478,18 @@ if [[ "$DUAL_STREAM_ENABLE" == "True" ]]; then
   (( AGENT_ROLLOUT_N > 1 && NATIVE_ROLLOUT_N > 1 )) || {
     die "dual-stream GRPO requires AGENT_ROLLOUT_N and NATIVE_ROLLOUT_N greater than 1"
   }
+fi
+[[ "$DECISION_BRANCH_ENABLE" == "True" || "$DECISION_BRANCH_ENABLE" == "False" ]] || {
+  die "DECISION_BRANCH_ENABLE must be True or False, got $DECISION_BRANCH_ENABLE"
+}
+ADV_ESTIMATOR=grpo
+if [[ "$DECISION_BRANCH_ENABLE" == "True" ]]; then
+  [[ "$DUAL_STREAM_ENABLE" == "False" ]] || die "decision branches and dual-stream rollouts cannot be combined"
+  [[ "$DECISION_BRANCH_ADV" == "decision_branch" || "$DECISION_BRANCH_ADV" == "grpo" ]] || {
+    die "DECISION_BRANCH_ADV must be decision_branch or grpo, got $DECISION_BRANCH_ADV"
+  }
+  [[ "$DECISION_BRANCH_FORCED_PER_DECISION" =~ ^[1-9][0-9]*$ ]] || die "DECISION_BRANCH_FORCED_PER_DECISION must be a positive integer"
+  ADV_ESTIMATOR="$DECISION_BRANCH_ADV"
 fi
 [[ "$PPO_MINI_BATCH_SIZE" =~ ^[1-9][0-9]*$ ]] || {
   die "PPO_MINI_BATCH_SIZE must be a positive integer, got $PPO_MINI_BATCH_SIZE"
@@ -968,7 +988,7 @@ fi
 TRAIN_ARGS=(
   "+debug=False"
   "+vs_debug=False"
-  "algorithm.adv_estimator=grpo"
+  "algorithm.adv_estimator=$ADV_ESTIMATOR"
   "algorithm.use_kl_in_reward=False"
   "data.train_files=[$TRAIN_FILES]"
   "data.val_files=[$VAL_FILES]"
@@ -1046,6 +1066,15 @@ TRAIN_ARGS=(
 )
 if [[ "$SAVE_HF_MODEL" == "1" ]]; then
   TRAIN_ARGS+=("actor_rollout_ref.actor.checkpoint.save_contents=['model','hf_model','optimizer','extra']")
+fi
+if [[ "$DECISION_BRANCH_ENABLE" == "True" ]]; then
+  TRAIN_ARGS+=(
+    "+algorithm.decision_branch.enable=True"
+    "+algorithm.decision_branch.forced_per_decision=$DECISION_BRANCH_FORCED_PER_DECISION"
+    "+algorithm.decision_branch.forced_positive_weight=$DECISION_BRANCH_FORCED_POSITIVE_WEIGHT"
+    "+algorithm.decision_branch.forced_negative_weight=$DECISION_BRANCH_FORCED_NEGATIVE_WEIGHT"
+    "+algorithm.decision_branch.decision_weight=$DECISION_BRANCH_DECISION_WEIGHT"
+  )
 fi
 if [[ -n "$MAX_ACTOR_CKPT_TO_KEEP" ]]; then
   TRAIN_ARGS+=("trainer.max_actor_ckpt_to_keep=$MAX_ACTOR_CKPT_TO_KEEP")

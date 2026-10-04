@@ -494,6 +494,34 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+    elif adv_estimator == AdvantageEstimator.DECISION_BRANCH:
+        from verl.trainer.ppo.decision_branch import compute_decision_branch_advantage
+
+        response_mask = data.batch["response_mask"]
+        if multi_turn:
+            response_mask = data.batch["loss_mask"][:, -response_mask.size(1):]
+        decision_config = config.get("decision_branch", {})
+        forced = data.non_tensor_batch["decision_forced"]
+        # Every prompt forces every decision, so the forced ids are the full decision set.
+        decisions = sorted(set(data.non_tensor_batch["decision_id"][forced]))
+        advantages, returns, metrics = compute_decision_branch_advantage(
+            token_level_rewards=data.batch["token_level_rewards"],
+            response_mask=response_mask,
+            decision_mask=data.batch["decision_mask"],
+            old_log_probs=data.batch["old_log_probs"],
+            index=data.non_tensor_batch["uid"],
+            decision_ids=data.non_tensor_batch["decision_id"],
+            decision_forced=forced,
+            decisions=decisions,
+            reward_valid_mask=data.non_tensor_batch.get("reward_valid"),
+            norm_adv_by_std=norm_adv_by_std_in_grpo,
+            forced_positive_weight=float(decision_config.get("forced_positive_weight", 1.0)),
+            forced_negative_weight=float(decision_config.get("forced_negative_weight", 0.0)),
+            decision_weight=float(decision_config.get("decision_weight", 1.0)),
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
+        data.meta_info["decision_branch_metrics"] = metrics
     else:
         # handle all other adv estimator type other than GAE and GRPO
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
@@ -577,6 +605,7 @@ class RayPPOTrainer:
             AdvantageEstimator.RLOO,
             AdvantageEstimator.OPO,
             AdvantageEstimator.REINFORCE_PLUS_PLUS_BASELINE,
+            AdvantageEstimator.DECISION_BRANCH,
         ]:
             self.use_critic = False
         else:
@@ -701,7 +730,18 @@ class RayPPOTrainer:
         # check multi_turn with tool config
         if config.actor_rollout_ref.rollout.multi_turn.enable:
             assert config.actor_rollout_ref.rollout.multi_turn.tool_config_path is not None, "tool_config_path must be set when enabling multi_turn with tool, due to no role-playing support"
-            assert config.algorithm.adv_estimator in [AdvantageEstimator.GRPO], "only GRPO is tested for multi-turn with tool"
+            assert config.algorithm.adv_estimator in [AdvantageEstimator.GRPO, AdvantageEstimator.DECISION_BRANCH], (
+                "only GRPO and decision_branch are supported for multi-turn with tool"
+            )
+
+        decision_branch = config.algorithm.get("decision_branch", {})
+        if config.algorithm.adv_estimator == AdvantageEstimator.DECISION_BRANCH:
+            assert decision_branch.get("enable", False), "adv_estimator=decision_branch requires algorithm.decision_branch.enable"
+        if decision_branch.get("enable", False):
+            assert config.actor_rollout_ref.rollout.mode == "async", "decision branches require rollout.mode=async"
+            assert not config.algorithm.get("dual_stream", {}).get("enable", False), (
+                "decision branches and dual-stream rollouts cannot be combined"
+            )
 
         print("[validate_config] All configuration checks passed successfully!")
 
@@ -1633,6 +1673,7 @@ class RayPPOTrainer:
                             multi_turn=self.config.actor_rollout_ref.rollout.multi_turn.enable,
                             config=self.config.algorithm,
                         )
+                        metrics.update(batch.meta_info.pop("decision_branch_metrics", {}))
 
                     # update critic
                     if self.use_critic:
