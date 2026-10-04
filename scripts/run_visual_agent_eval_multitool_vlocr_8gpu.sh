@@ -35,16 +35,16 @@ export VTS_TOOL_BRIDGE_ROOT="$VTS_OUTPUT_ROOT/visual_agent_bridge/$RUN_ID"
 export LMUData="$BASE/DeepEyesV2/evaluation/VLMEvalKit/evaluation/VLMEvalKit/LMUData"
 export HF_HOME="${HF_HOME:-$BASE/hf_cache}"
 export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
-export ENV_DIR=/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM
+export ENV_DIR="${ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM}"
 export SKIP_CONDA_ACTIVATION=1
 export VLMEVAL_IMPORT_PREFLIGHT=1
 export CUDA_HOME="$BASE/conda_envs/spacetools-rl"
 export MODEL_CUDA_HOME="$CUDA_HOME"
 export MODEL_CC="$CUDA_HOME/bin/x86_64-conda-linux-gnu-gcc"
 export MODEL_CXX="$CUDA_HOME/bin/x86_64-conda-linux-gnu-g++"
-export TOOL_CUDA_HOME=/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118
-export MODEL_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6
-export TOOL_CUDA_VISIBLE_DEVICES=7
+export TOOL_CUDA_HOME="${TOOL_CUDA_HOME:-/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118}"
+export MODEL_CUDA_VISIBLE_DEVICES="${MODEL_CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6}"
+export TOOL_CUDA_VISIBLE_DEVICES="${TOOL_CUDA_VISIBLE_DEVICES:-7}"
 export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.80}"
 export VLMEVAL_API_NPROC="${VLMEVAL_API_NPROC:-7}"
 export MODEL_SERVER_BACKEND=vllm
@@ -143,11 +143,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-setsid env CUDA_VISIBLE_DEVICES=7 "$VTS_DEPTH_ENV/bin/python3" \
+setsid env CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" "$VTS_DEPTH_ENV/bin/python3" \
     -m vts.tool_server --config "$PIPELINE_ROOT/configs/services/depth_anything_3.yaml" \
     >"$WORK_ROOT/services/depth.log" 2>&1 &
 service_pids+=("$!")
-setsid env CUDA_VISIBLE_DEVICES=7 "$VTS_COUNT_ENV/bin/python3" \
+setsid env CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" "$VTS_COUNT_ENV/bin/python3" \
     -m vts.tool_server --config "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml" \
     >"$WORK_ROOT/services/count.log" 2>&1 &
 service_pids+=("$!")
@@ -157,7 +157,7 @@ for torch_library in "$VTS_CHART_ENV"/lib/python*/site-packages/torch/lib; do
     [[ ! -d "$torch_library" ]] || chart_library_path+=":$torch_library"
 done
 chart_library_path+="${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-setsid env CUDA_VISIBLE_DEVICES=7 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+setsid env CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     LD_LIBRARY_PATH="$chart_library_path" \
     "$VTS_CHART_ENV/bin/python3" "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
     --model-root "$PADDLEOCR_VL_MODEL_ROOT" --allowed-root "$VTS_TOOL_BRIDGE_ROOT" \

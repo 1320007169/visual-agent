@@ -22,7 +22,8 @@ export REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
 export VLOCR_STEP=80
 export VLOCR_MODEL_PATH="$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c/global_step_80/actor/huggingface"
 export EVAL_DATASETS=OCRBench PRED_FORMAT=json
-export VLOCR_NATIVE_TOOLS=1 GPU_MEMORY_UTILIZATION=0.80 VLMEVAL_API_NPROC=7
+export VLOCR_NATIVE_TOOLS=1 GPU_MEMORY_UTILIZATION=0.80
+export VLMEVAL_API_NPROC="${VLMEVAL_API_NPROC:-7}"
 export EVAL_TIMEOUT_SECONDS=0
 unset VLOCR_REUSE_GROUP_ROOT VLOCR_RETRY_FAILED_ONLY
 group_run_id="${RUN_ID:-ocrbench_backslash_ab_64gpu_step80_$(date +%Y%m%dT%H%M%S%N)_$$}"

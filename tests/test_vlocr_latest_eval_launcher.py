@@ -101,7 +101,8 @@ def test_failed_first_evaluation_records_status_and_attempts_second(evaluation):
 
 
 @pytest.mark.parametrize("reuse_same_checkpoint", [True, False])
-def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_checkpoint):
+@pytest.mark.parametrize("tool_gpu", ["7", "1"])
+def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_checkpoint, tool_gpu):
     env, sources = evaluation
     base = Path(env["BASE"])
     previous = base / "previous_eval"
@@ -119,7 +120,8 @@ def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_check
     pipeline.mkdir()
     service_env = base / "service_env"
     (service_env / "bin").mkdir(parents=True)
-    (service_env / "bin/python3").write_text("#!/bin/bash\nexec /bin/sleep 300\n")
+    (service_env / "bin/python3").write_text(
+        '#!/bin/bash\nprintf "SERVICE_GPU|%s\\n" "$CUDA_VISIBLE_DEVICES"\nexec /bin/sleep 300\n')
     (service_env / "bin/python3").chmod(0o755)
     chart_env = base / "chart_env"
     (chart_env / "bin").mkdir(parents=True)
@@ -138,11 +140,15 @@ def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_check
     (fake_bin / "curl").write_text('#!/bin/bash\nsleep 0.1\ntest -f "$TEST_CHART_STARTED"\n')
     (fake_bin / "curl").chmod(0o755)
     repo = Path(env["REPO_ROOT"])
-    (repo / "scripts/run_visual_agent_eval_qwen3.sh").write_text('echo "EVALUATION_STARTED"\n')
+    (repo / "scripts/run_visual_agent_eval_qwen3.sh").write_text(
+        'echo "EVALUATION_STARTED|$MODEL_CUDA_VISIBLE_DEVICES|$ENV_DIR"\n')
+    overrides = {"TOOL_CUDA_VISIBLE_DEVICES": tool_gpu}
+    if tool_gpu == "1":
+        overrides.update(MODEL_CUDA_VISIBLE_DEVICES="0", ENV_DIR=str(service_env))
     assert shutil.which("conda", path=f"{fake_bin}:/usr/bin:/bin") is None
     result = subprocess.run(
         ["bash", str(ROOT / "scripts/run_visual_agent_eval_multitool_vlocr_8gpu.sh")],
-        env={**env, "PATH": f"{fake_bin}:/usr/bin:/bin", "PIPELINE_ROOT": str(pipeline),
+        env={**env, **overrides, "PATH": f"{fake_bin}:/usr/bin:/bin", "PIPELINE_ROOT": str(pipeline),
              "VLOCR_DEPTH_ENV": str(service_env), "VTS_CHART_ENV": str(chart_env),
              "VLOCR_STEP": "70", "VLOCR_MODEL_PATH": str(sources[0]),
              "VLOCR_REUSE_GROUP_ROOT": str(previous),
@@ -151,6 +157,10 @@ def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_check
         capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "EVALUATION_STARTED" in result.stdout
+    if tool_gpu == "1":
+        assert f"EVALUATION_STARTED|0|{service_env}" in result.stdout
+    for service in ("depth", "count"):
+        assert f"SERVICE_GPU|{tool_gpu}" in (Path(env["WORK_ROOT"]) / f"services/{service}.log").read_text()
     cached = Path(env["WORK_ROOT"]) / "dino_latest/VisualAgent-vllm" / env["RUN_ID"]
     assert (cached / prediction.name).exists() == reuse_same_checkpoint
     assert (cached / partial.name).exists() == reuse_same_checkpoint
@@ -161,7 +171,7 @@ def test_chart_service_starts_without_conda_on_path(evaluation, reuse_same_check
         assert (cached / partial.name).read_bytes() == partial.read_bytes()
     chart_log = (Path(env["WORK_ROOT"]) / "services/chart.log").read_text()
     expected_libraries = f"{chart_env}/lib:{chart_env}/lib/python3.10/site-packages/torch/lib:/platform/driver/lib"
-    assert f"CHART|{chart_env}/bin/python3|7|1|1|{expected_libraries}|" in chart_log
+    assert f"CHART|{chart_env}/bin/python3|{tool_gpu}|1|1|{expected_libraries}|" in chart_log
     assert "paddleocr_vl_chart_server.py" in chart_log
 
 
