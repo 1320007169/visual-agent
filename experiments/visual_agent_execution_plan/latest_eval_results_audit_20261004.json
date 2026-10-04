@@ -1,0 +1,559 @@
+{
+  "checked_at": "2026-10-04T13:17:52.309583+08:00",
+  "evaluation_root": "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343",
+  "checkpoints": [
+    {
+      "checkpoint": "64gpu",
+      "step": "80",
+      "model_path": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c/global_step_80/actor/huggingface"
+    },
+    {
+      "checkpoint": "16gpu",
+      "step": "110",
+      "model_path": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261002T170651989009_040bfc67/global_step_110/actor/huggingface"
+    }
+  ],
+  "protocol": "Agent/tool-on; five tools, native/hermes, max 8 assistant rounds, 512 tokens per round. HRBench uses Average/all. Percent units except FSC147 MAE/RMSE. ChartQA uses local relaxed numeric matching (5%); no training judge API. OCRBench reproduced from the local scorer. FSC147 overall MAE/RMSE are null if predictions are invalid; valid-subset metrics must be labelled as such.",
+  "status": [
+    {
+      "checkpoint": "64gpu_step80",
+      "exit_code": "0",
+      "seconds": "6086",
+      "result_dir": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest"
+    },
+    {
+      "checkpoint": "16gpu_step110",
+      "exit_code": "0",
+      "seconds": "20368",
+      "result_dir": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest"
+    }
+  ],
+  "models": {
+    "64gpu_step80": {
+      "scores": {
+        "VStarBench": 87.95811518324608,
+        "HRBench4K": 83.625,
+        "HRBench8K": 79.125,
+        "CV-Bench-2D": 81.3247573911081,
+        "CV-Bench-3D": 91.08333333333334,
+        "ChartQA_TEST": 76.96,
+        "MME-RealWorld-Lite": 55.497655028660766,
+        "MME-RealWorld-CN": 68.19334122021294,
+        "OCRBench": 85.4,
+        "FSC147_TEST": {
+          "MAE": null,
+          "RMSE": null,
+          "MAE_valid": 17.042087542087543,
+          "RMSE_valid": 120.12194981885213,
+          "exact_accuracy": 4.033613445378151,
+          "valid_rate": 99.83193277310924,
+          "total_samples": 1190.0,
+          "valid_samples": 1188.0,
+          "invalid_count": 2.0,
+          "api_failed_count": 0.0
+        }
+      },
+      "prediction_audit": {
+        "VStarBench": {
+          "rows": 191,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_missing": 191,
+          "category_totals": {
+            "direct_attributes": 115,
+            "relative_position": 76
+          }
+        },
+        "HRBench4K": {
+          "rows": 800,
+          "api_failed": 10,
+          "empty_prediction": 0,
+          "trace_missing": 799,
+          "trace_complete_json": 1,
+          "category_totals": {
+            "single": 400,
+            "cross": 400
+          }
+        },
+        "HRBench8K": {
+          "rows": 800,
+          "api_failed": 22,
+          "empty_prediction": 0,
+          "trace_missing": 800,
+          "category_totals": {
+            "single": 400,
+            "cross": 400
+          }
+        },
+        "CV-Bench-2D": {
+          "rows": 1438,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_missing": 1181,
+          "trace_complete_json": 257,
+          "category_totals": {
+            "Count": 788,
+            "Relation": 650
+          }
+        },
+        "CV-Bench-3D": {
+          "rows": 1200,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_missing": 973,
+          "trace_complete_json": 227,
+          "category_totals": {
+            "Depth": 600,
+            "Distance": 600
+          }
+        },
+        "ChartQA_TEST": {
+          "rows": 2500,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 2500,
+          "category_totals": {
+            "test_human": 1250,
+            "test_augmented": 1250
+          }
+        },
+        "MME-RealWorld-Lite": {
+          "rows": 1919,
+          "api_failed": 7,
+          "empty_prediction": 0,
+          "trace_missing": 1918,
+          "trace_complete_json": 1,
+          "category_totals": {
+            "Perception/Remote Sensing": 150,
+            "Perception/Autonomous_Driving": 350,
+            "Reasoning/Autonomous_Driving": 400,
+            "Perception/Diagram and Table": 100,
+            "Reasoning/Diagram and Table": 100,
+            "Perception/Monitoring": 319,
+            "Perception/OCR with Complex Context": 250,
+            "Reasoning/OCR with Complex Context": 100,
+            "Reasoning/Monitoring": 150
+          }
+        },
+        "MME-RealWorld-CN": {
+          "rows": 5917,
+          "api_failed": 16,
+          "empty_prediction": 0,
+          "trace_missing": 4986,
+          "trace_complete_json": 931,
+          "category_totals": {
+            "Reasoning/OCR with Complex Context": 207,
+            "Perception/OCR with Complex Context": 1908,
+            "Perception/Diagram and Table": 602,
+            "Reasoning/Diagram and Table": 602,
+            "Perception/Autonomous_Driving": 700,
+            "Reasoning/Autonomous_Driving": 800,
+            "Perception/Monitoring": 500,
+            "Reasoning/Monitoring": 298,
+            "Perception/Remote Sensing": 300
+          }
+        },
+        "OCRBench": {
+          "rows": 1000,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_missing": 1000,
+          "category_totals": {
+            "Regular Text Recognition": 50,
+            "Irregular Text Recognition": 50,
+            "Artistic Text Recognition": 50,
+            "Handwriting Recognition": 50,
+            "Digit String Recognition": 50,
+            "Non-Semantic Text Recognition": 50,
+            "Scene Text-centric VQA": 200,
+            "Doc-oriented VQA": 200,
+            "Key Information Extraction": 200,
+            "Handwritten Mathematical Expression Recognition": 100
+          }
+        },
+        "FSC147_TEST": {
+          "rows": 1190,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 1185,
+          "trace_unreadable": 4,
+          "trace_recovered_complete_array": 1,
+          "category_totals": {
+            "cashew nut": 51,
+            "strawberry": 169,
+            "green pea": 68,
+            "apple": 221,
+            "finger food": 50,
+            "ski": 11,
+            "tree log": 32,
+            "marker": 34,
+            "keyboard key": 37,
+            "watch": 18,
+            "crab cake": 4,
+            "sheep": 24,
+            "marble": 73,
+            "sunglasses": 63,
+            "red bean": 10,
+            "hot air balloon": 20,
+            "nail polish": 30,
+            "egg": 63,
+            "elephant": 26,
+            "lego": 13,
+            "stamp": 63,
+            "carrom board piece": 13,
+            "potato chip": 4,
+            "comic book": 37,
+            "sticky note": 11,
+            "round dessert": 2,
+            "sauce bottle": 15,
+            "deer": 19,
+            "sea shell": 4,
+            "candy piece": 4,
+            "yellow lego stud": 1
+          }
+        }
+      },
+      "ocr_category_correct": {
+        "Regular Text Recognition": 49.0,
+        "Irregular Text Recognition": 48.0,
+        "Artistic Text Recognition": 47.0,
+        "Handwriting Recognition": 45.0,
+        "Digit String Recognition": 44.0,
+        "Non-Semantic Text Recognition": 50.0,
+        "Scene Text-centric VQA": 178.0,
+        "Doc-oriented VQA": 177.0,
+        "Key Information Extraction": 171.0,
+        "Handwritten Mathematical Expression Recognition": 45.0
+      },
+      "ocr_category_total": {
+        "Regular Text Recognition": 50,
+        "Irregular Text Recognition": 50,
+        "Artistic Text Recognition": 50,
+        "Handwriting Recognition": 50,
+        "Digit String Recognition": 50,
+        "Non-Semantic Text Recognition": 50,
+        "Scene Text-centric VQA": 200,
+        "Doc-oriented VQA": 200,
+        "Key Information Extraction": 200,
+        "Handwritten Mathematical Expression Recognition": 100
+      },
+      "chart_split_scores": {
+        "test_human": "74.56",
+        "test_augmented": "79.36",
+        "Overall": "76.96"
+      },
+      "cv_category_accuracy_CV-Bench-2D": {
+        "Count": {
+          "n": 788,
+          "correct": 562.0,
+          "accuracy": 0.7131979695431472
+        },
+        "Relation": {
+          "n": 650,
+          "correct": 615.0,
+          "accuracy": 0.9461538461538461
+        }
+      },
+      "cv_category_accuracy_CV-Bench-3D": {
+        "Depth": {
+          "n": 600,
+          "correct": 572.0,
+          "accuracy": 0.9533333333333334
+        },
+        "Distance": {
+          "n": 600,
+          "correct": 521.0,
+          "accuracy": 0.8683333333333333
+        }
+      }
+    },
+    "16gpu_step110": {
+      "scores": {
+        "VStarBench": 86.38743455497382,
+        "HRBench4K": 79.75,
+        "HRBench8K": 78.0,
+        "CV-Bench-2D": 82.30098221031665,
+        "CV-Bench-3D": 90.33333333333333,
+        "ChartQA_TEST": 77.36,
+        "MME-RealWorld-Lite": 55.08077123501823,
+        "MME-RealWorld-CN": 67.21311475409836,
+        "OCRBench": 85.0,
+        "FSC147_TEST": {
+          "MAE": null,
+          "RMSE": null,
+          "MAE_valid": 16.52649285113541,
+          "RMSE_valid": 116.42112011030298,
+          "exact_accuracy": 4.117647058823529,
+          "valid_rate": 99.91596638655462,
+          "total_samples": 1190.0,
+          "valid_samples": 1189.0,
+          "invalid_count": 1.0,
+          "api_failed_count": 0.0
+        }
+      },
+      "prediction_audit": {
+        "VStarBench": {
+          "rows": 191,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 191,
+          "category_totals": {
+            "direct_attributes": 115,
+            "relative_position": 76
+          }
+        },
+        "HRBench4K": {
+          "rows": 800,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 800,
+          "category_totals": {
+            "single": 400,
+            "cross": 400
+          }
+        },
+        "HRBench8K": {
+          "rows": 800,
+          "api_failed": 6,
+          "empty_prediction": 0,
+          "trace_complete_json": 794,
+          "trace_missing": 6,
+          "category_totals": {
+            "single": 400,
+            "cross": 400
+          }
+        },
+        "CV-Bench-2D": {
+          "rows": 1438,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 1438,
+          "category_totals": {
+            "Count": 788,
+            "Relation": 650
+          }
+        },
+        "CV-Bench-3D": {
+          "rows": 1200,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 1200,
+          "category_totals": {
+            "Depth": 600,
+            "Distance": 600
+          }
+        },
+        "ChartQA_TEST": {
+          "rows": 2500,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 2500,
+          "category_totals": {
+            "test_human": 1250,
+            "test_augmented": 1250
+          }
+        },
+        "MME-RealWorld-Lite": {
+          "rows": 1919,
+          "api_failed": 5,
+          "empty_prediction": 0,
+          "trace_complete_json": 1913,
+          "trace_missing": 5,
+          "trace_recovered_complete_array": 1,
+          "category_totals": {
+            "Perception/Remote Sensing": 150,
+            "Perception/Autonomous_Driving": 350,
+            "Reasoning/Autonomous_Driving": 400,
+            "Perception/Diagram and Table": 100,
+            "Reasoning/Diagram and Table": 100,
+            "Perception/Monitoring": 319,
+            "Perception/OCR with Complex Context": 250,
+            "Reasoning/OCR with Complex Context": 100,
+            "Reasoning/Monitoring": 150
+          }
+        },
+        "MME-RealWorld-CN": {
+          "rows": 5917,
+          "api_failed": 8,
+          "empty_prediction": 0,
+          "trace_complete_json": 5908,
+          "trace_recovered_complete_array": 1,
+          "trace_missing": 8,
+          "category_totals": {
+            "Reasoning/OCR with Complex Context": 207,
+            "Perception/OCR with Complex Context": 1908,
+            "Perception/Diagram and Table": 602,
+            "Reasoning/Diagram and Table": 602,
+            "Perception/Autonomous_Driving": 700,
+            "Reasoning/Autonomous_Driving": 800,
+            "Perception/Monitoring": 500,
+            "Reasoning/Monitoring": 298,
+            "Perception/Remote Sensing": 300
+          }
+        },
+        "OCRBench": {
+          "rows": 1000,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 1000,
+          "category_totals": {
+            "Regular Text Recognition": 50,
+            "Irregular Text Recognition": 50,
+            "Artistic Text Recognition": 50,
+            "Handwriting Recognition": 50,
+            "Digit String Recognition": 50,
+            "Non-Semantic Text Recognition": 50,
+            "Scene Text-centric VQA": 200,
+            "Doc-oriented VQA": 200,
+            "Key Information Extraction": 200,
+            "Handwritten Mathematical Expression Recognition": 100
+          }
+        },
+        "FSC147_TEST": {
+          "rows": 1190,
+          "api_failed": 0,
+          "empty_prediction": 0,
+          "trace_complete_json": 1185,
+          "trace_unreadable": 4,
+          "trace_recovered_complete_array": 1,
+          "category_totals": {
+            "cashew nut": 51,
+            "strawberry": 169,
+            "green pea": 68,
+            "apple": 221,
+            "finger food": 50,
+            "ski": 11,
+            "tree log": 32,
+            "marker": 34,
+            "keyboard key": 37,
+            "watch": 18,
+            "crab cake": 4,
+            "sheep": 24,
+            "marble": 73,
+            "sunglasses": 63,
+            "red bean": 10,
+            "hot air balloon": 20,
+            "nail polish": 30,
+            "egg": 63,
+            "elephant": 26,
+            "lego": 13,
+            "stamp": 63,
+            "carrom board piece": 13,
+            "potato chip": 4,
+            "comic book": 37,
+            "sticky note": 11,
+            "round dessert": 2,
+            "sauce bottle": 15,
+            "deer": 19,
+            "sea shell": 4,
+            "candy piece": 4,
+            "yellow lego stud": 1
+          }
+        }
+      },
+      "ocr_category_correct": {
+        "Regular Text Recognition": 49.0,
+        "Irregular Text Recognition": 47.0,
+        "Artistic Text Recognition": 47.0,
+        "Handwriting Recognition": 45.0,
+        "Digit String Recognition": 43.0,
+        "Non-Semantic Text Recognition": 50.0,
+        "Scene Text-centric VQA": 179.0,
+        "Doc-oriented VQA": 170.0,
+        "Key Information Extraction": 176.0,
+        "Handwritten Mathematical Expression Recognition": 44.0
+      },
+      "ocr_category_total": {
+        "Regular Text Recognition": 50,
+        "Irregular Text Recognition": 50,
+        "Artistic Text Recognition": 50,
+        "Handwriting Recognition": 50,
+        "Digit String Recognition": 50,
+        "Non-Semantic Text Recognition": 50,
+        "Scene Text-centric VQA": 200,
+        "Doc-oriented VQA": 200,
+        "Key Information Extraction": 200,
+        "Handwritten Mathematical Expression Recognition": 100
+      },
+      "chart_split_scores": {
+        "test_human": "74.32",
+        "test_augmented": "80.4",
+        "Overall": "77.36"
+      },
+      "cv_category_accuracy_CV-Bench-2D": {
+        "Count": {
+          "n": 788,
+          "correct": 576.0,
+          "accuracy": 0.7309644670050761
+        },
+        "Relation": {
+          "n": 650,
+          "correct": 614.0,
+          "accuracy": 0.9446153846153846
+        }
+      },
+      "cv_category_accuracy_CV-Bench-3D": {
+        "Depth": {
+          "n": 600,
+          "correct": 571.0,
+          "accuracy": 0.9516666666666667
+        },
+        "Distance": {
+          "n": 600,
+          "correct": 513.0,
+          "accuracy": 0.855
+        }
+      }
+    }
+  },
+  "score_file_hashes": {
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_CV-Bench-2D_acc.csv": "f5e9de077bcb8bbd2775a688f4442a6a4b08d585f6ebb6a9998330dd81a71af4",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_CV-Bench-3D_acc.csv": "970f967c11b2ac57e29ce26a6a5d11881e432b27243505d3ea0a09b124f4134d",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_ChartQA_TEST_acc.csv": "d1bc3022ddaff7034f528a97a8741d267ffb520d911f417551c3ab4b99a94769",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_FSC147_TEST_acc.csv": "6535bf666c74737fec245d30fb25d433e004fceca3277e1f578f741f50045d6c",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_HRBench4K_acc.csv": "8adc5f345ff5c0656de0b9d20da8078f7bc6481186146e3f9afe3a5ee5a6e074",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_HRBench8K_acc.csv": "6aafc724d2316673b50b5364d3cd97a168b2854644e485c54e2f4a1fa7334697",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_MME-RealWorld-CN_rating.json": "05be7191fec60be829710b8298d1d55d5c3368d391a25293141658d9930b36ce",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_MME-RealWorld-Lite_rating.json": "a5d10290d1c3700df51b2bcdd10bd0741acbc7830e1f999c16f8e15efb347fef",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_OCRBench_score.json": "71ed4d276abf02f0c26f12a6cb9b3bd050ba80ede7cadc83fcb3d91afc17dddc",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_VStarBench_acc.csv": "a253ff04892fc9ebe4d8b268c869d9ec57e96b3122a8690b147d7366b6f0ea71",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_CV-Bench-2D_acc.csv": "3c152bb08f44d194e27637f9e767bdbe8f834d5d7e3beafb2522f9e5b2f1c55b",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_CV-Bench-3D_acc.csv": "2e9c30a9483acfcd14d1cf4cb7064c6580ef0e6488e1bd9ec9dbf7100b134399",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_ChartQA_TEST_acc.csv": "39dca4f97f4799b7de8fbe88a225178f4a20c070d0251297eb1806575480f8c6",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_FSC147_TEST_acc.csv": "2d2a7be924b44f8a50fd6484a3d9f564719be82b17e5ac36953a885413db4121",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_HRBench4K_acc.csv": "927161c2d4ed734c212a26504319d2a9c671ab7e3a265bf48c83bf5398133f93",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_HRBench8K_acc.csv": "346cf961bc3d733ba081933ea76166e3667235ebbb303839762d6eda765144e6",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_MME-RealWorld-CN_rating.json": "1eca82cb5b427057276ab06b0a7d6829939f9fe33b404060e0ef1485f85a928e",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_MME-RealWorld-Lite_rating.json": "4d38d98ccde215549b68d8e8c2a3f30418567b1bc80a3ff9db8ea78b8caa3c97",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_OCRBench_score.json": "6f9deb1bfb19f4bea9933b706037e02948184400f766f69f73fb2a555a326c84",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_VStarBench_acc.csv": "9e7cf813a87e5ded20acfef3811a88c166cb0b09a4d1a42c2ec2a4ed9213c137",
+    "outputs/vlmeval/qwen3_base_direct_other4/qwen3_base_direct_other4_20260922_195211/qwen3_base/VisualAgent-vllm/T20260922_G/VisualAgent-vllm_OCRBench_score.json": "d83dc0a82e16cea6dd6f384b3a895c0ae59548dd4a3d92e55fc73f6d1b1f2c51",
+    "outputs/vlmeval/qwen3_base_direct_other4/qwen3_base_direct_other4_20260922_195211/qwen3_base/VisualAgent-vllm/T20260922_G/VisualAgent-vllm_ChartQA_TEST_acc.csv": "69813966c71195c6a442e0b4bdcbd59c036f562c31f8a011c605095eddb2a427",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_CV-Bench-2D_exact_matching_result.xlsx": "6bd8a6fd0108ee9400c68fbb11f972cddd3b02e051779776609d1b23cf05b941",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_CV-Bench-3D_exact_matching_result.xlsx": "11537e8d8a3f95e01c25efcbb09e9d629008bc495e814848703264f320a186f8",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_CV-Bench-2D_exact_matching_result.xlsx": "8dddb8283a0eb7200bf7f7cf7e074113fc3dfc7a2f7b1b2faeb85b8e3ed28a80",
+    "outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_CV-Bench-3D_exact_matching_result.xlsx": "ce81e36f699841ba8be1f1e55ce4dd0f8770f876a4adb20cb8d63d7ce52b4521"
+  },
+  "qwen3_base_reference": {
+    "result_root": "outputs/vlmeval/qwen3_base_direct_other4/qwen3_base_direct_other4_20260922_195211/qwen3_base/VisualAgent-vllm/T20260922_G",
+    "protocol": "Original Qwen3-VL-8B-Instruct direct answer without tools; historical reference, not a matched tool-on control.",
+    "ocr": {
+      "Text Recognition": 276,
+      "Scene Text-centric VQA": 176,
+      "Doc-oriented VQA": 164,
+      "Key Information Extraction": 177,
+      "Handwritten Mathematical Expression Recognition": 80,
+      "Final Score": 873,
+      "Final Score Norm": 87.3
+    },
+    "chart": {
+      "test_augmented": "92.32000000000001",
+      "test_human": "70.24000000000001",
+      "Overall": "81.28"
+    },
+    "mme": {
+      "MME-RealWorld-Lite": 49.24439812402293,
+      "MME-RealWorld-CN": 65.20196045293223
+    }
+  }
+}

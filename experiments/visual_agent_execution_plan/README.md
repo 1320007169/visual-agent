@@ -213,3 +213,172 @@ PaddleOCR-VL 为 `qwen38-vllm-clean`，GroundingDINO 为 `visual-tools`，工具
 针对两个 checkpoint 的环境传递及评测入口执行 17 项测试，全部通过；Bash 语法检查及真实 checkpoint 配置检查通过。
 配置预检、结果目录和单独指定两项 benchmark 的方式见
 [脚本说明](../../scripts/README.md#vl-ocr-两个最新-checkpoint-评测)。
+
+## 最新双权重评测与工具轨迹分析（2026-10-04）
+
+核对时间：北京时间 2026-10-04 13:26。本节更新前文的历史快照。
+最新评测目录为
+`outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343`。
+`checkpoints.tsv` 确认评测的是 64 卡 step80 和 16 卡 step110；两行 `status.tsv`
+均为退出码 0，耗时分别 6,086 秒、20,368 秒，十项 benchmark 的成绩文件均已生成。
+此前“16 卡 FSC147 暂无结果、双权重尚未全部完成”的记录是早期快照，已被本节更新。
+
+### 完整成绩及评测口径
+
+以下是 Agent/tool-on 结果，使用五工具、native/hermes、最多 8 个 assistant 回合、
+每回合 512 token。除特别注明的 FSC147 误差外，单位均为百分比。
+HRBench 使用 `Average / all`；CV-Bench-2D 的 Overall 按导出 CSV 的源域聚合口径记录，
+不等于把 Count 和 Relation 的逐题正确数直接合并。成绩包含残留 API 失败，未排除失败题。
+
+| Benchmark / 指标 | 64 卡 step80 | 16 卡 step110 | 样本数 |
+| --- | ---: | ---: | ---: |
+| VStarBench Overall | 87.96 | 86.39 | 191 |
+| HRBench4K Average / all | 83.63 | 79.75 | 800 |
+| HRBench8K Average / all | 79.13 | 78.00 | 800 |
+| OCRBench Final Score Norm | 85.40 | 85.00 | 1,000 |
+| MME-RealWorld-Lite Overall | 55.50 | 55.08 | 1,919 |
+| MME-RealWorld-CN Overall | 68.19 | 67.21 | 5,917 |
+| CV-Bench-2D Overall | 81.32 | 82.30 | 1,438 |
+| CV-Bench-3D Overall | 91.08 | 90.33 | 1,200 |
+| ChartQA_TEST Overall | 76.96 | 77.36 | 2,500 |
+| FSC147_TEST 精确正确率 | 4.03 | 4.12 | 1,190 |
+| FSC147_TEST MAE_valid，越低越好 | 17.04 | 16.53 | 1,188 / 1,189 个有效答案 |
+| FSC147_TEST RMSE_valid，越低越好 | 120.12 | 116.42 | 1,188 / 1,189 个有效答案 |
+
+FSC147 分别有 2 / 1 个无效答案，API failure 均为 0；全量 MAE/RMSE 在 CSV 中为空。
+上述误差只覆盖有效答案，不能标为全量 MAE/RMSE；精确正确率以全部 1,190 题为分母。
+CV-Bench-2D 的 Count 分别为 562/788（71.32%）、576/788（73.10%），
+Relation 分别为 615/650（94.62%）、614/650（94.46%）。
+
+残留 API 失败从最终预测列核对，而不是用进程退出码代替：
+
+| Benchmark | 64 卡 step80 API 失败 | 16 卡 step110 API 失败 |
+| --- | ---: | ---: |
+| HRBench4K | 10 | 0 |
+| HRBench8K | 22 | 6 |
+| MME-RealWorld-Lite | 7 | 5 |
+| MME-RealWorld-CN | 16 | 8 |
+| 其余六项 | 0 | 0 |
+
+因此退出码 0 表示评测流程完成，不代表所有推理请求成功。需补测时应保持原权重与协议，
+不能通过删除失败题抬高准确率。
+
+### OCR、Chart 与 Qwen3 基座的参考比较
+
+Qwen3-VL-8B-Instruct 直答参考来自
+`outputs/vlmeval/qwen3_base_direct_other4/qwen3_base_direct_other4_20260922_195211`，
+OCRBench 为 873/1,000（87.30%），ChartQA 为 81.28%。该基座不使用工具，
+与本次 Agent 的提示词、工具和回合预算不同，属于历史参考，不是严格的 RL 控制变量对照。
+
+| 项目 | Qwen3 基座直答 | 64 卡 step80 | 16 卡 step110 |
+| --- | ---: | ---: | ---: |
+| OCRBench 总分，/1,000 | 873 | 854 | 850 |
+| Text Recognition，/300 | 276 | 283 | 281 |
+| Scene Text-centric VQA，/200 | 176 | 178 | 179 |
+| Doc-oriented VQA，/200 | 164 | 177 | 170 |
+| Key Information Extraction，/200 | 177 | 171 | 176 |
+| 手写数学表达式，/100 | 80 | 45 | 44 |
+| ChartQA human，% | 70.24 | 74.56 | 74.32 |
+| ChartQA augmented，% | 92.32 | 79.36 | 80.40 |
+| ChartQA Overall，% | 81.28 | 76.96 | 77.36 |
+
+OCR 的差距主要集中在手写公式，其他分项并非全面退化；Chart 的差距主要在 augmented，
+human 反而高于此基座参考。ChartQA 评测使用本地标准数值 5% 容差或文本匹配，
+未调用训练用 judge API；不能与训练 reward 的数值规则混用。
+
+原始成绩、分项、预测失败数、结果路径及 SHA256 见
+[最新评测审计](latest_eval_results_audit_20261004.json)。
+
+### 模型是否按场景选择工具
+
+新数据任务为
+`qwen3base_multitool_vlocr_hme_chartqa_tallyhalf_fsc3000_n16_8node_20261003T202135115738_f9c41af7`。
+本次固定分析其 step1–11 的 59,136 条训练轨迹，覆盖 3,696 道题，每题 16 次采样。
+调用来自实际执行的 `rollout_trace.tool_calls`，按 `source_metadata` 识别题目、来源和标准答案。
+下表比较 step1–3 与 step9–11，各覆盖 1,008 道题、16,128 条轨迹。
+“调用率”指至少调用一次该工具的轨迹比例，不是该工具占全部调用的比例。
+
+| 场景 / 工具 | step1–3 调用率 | step9–11 调用率 |
+| --- | ---: | ---: |
+| HME100K 手写公式 → ocr_read | 100.00% | 100.00% |
+| 官方 ChartQA → ocr_read | 91.03% | 91.85% |
+| 官方 ChartQA → ocr_read(mode=chart) | 72.64% | 70.79% |
+| 旧 codevision Chart → ocr_read(mode=chart) | 38.41% | 42.76% |
+| 原始深度题 → depth_measure | 76.85% | 84.66% |
+| TallyQA → object_count | 70.07% | 39.53% |
+| TallyQA → grounding_detect | 34.63% | 63.07% |
+| FSC147 → object_count | 99.93% | 98.78% |
+| 二维关系标签 → depth_measure | 66.08% | 44.43% |
+| 前后关系标签 → depth_measure | 70.77% | 31.56% |
+
+结论：模型有明显的场景区分，并非所有题都走同一个工具流程；但 HME/FSC 等路由
+在基座的 step1 采样时已存在，不能全部归功于本次 RL。前后两段题目不同，且同题的
+16 条采样并不独立；比例变化是描述性证据，不是固定验证集上的学习增益。
+前后关系的深度调用下降尤其值得注意，不能据此认定路由已全面改善。
+
+小数量 TallyQA（标准答案 1–5）调用 object_count 的比例从 70.56% 降至 37.08%，
+grounding_detect 从 34.26% 升至 65.54%；FSC147 则继续主要走专用计数工具。
+119 道 TallyQA 同题同时出现有/无 object_count 的采样，前者平均 acc 低 20.80 个百分点，
+说明少量物体改用检测框计数有一定合理性，但这是采样路径的观察关联，不是工具开关的因果收益。
+
+已完成评测也能看到这种区分。16 卡 step110 的完整可读轨迹中：CV2D Count 的
+grounding_detect 调用率为 99.49%、object_count 为 5.46%；CV3D Depth 的
+depth_measure 为 97.67%；OCRBench 的 ocr_read 为 89.40%，其中手写公式为 100%；
+ChartQA 的 chart 模式为 81.44%；FSC147 的 object_count 为 72.34%。
+FSC 的工具比例只覆盖 1,186 条可读轨迹，另有 4 条截断 JSON 不可恢复。
+64 卡 OCRBench 全部缺少保存的工具轨迹，CV2D/CV3D 也仅有 257/227 条可读轨迹，
+不能把缺失轨迹当成“没有调用工具”，也不能将这些补测子集的比例当成全量路由率。
+
+### 主要失败原因与具体轨迹
+
+1. **计数工具结果被直接采纳，纠错很少。** 新任务 FSC147 的 5,147 条可比较轨迹中，
+   5,106 条最终答案等于首次工具 count（99.20%）；首次错误的 2,887 条中，
+   2,852 条直接沿用错误 count，只有 7 条修正为标准答案。已完成 benchmark 也类似：
+   64 卡为 933/975（95.69%）沿用首次 count，16 卡为 819/858（95.45%）。
+   因而“会选 object_count”和“能可靠计数”是两个不同的验证目标。
+
+2. **手写公式选对 OCR，仍在最终表达时丢分。** 16 卡 step110 的 100 道公式题全部使用
+   ocr_read；首次工具文本按相同 OCRBench 规则可匹配 69 题，最终答案却只匹配 44 题。
+   其中 26 题工具已匹配而最终不匹配，工具未匹配但最终修正的仅 1 题。
+   例如 index906 的工具正确返回 `\frac{6.8}{x}=\frac{1.7}{4}`，模型在 `<answer>` 中
+   输出 `\\frac{6.8}{x}=\\frac{1.7}{4}`，多了一层反斜杠转义。
+   原始模型 response 已有双反斜杠，问题不是 Excel 显示转义。
+   仅对最终文本做诊断性的双反斜杠归一化，匹配数变为 66/100，修复了 22 个原失败题。
+   **正式成绩仍为 44/100**；该处理没有写入评分器，也不是通用 LaTeX 归一化方案。
+
+3. **部分 Chart 路径仍把图表当自然场景处理。** step9–11 的旧 codevision 图表题中，
+   depth_measure 调用率 29.83%，chart 模式 42.76%，工具错误轨迹率 15.06%；
+   官方 ChartQA 对应为 3.67%、70.79%、2.04%。实际失败例子：step9 第14行问
+   “IDA only 哪一年清洁燃料覆盖率最高”，模型调用 grounding_detect 检测折线，再用
+   depth_measure 得到米制深度，回答 2002，标准答案是 2014；这条路线没有读出图表数值。
+   当前新任务两类题的训练 acc 为 29.83% / 64.54%，不能把混合 Chart 来源视为同一分布。
+
+4. **多工具衔接有坐标风险。** 在部分 crop_zoom 后的 OCR 中，模型对新生成的
+   `target_image=1` 继续使用原图检测框；例如 step9 第43行先裁剪手机显示区域，再把
+   原图框原样用于裁剪图上的 ocr_read。全体 Chart 训练轨迹有 593/5,792 条存在这种
+   框复用迹象。这里只识别坐标衔接风险，不把每次复用都判为错误或断言它导致了失败。
+
+5. **当前 reward 没有直接评价工具路由。** 实现为
+   `max(0, 0.9 * acc + 0.1 * format - query_penalty)`，`tool_used` 只是记录指标，
+   不直接增加分数；也没有“Chart 应使用 chart 模式”“二维关系不需要米制深度”或
+   计数工具结果纠错的专门奖励。除定位 query 的额外惩罚外，工具路径主要通过最终答案
+   间接学习，因此答对题时冗余调用也可能得到相同奖励。这能解释为什么工具调用率高，
+   却仍存在路线不合适或工具输出利用不足的情况；它不是本次采样单独证明的因果结论。
+
+详细分组、调用顺序、成功/错误状态、题目、标准答案、模型输出、文件行号和工具返回值见
+[工具路由与轨迹审计](tool_routing_trajectory_audit_20261004.json)。
+训练 acc 使用当前 reward 的规则和 judge 结果，不等于独立 benchmark 的评分。
+
+下一步最有信息量的验证是：同一固定题集比较基座和新 checkpoint 的路由，
+并对计数/HME 做同题工具开关或原始工具文本对照；分别核对工具读取错误、模型纠错失败、
+LaTeX 输出格式、Chart 模式选择和裁剪坐标，避免只用整体工具调用率判断模型是否学会使用工具。
+
+### 新任务评测状态
+
+截至上述核对时间，新任务已保存 step12；当前只有 step0 的训练前验证，
+宏平均 57.75%，尚无训练后 benchmark 或 step40 验证结果。
+本节的 step80/step110 benchmark 成绩属于旧数据任务，不能登记为 HME/FSC 新混合数据的成绩。
+新任务训练总量 33,921，TallyQA 2,418、FSC147 3,000，默认 1 epoch、100 step，
+每 step 保存，时间限制关闭。前11步平均 40.40 分钟；原版前11步 43.95 分钟，
+原版前80步 43.62 分钟，最近 skip83 续训 step81–82 为 54.52 分钟。
+速度统计不含初始化和训练前验证，仅表示这些完成 step 的日志耗时。
