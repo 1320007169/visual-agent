@@ -1,0 +1,109 @@
+{
+  "evaluation_root": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343",
+  "checkpoint_selection": "checkpoint\tstep\tmodel_path\n64gpu\t80\t/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c/global_step_80/actor/huggingface\n16gpu\t110\t/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart_n16_2node_from_step60_20261002T170651989009_040bfc67/global_step_110/actor/huggingface\n",
+  "status_snapshot": "checkpoint\texit_code\tseconds\tresult_dir\n64gpu_step80\t0\t6086\t/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest\n",
+  "cvbench2d": {
+    "64gpu_step80": {
+      "Count": {
+        "n": 788,
+        "correct": 562,
+        "accuracy": 0.7131979695431472
+      },
+      "Relation": {
+        "n": 650,
+        "correct": 615,
+        "accuracy": 0.9461538461538461
+      }
+    },
+    "16gpu_step110": {
+      "Count": {
+        "n": 788,
+        "correct": 576,
+        "accuracy": 0.7309644670050761
+      },
+      "Relation": {
+        "n": 650,
+        "correct": 614,
+        "accuracy": 0.9446153846153846
+      }
+    }
+  },
+  "fsc147_step80": {
+    "MAE": null,
+    "RMSE": null,
+    "MAE_valid": 17.042087542087543,
+    "RMSE_valid": 120.12194981885212,
+    "exact_accuracy": 4.033613445378151,
+    "valid_rate": 99.83193277310924,
+    "total_samples": 1190.0,
+    "valid_samples": 1188.0,
+    "invalid_count": 2.0,
+    "api_failed_count": 0.0
+  },
+  "fsc147_error_distribution": {
+    "median_absolute_error": 3.0,
+    "p90_absolute_error": 25.0,
+    "worst_examples": [
+      {
+        "index": 561,
+        "question": "Count every instance of marker in the image. Respond with only the nonnegative integer count.",
+        "answer": 3704,
+        "prediction": 100,
+        "absolute_error": 3604
+      },
+      {
+        "index": 979,
+        "question": "Count every instance of yellow lego stud in the image. Respond with only the nonnegative integer count.",
+        "answer": 2563,
+        "prediction": 1000,
+        "absolute_error": 1563
+      },
+      {
+        "index": 1046,
+        "question": "Count every instance of lego in the image. Respond with only the nonnegative integer count.",
+        "answer": 515,
+        "prediction": 1,
+        "absolute_error": 514
+      },
+      {
+        "index": 1171,
+        "question": "Count every instance of marker in the image. Respond with only the nonnegative integer count.",
+        "answer": 503,
+        "prediction": 47,
+        "absolute_error": 456
+      },
+      {
+        "index": 1090,
+        "question": "Count every instance of lego in the image. Respond with only the nonnegative integer count.",
+        "answer": 387,
+        "prediction": 3,
+        "absolute_error": 384
+      }
+    ]
+  },
+  "fsc147_trace_audit": {
+    "statistics": {
+      "complete_json_rows": 1185,
+      "rows_with_readable_calls": 1186,
+      "rows_with_count_result": 975,
+      "first_count_on_original_image_rows": 975,
+      "first_count_on_original_image_exact": 45,
+      "count_rows_with_numeric_final_answer": 975,
+      "final_equals_first_count": 933,
+      "final_equals_any_count": 933,
+      "no_count_result_rows": 211,
+      "truncated_or_invalid_json_rows": 5,
+      "unrecoverable_calls_rows": 4,
+      "recovered_calls_from_prefix_rows": 1
+    },
+    "tool_call_names": {
+      "object_count": 976,
+      "grounding_detect": 729,
+      "depth_measure": 76,
+      "crop_zoom": 57,
+      "ocr_read": 14
+    },
+    "original_image_first_count_mae": 11.67897435897436,
+    "scope": "Tool statistics cover only rows whose tool_calls array could be decoded; Excel raw_response cells may be truncated."
+  }
+}

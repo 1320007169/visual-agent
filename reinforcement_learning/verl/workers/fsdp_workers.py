@@ -626,6 +626,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     @WorkerProfiler.annotate(color="red")
     def update_actor(self, data: DataProto):
+        # Wait on Gloo for every Ray batch to arrive before starting NCCL work.
+        dist.all_reduce(torch.zeros(1, device="cpu"))
         # Support all hardwares
         data = data.to("cpu")  # data will to device with each micro batch on actor.update_policy
 
@@ -713,6 +715,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
         # when is_lora is True, we use the actor without lora applied to calculate the log_prob
         # which is mostly used for ref log_prob calculation
         assert self._is_actor
+        # Wait on Gloo for every Ray batch to arrive before starting NCCL work.
+        dist.all_reduce(torch.zeros(1, device="cpu"))
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
 
@@ -766,6 +770,8 @@ class ActorRolloutRefWorker(Worker, WorkerProfilerExtension):
             data = DataProto.from_dict(tensors={"ref_log_prob": data.batch["old_log_probs"]})
             return data
         assert self._is_ref
+        # Wait on Gloo for every Ray batch to arrive before starting NCCL work.
+        dist.all_reduce(torch.zeros(1, device="cpu"))
         # else:
         # otherwise, the class have a standalone ref model
         # Support all hardwares

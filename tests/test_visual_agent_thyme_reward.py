@@ -16,6 +16,90 @@ SPEC.loader.exec_module(reward)
 
 
 class VisualAgentThymeRewardTest(unittest.TestCase):
+    def test_ocr_aliases_match_before_judge_fallback(self):
+        extra = {"data_source": "visual-agent-ocr", "answer_aliases": ["New York", "NYC"]}
+        with patch.object(reward, "judge_match", return_value=False) as judge:
+            for answer, expected in ((" NYC. ", 1), ("new  york", 1), ("York", 0), ("Boston", 0)):
+                with self.subTest(answer=answer):
+                    result = reward.compute_score(f"<answer>{answer}</answer>", "New York", extra)
+                    self.assertEqual(result["acc"], expected)
+            self.assertEqual(reward.compute_score("<answer>A. apple</answer>", "A", extra)["acc"], 0)
+            self.assertEqual(judge.call_count, 3)
+
+    def test_chart_exact_numbers_and_text_before_judge_fallback(self):
+        extra = {"data_source": "visual-agent-chartqa"}
+        cases = [("100.0", "100", 1), ("105", "100", 0), ("106", "100", 0), ("95", "100", 0),
+                 ("-105", "-100", 0), ("-106", "-100", 0),
+                 ("0.0", "0", 1), ("0.01", "0", 0), ("50%", "0.5", 1),
+                 ("52%", "50%", 0), ("53%", "50%", 0),
+                 ("BLUE", "blue", 1), ("blueish", "blue", 0),
+                 ("inf", "100", 0), ("1", "inf", 0), ("nan", "nan", 0)]
+        with patch.object(reward, "judge_match", return_value=False) as judge:
+            for answer, gold, expected in cases:
+                with self.subTest(answer=answer, gold=gold):
+                    judge.reset_mock()
+                    self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", gold, extra)["acc"], expected)
+                    if expected:
+                        judge.assert_not_called()
+                    else:
+                        judge.assert_called_once_with("", answer, gold)
+            judge.reset_mock()
+            extra["answer_aliases"] = ["navy"]
+            self.assertEqual(reward.compute_score("<answer>navy</answer>", "blue", extra)["acc"], 1)
+            judge.assert_not_called()
+
+    def test_chart_years_and_other_numbers_do_not_use_relative_tolerance(self):
+        questions = (
+            "Which year recorded the lowest number of Natural gas consumption per capita in Romania?",
+            "In what year the gap between the two countries was greatest?",
+            "When did Life expectancy(years) peak?",
+            "Which x-axis label witnessed the smallest value of Sweden?",
+            "What x axis label has the maximum difference between the two countries?",
+            "WHICH X-AXIS LABEL IS SECOND HIGHEST FOR ITALY?",
+            "Which one is greater, 1965.0 or 1982.0?",
+        )
+        with patch.object(reward, "judge_match", return_value=False) as judge:
+            for question in questions:
+                extra = {"data_source": "visual-agent-chartqa", "question": question,
+                         "answer_aliases": ["1965"]}
+                for answer, expected in (("1965", 1), ("1965.0", 1), ("1966", 0), ("1982", 0)):
+                    with self.subTest(question=question, answer=answer):
+                        judge.reset_mock()
+                        result = reward.compute_score(f"<answer>{answer}</answer>", "1965.0", extra)
+                        self.assertEqual(result["acc"], expected)
+                        self.assertAlmostEqual(result["score"], 1.0 if expected else 0.1)
+                        if expected:
+                            judge.assert_not_called()
+                        else:
+                            judge.assert_called_once_with(question, answer, "1965.0")
+            extra = {"data_source": "visual-agent-chartqa",
+                     "question": "Which x-axis label witnessed the smallest value of Sweden?"}
+            self.assertEqual(reward.compute_score("<answer>2000</answer>", "1983.0", extra)["acc"], 0)
+            extra = {"data_source": "visual-agent-chartqa",
+                     "question": "What was the population in the year 1965?"}
+            self.assertEqual(reward.compute_score("<answer>2100</answer>", "2000", extra)["acc"], 0)
+            extra["question"] = "What is the average between green and pink?"
+            self.assertEqual(reward.compute_score("<answer>2100</answer>", "2050.0", extra)["acc"], 0)
+
+    def test_all_non_relation_tasks_use_judge_after_exact_matching_fails(self):
+        sources = (
+            "visual-agent-deepeyesv2", "visual-agent-hrbench4k", "visual-agent-vision-opd",
+            "visual-agent-depth-raw", "visual-agent-tallyqa", "visual-agent-ocr", "visual-agent-chartqa",
+        )
+        for source in sources:
+            extra = {"data_source": source, "question": "Which answer is correct?"}
+            with self.subTest(source=source), patch.object(reward, "judge_match") as judge:
+                self.assertEqual(reward.compute_score("<answer>B</answer>", "B", extra)["acc"], 1)
+                judge.assert_not_called()
+                for verdict, expected in ((True, 1), (False, 0), (None, 0)):
+                    judge.reset_mock()
+                    judge.return_value = verdict
+                    result = reward.compute_score("<answer>A</answer>", "B", extra)
+                    self.assertEqual(result["acc"], expected)
+                    self.assertAlmostEqual(result["score"], 1.0 if expected else 0.1)
+                    self.assertEqual(result["reward_valid"], 1.0)
+                    judge.assert_called_once_with(extra["question"], "A", "B")
+
     def test_chart_parse_is_valid_in_both_strict_protocol_switches(self):
         call = '<tool_call>{"name":"chart_parse","arguments":{"target_image":0,"bbox_2d":[0,0,1000,1000]}}</tool_call>'
         observation = '<|im_end|>\n<|im_start|>user\n<tool_response>{"text":"A | 4","truncated":false}</tool_response><|im_end|>\n<|im_start|>assistant\n'
@@ -90,14 +174,15 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
         self.assertEqual(stats["backup_errors"], 2)
         self.assertEqual(stats["final_unresolved"], 1)
 
-    def test_choice_punctuation_without_judge(self):
+    def test_choice_punctuation_matches_before_judge_fallback(self):
         for source in ("visual-agent-hrbench4k", "visual-agent-vision-opd"):
-            with patch.object(reward, "judge_match") as judge:
+            with patch.object(reward, "judge_match", return_value=False) as judge:
                 for answer in ("B", "B.", "B)", "B. text", "B) text"):
                     self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", "B", {"data_source": source})["acc"], 1)
+                judge.assert_not_called()
                 for answer in ("A.", "A)", "B or C", "blue"):
                     self.assertEqual(reward.compute_score(f"<answer>{answer}</answer>", "B", {"data_source": source})["acc"], 0)
-                judge.assert_not_called()
+                self.assertEqual(judge.call_count, 4)
 
     def test_judge_stats_distinguish_backup_false_from_failure(self):
         primary, backup = Mock(), Mock()
@@ -195,20 +280,21 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
             self.assertIsNone(reward.judge_match("color?", "red", "red"))
         self.assertEqual(client.chat.completions.create.call_count, 3)
 
-    def test_hrbench_uses_choice_accuracy_without_judge(self):
+    def test_hrbench_uses_choice_matching_then_judge(self):
         extra = {"data_source": "visual-agent-hrbench4k"}
-        with patch.object(reward, "judge_match") as judge:
+        with patch.object(reward, "judge_match", return_value=False) as judge:
             self.assertEqual(reward.compute_score("<answer>B</answer>", "B", extra)["acc"], 1)
             self.assertEqual(reward.compute_score("<answer>B. 37B</answer>", "B", extra)["acc"], 1)
             self.assertEqual(reward.compute_score("<answer>B) 37B</answer>", "B", extra)["acc"], 1)
+            judge.assert_not_called()
             self.assertEqual(reward.compute_score("<answer>A</answer>", "B", extra)["acc"], 0)
             self.assertEqual(reward.compute_score("<answer>A. 37B</answer>", "B", extra)["acc"], 0)
             self.assertEqual(reward.compute_score("<answer>blue</answer>", "B", extra)["acc"], 0)
             self.assertEqual(reward.compute_score("<answer>B or C</answer>", "B", extra)["acc"], 0)
-            judge.assert_not_called()
+            self.assertEqual(judge.call_count, 4)
 
-    def test_raw_depth_and_tallyqa_use_closed_rule_rewards(self):
-        with patch.object(reward, "judge_match") as judge:
+    def test_raw_depth_and_tallyqa_use_exact_matching_then_judge(self):
+        with patch.object(reward, "judge_match", return_value=False) as judge:
             depth = {"data_source": "visual-agent-depth-raw", "original_source": "ca_vqa_multichoice"}
             depth_open = {"data_source": "visual-agent-depth-raw", "original_source": "gqa_depth"}
             count = {"data_source": "visual-agent-tallyqa"}
@@ -218,7 +304,7 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
             self.assertEqual(reward.compute_score("<answer>A. glass</answer>", "A", depth_open)["acc"], 0)
             self.assertEqual(reward.compute_score("<answer>4</answer>", "4", count)["acc"], 1)
             self.assertEqual(reward.compute_score("<answer>40</answer>", "4", count)["acc"], 0)
-            judge.assert_not_called()
+            self.assertEqual(judge.call_count, 3)
 
     def test_multitool_actions_are_valid_in_reason_act_format(self):
         prefix = '<tool_call>{"name":"depth_measure","arguments":{"target_image":0,"bbox_2d":[1,2,3,4]}}</tool_call>'

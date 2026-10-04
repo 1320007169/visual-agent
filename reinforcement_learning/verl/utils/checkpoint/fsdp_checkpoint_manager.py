@@ -77,6 +77,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             processing_class=processing_class,
             checkpoint_contents=checkpoint_contents,
         )
+        self.allow_world_size_change = checkpoint_contents.get("allow_world_size_change", False) if checkpoint_contents else False
 
     def load_checkpoint(self, local_path: str, hdfs_path: str = None, del_local_after_load=False):
         """
@@ -94,6 +95,18 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         if local_path is None:
             return
 
+        source_world_size = self.world_size
+        if self.allow_world_size_change:
+            from .fsdp_reshard import checkpoint_world_size, reshard_model_state, reshard_optimizer_state
+
+            source_world_size = checkpoint_world_size(local_path)
+            if source_world_size < self.world_size or fsdp_version(self.model) != 1:
+                raise ValueError("World-size conversion supports reducing FSDP1 ranks only")
+        reshard = source_world_size != self.world_size
+        if reshard:
+            log_with_rank(f"Resharding FSDP checkpoint from {source_world_size} to {self.world_size} ranks; preserving Adam state",
+                          rank=self.rank, logger=logger, log_only_rank_0=True)
+
         # check if the checkpoint_load_contents is valid
         if self.should_load_model:
             assert self.model is not None, "model must be provided when checkpoint_contents.load includes ['model']"
@@ -105,21 +118,28 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True if is_cuda_available else False) if self.should_load_optimizer else None
         with get_fsdp_state_ctx(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
             if self.should_load_model:
-                remote_model_path = os.path.join(local_path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
+                remote_model_path = os.path.join(local_path, f"model_world_size_{source_world_size}_rank_{self.rank}.pt")
                 local_model_path = copy_to_local(remote_model_path)
-                model_state_dict = torch.load(local_model_path, weights_only=False)
+                if reshard:
+                    model_state_dict = reshard_model_state(local_path, source_world_size, self.model.state_dict())
+                else:
+                    model_state_dict = torch.load(local_model_path, weights_only=False)
                 self.model.load_state_dict(model_state_dict)
+                del model_state_dict
                 log_with_rank(f"Loaded model from {remote_model_path}", rank=self.rank, logger=logger)
 
             if self.should_load_optimizer:
-                remote_optim_path = os.path.join(local_path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
+                remote_optim_path = os.path.join(local_path, f"optim_world_size_{source_world_size}_rank_{self.rank}.pt")
                 local_optim_path = copy_to_local(remote_optim_path)
-                optimizer_state_dict = torch.load(local_optim_path, weights_only=False)
+                if reshard:
+                    optimizer_state_dict = reshard_optimizer_state(local_path, source_world_size, self.optimizer, self.rank, self.world_size)
+                else:
+                    optimizer_state_dict = torch.load(local_optim_path, weights_only=False)
                 self.optimizer.load_state_dict(optimizer_state_dict)
                 log_with_rank(f"Loaded optimizer from {remote_optim_path}", rank=self.rank, logger=logger)
 
         if self.should_load_extra:
-            remote_extra_state_path = os.path.join(local_path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
+            remote_extra_state_path = os.path.join(local_path, f"extra_state_world_size_{source_world_size}_rank_{self.rank}.pt")
             local_extra_state_path = copy_to_local(remote_extra_state_path)
             extra_state_dict = torch.load(local_extra_state_path, weights_only=False)
             # recover random state

@@ -28,6 +28,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from sft_tool_call_logic import execute_tool_call
 from vts_tool_bridge import VtsBridgeError, VtsRemoteBridge
+from visual_tool_extensions import (
+    EXTENSION_TOOL_NAMES,
+    execute_extension,
+    relative_box_to_pixels,
+    validate_extension_arguments,
+)
 
 
 SUPPORTED_TOOLS = {
@@ -44,7 +50,7 @@ SUPPORTED_TOOLS = {
     "depth_measure",
     "ground_depth",
     "object_count",
-}
+} | EXTENSION_TOOL_NAMES
 
 
 class ToolServerError(RuntimeError):
@@ -387,6 +393,34 @@ class ToolService:
     crop_size: int = 336
     minimum_crop_size: int = 96
     chart_bridge: VtsRemoteBridge | None = None
+    segment_bridge: VtsRemoteBridge | None = None
+
+    def _execute_segment(
+        self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
+    ) -> tuple[dict, list[str]]:
+        target = validate_extension_arguments("sam_segment", arguments, images)
+        pixels = relative_box_to_pixels(arguments["bbox_2d"], images[target].size)
+        if self.segment_bridge is None:
+            raise ToolServerError("sam_segment service is not configured; set VTS_SEGMENT_ENDPOINT")
+        response = self.segment_bridge.execute(
+            images=images,
+            arguments={"image_id": target, "bbox": pixels},
+            instance_id=instance_id,
+        )
+        if error := _remote_error(response.result, "sam_segment"):
+            return error, []
+        if len(response.images) != 2:
+            raise ToolServerError("sam_segment must return a mask image and an overlay image")
+        structured = response.result["structured"]
+        return {
+            "target_image": target,
+            "bbox_2d": list(arguments["bbox_2d"]),
+            "score": structured["score"],
+            "area_pixels": structured["area_pixels"],
+            "area_ratio": structured["area_ratio"],
+            "mask_image": len(images),
+            "overlay_image": len(images) + 1,
+        }, response.images
 
     def _execute_chart(
         self, arguments: dict[str, Any], images: list[Image.Image], instance_id: str,
@@ -727,6 +761,14 @@ class ToolService:
     ) -> tuple[dict, list[str]]:
         if name not in SUPPORTED_TOOLS:
             raise ToolServerError(f"Unsupported tool: {name}")
+        if name in EXTENSION_TOOL_NAMES:
+            try:
+                if name == "sam_segment":
+                    return self._execute_segment(arguments, images, instance_id)
+                result, output_images = execute_extension(name, arguments, images)
+                return result, [encode_image(image, image_format="PNG") for image in output_images]
+            except (TypeError, ValueError, VtsBridgeError) as exc:
+                raise ToolServerError(str(exc)) from exc
         if name == "chart_parse":
             try:
                 return self._execute_chart(arguments, images, instance_id)
@@ -830,6 +872,7 @@ def load_service(backend: str) -> ToolService:
         count_bridge=VtsRemoteBridge.from_env(
             endpoint_env="VTS_COUNT_ENDPOINT", tool_name="countgd_plusplus_count"
         ),
+        segment_bridge=VtsRemoteBridge.from_env(endpoint_env="VTS_SEGMENT_ENDPOINT", tool_name="sam_segment"),
     )
 
 
@@ -858,6 +901,7 @@ def create_app(service: ToolService):
             "chart_service": service.chart_bridge is not None,
             "depth_service": service.depth_bridge is not None,
             "count_service": service.count_bridge is not None,
+            "segment_service": service.segment_bridge is not None,
         }
 
     @app.post("/execute")

@@ -24,8 +24,8 @@ export RL_OUTPUT_DIR="${RL_OUTPUT_DIR:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen
 
 export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-https://models.sjtu.edu.cn/api/v1}"
 export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-chat}"
-export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api-cn.hi-code.cc/v1}"
-export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4.1-flash}"
+export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api.deepseek.com/v1}"
+export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4-flash}"
 export LLM_AS_A_JUDGE_RETRIES="${LLM_AS_A_JUDGE_RETRIES:-2}"
 export JUDGE_ENABLED=1
 
@@ -45,7 +45,7 @@ load_key() {
 
 if [[ "${MIXED_CONFIG_ONLY:-0}" != "1" ]]; then
   load_key LLM_AS_A_JUDGE_KEY "${JUDGE_KEY_FILE:-$BASE/secrets/sjtu_judge_api_key.txt}"
-  load_key LLM_AS_A_JUDGE_BACKUP_KEY "${BACKUP_JUDGE_KEY_FILE:-$BASE/secrets/hicode_judge_api_key.txt}"
+  load_key LLM_AS_A_JUDGE_BACKUP_KEY "${BACKUP_JUDGE_KEY_FILE:-$BASE/secrets/deepseek_api_key.txt}"
 fi
 
 export HTTP_PROXY="${HTTP_PROXY:-http://proxy.modelarts.com:80}"

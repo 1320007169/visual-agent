@@ -56,7 +56,12 @@ def depth_rows(path: Path, split: str) -> list[dict]:
             "original_source": source["source"],
             "count_complexity": "",
         }))
-    return result
+    answers = {}
+    for row in result:
+        key = (tuple(row["images"]), row["question"])
+        answers.setdefault(key, set()).add(row["solution"])
+    return [row for row in result
+            if len(answers[(tuple(row["images"]), row["question"])]) == 1]
 
 
 def tally_rows(manifest_path: Path, official_path: Path) -> dict[str, list[dict]]:

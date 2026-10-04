@@ -49,6 +49,7 @@ OCR 服务使用 `PIPELINE_ROOT/.env` 中的 `VTS_OCR_ENV`，模型目录由 `PA
 | CountGD++ pseudo-exemplar 对照 | [run_qwen3_vl_8b_count_pseudo_v2_eval_modelarts.sh](run_qwen3_vl_8b_count_pseudo_v2_eval_modelarts.sh) | 替换计数后端和 prompt；默认 MME-RealWorld-Lite |
 | 通用 checkpoint 评测 | [run_visual_agent_eval_qwen3.sh](run_visual_agent_eval_qwen3.sh) | 通过 `EVAL_MODELS` 等变量选择权重；默认配置仍指向历史 step80/90 |
 | 连续评测多份 checkpoint | [run_visual_agent_eval_mixed_checkpoints_modelarts.sh](run_visual_agent_eval_mixed_checkpoints_modelarts.sh) | 多权重评测任务 |
+| 64 卡、16 卡 VL-OCR 最新 checkpoint 对照 | [run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh](run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh) | 单节点 8 卡，依次评测两个运行的最新完整 checkpoint；使用训练时的五工具和 PaddleOCR-VL-1.6 |
 | 工具行为诊断 | [run_visual_agent_eval_tool_diagnostic_modelarts.sh](run_visual_agent_eval_tool_diagnostic_modelarts.sh) | direct、auto、tool-first 等诊断模式 |
 | 两卡评测入口 | [run_visual_agent_eval_qwen3_local_2gpu.sh](run_visual_agent_eval_qwen3_local_2gpu.sh) | 通用评测的两卡配置 |
 
@@ -87,6 +88,47 @@ OCR 服务使用 `PIPELINE_ROOT/.env` 中的 `VTS_OCR_ENV`，模型目录由 `PA
 本地 `repair_data/` 保存 P2R 修复用的标注数据，尚未提交。
 
 ## 公共内部脚本
+
+### VL-OCR 两个最新 checkpoint 评测
+
+ModelArts 入口：`run_visual_agent/eval/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh`。
+提交一个单节点 8 卡任务，先评测 64 卡训练的最新完整 checkpoint，再评测 16 卡续训的最新完整 checkpoint。
+启动时分别读取当前两个运行目录的 `latest_checkpointed_iteration.txt`，并验证 HF 权重分片；
+这里的“最新”指已完整保存的 checkpoint，不是最后完成但尚未保存的训练 step。
+沿用 [VL-OCR 评测](run_visual_agent_eval_multitool_vlocr_8gpu.sh)：7 个模型副本、1 张工具卡、
+并发 14、五工具 native/hermes 协议、训练 prompt、最多 8 轮、每轮 512 token，OCR 使用 PaddleOCR-VL-1.6。
+默认评测现有 10 个 benchmark，包括 OCRBench 和 ChartQA_TEST；可用 `EVAL_DATASETS="OCRBench ChartQA_TEST"` 只跑这两项。
+环境沿用最近的评测入口：模型及 VLMEval 使用 `qwenvl3_xmx_vLLM`，CUDA 和 GCC/G++ 使用
+`$BASE/conda_envs/spacetools-rl`，入口设置相同的 `CUDA_LIBRARY_DIR`、`CC`、`CXX` 和 `CUDAHOSTCXX`。
+工具 CUDA 使用 `cuda118`；depth 使用 `starVLA_flash_dzw1`，count 使用 `.env` 中的 `VTS_COUNT_ENV`，
+PaddleOCR-VL 使用 `$BASE/conda_envs/qwen38-vllm-clean`，GroundingDINO 使用 `$BASE/conda_envs/visual-tools`。
+
+结果分别保存在 `outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/<run_id>/64gpu_step<N>/dino_latest/`
+及 `16gpu_step<N>/dino_latest/`，`checkpoints.tsv` 记录步数及模型源路径，`status.tsv` 记录两边退出码及耗时。
+与其他评测入口一致，直接读取原始 HF 模型目录；评测期间需保留选中的 checkpoint。
+两个模型依次调用现有评测入口，各自启动并清理工具服务；第一份失败仍尝试第二份，整体返回非零状态。
+已有结果目录拒绝复用；`CHECKPOINT_EVAL_CONFIG_ONLY=1` 只检查选中的 checkpoint，不启动服务或创建结果目录。
+
+```bash
+CHECKPOINT_EVAL_CONFIG_ONLY=1 bash scripts/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh
+```
+
+同一入口支持 `VLOCR_RETRY_FAILED_ONLY=1` 仅补测 64 卡任务的 API 失败。
+仓库入口默认值为 `0`，沿用双权重完整评测流程；当前 ModelArts 外部入口在开头显式设置为 `1`。
+直接提交外部入口即可补测；恢复完整评测时，将外部入口该行的 `1` 改为 `0`。
+补测从 `VLOCR_REUSE_GROUP_ROOT/checkpoints.tsv` 读取 64 卡原权重，不读取训练任务的最新 step；
+复用成功预测，只重试 API 失败题，重新生成评分文件，结果写入新的目录。
+默认选择 HRBench4K、HRBench8K、MME-RealWorld-Lite、MME-RealWorld-CN，
+可用 `EVAL_DATASETS` 覆盖；某项无失败题时只复用其预测并重新评分。
+ModelArts 外部入口在补测模式下默认复用 `20261003T194114860354878_343` 对应的双权重评测，
+仅处理其中的 64 卡 step80，共 55 条 API 失败；此数量是补测前记录，不保证一次补测全部成功。
+
+```bash
+bash /home/ma-user/work/algorithm/codebkp/run_visual_agent/eval/run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh
+```
+
+补测其他结果时显式设置 `VLOCR_REUSE_GROUP_ROOT`。不要将 `WORK_ROOT` 设为旧结果目录；
+配置预检可同时设置 `CHECKPOINT_EVAL_CONFIG_ONLY=1`，无需启动 GPU 服务。
 
 ### 六工具双权重评测
 

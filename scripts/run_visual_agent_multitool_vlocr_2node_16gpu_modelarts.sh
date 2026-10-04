@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Run this entrypoint on both 8-GPU ModelArts nodes.
+export NNODES=2
+export TRAIN_BATCH_SIZE=126
+export PPO_MINI_BATCH_SIZE=42
+export VAL_BATCH_SIZE=126
+export ROLLOUT_N=16
+export MAX_CONCURRENT_REQUESTS=112
+export RUN_ID=qwen3base_multitool_vlocr_n16_2node_resume_step60
+export RL_SPLIT_OCR=0
+export RL_CHART_PARSE=1
+export VTS_VL_OCR=1
+export TRAINER_STOP_AFTER_SECONDS=36000
+export ALLOW_FSDP_WORLD_SIZE_CHANGE=True
+export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
+export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
+
+# Generated ModelArts entrypoint; run the same file on every node.
 export BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 export REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
 export RL_ROOT="${RL_ROOT:-$REPO_ROOT/reinforcement_learning}"
@@ -21,9 +36,10 @@ export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-112}"
 export ROLLOUT_N="${ROLLOUT_N:-8}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
-export RESUME_MODE="${RESUME_MODE:-disable}"
+export RESUME_MODE=resume_path
+export RESUME_FROM_PATH="$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_n16_3node_resume_step44_20260930T190545597224_5a18e952/global_step_60"
 export TEST_FREQ="${TEST_FREQ:-40}"
-export SAVE_FREQ="${SAVE_FREQ:-20}"
+export SAVE_FREQ="${SAVE_FREQ:-10}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
 export MAX_CHECKPOINTS_TO_KEEP="${MAX_CHECKPOINTS_TO_KEEP:-1}"
 export SAVE_BEST_ONLY=False
@@ -50,15 +66,34 @@ export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4-flash}"
 export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api.deepseek.com/v1}"
 export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4-flash}"
 
+export NNODES=2
+export TRAIN_BATCH_SIZE=126
+export PPO_MINI_BATCH_SIZE=42
+export VAL_BATCH_SIZE=126
+export ROLLOUT_N=16
+export MAX_CONCURRENT_REQUESTS=112
+export RUN_ID=qwen3base_multitool_vlocr_n16_2node_resume_step60
+export RL_SPLIT_OCR=0
+export RL_CHART_PARSE=1
+export VTS_VL_OCR=1
+export TRAINER_STOP_AFTER_SECONDS=36000
+export ALLOW_FSDP_WORLD_SIZE_CHANGE=True
+export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
+export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
+
+launcher="$REPO_ROOT"/scripts/run_visual_agent_multitool_vlocr_2node_16gpu.sh
 if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
+  export RESUME_MODE=disable
   source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+  export RESUME_MODE=resume_path
   for key in RL_ENV_DIR MODEL_PATH TRAIN_FILES VAL_FILES COUNT_SERVICE_CONFIG NNODES RL_CUDA_VISIBLE_DEVICES \
     TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
     ROLLOUT_N TOTAL_TRAINING_STEPS TEST_FREQ SAVE_FREQ BEST_METRIC VAL_BEFORE_TRAIN \
     VISUAL_AGENT_IMAGE_TRANSPORT MAX_CONCURRENT_REQUESTS RL_SPLIT_OCR TOOL_CONFIG_PATH \
-    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS; do
+    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH ALLOW_FSDP_WORLD_SIZE_CHANGE; do
     printf '%s=%s\n' "$key" "${!key:-}"
   done
+  printf 'LAUNCHER=%s\n' "$launcher"
   exit 0
 fi
 
@@ -73,7 +108,21 @@ ensure_symlink /opt/huawei/dataset /opt/huawei/explorer-env/dataset
 ensure_symlink /opt/huawei/dataset /home/ma-user/work/dataset
 ensure_symlink /opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink /opt/huawei/quoteModel/xiaoyi_tmpstorage /home/ma-user/work/model/xiaoyi_tmpstorage
+# Create a separate run namespace while loading the complete source checkpoint.
+export RESUME_MODE=disable
 source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+export RESUME_MODE=resume_path
+
+[[ -s "$RESUME_FROM_PATH/data.pt" ]] || { echo "error: missing resume dataloader state: $RESUME_FROM_PATH/data.pt" >&2; exit 2; }
+IFS=',' read -r -a resume_rl_gpus <<< "$RL_CUDA_VISIBLE_DEVICES"
+# The source checkpoint has 21 shards; the loader repartitions them onto 14 ranks.
+resume_world_size=21
+for ((rank = 0; rank < resume_world_size; rank++)); do
+    for component in model optim extra_state; do
+        checkpoint_file="$RESUME_FROM_PATH/actor/${component}_world_size_${resume_world_size}_rank_${rank}.pt"
+        [[ -s "$checkpoint_file" ]] || { echo "error: missing resume shard: $checkpoint_file" >&2; exit 2; }
+    done
+done
 
 if [[ -z "${MULTITOOL_RL_ENV_DIR:-}" && ! -x "$RL_ENV_DIR/bin/python" ]]; then
   for dataset_root in /home/ma-user/work/dataset /opt/huawei/dataset; do
@@ -139,4 +188,4 @@ if not isinstance(processor, Qwen3VLProcessor):
 print(f"ModelArts preflight passed: {type(processor).__name__}, OpenCV GUI={gui}", flush=True)
 PYMODEL
 
-exec bash "$REPO_ROOT/scripts/run_visual_agent_multitool_depth_count_2node_16gpu.sh"
+exec bash "$launcher" "$@"

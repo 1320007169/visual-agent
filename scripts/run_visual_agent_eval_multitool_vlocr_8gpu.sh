@@ -45,7 +45,8 @@ export MODEL_CXX="$CUDA_HOME/bin/x86_64-conda-linux-gnu-g++"
 export TOOL_CUDA_HOME=/opt/huawei/explorer-env/dataset/trellis_ckpt/cuda/cuda118
 export MODEL_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6
 export TOOL_CUDA_VISIBLE_DEVICES=7
-export VLMEVAL_API_NPROC=14
+export GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.80}"
+export VLMEVAL_API_NPROC="${VLMEVAL_API_NPROC:-7}"
 export MODEL_SERVER_BACKEND=vllm
 export EVAL_MODELS=dino_latest
 export EVAL_DATASETS="${EVAL_DATASETS:-VStarBench HRBench8K OCRBench MME-RealWorld-Lite HRBench4K MME-RealWorld-CN CV-Bench-2D CV-Bench-3D ChartQA_TEST FSC147_TEST}"
@@ -82,6 +83,38 @@ fi
 mkdir -p "$(dirname "$WORK_ROOT")"
 mkdir "$WORK_ROOT"
 mkdir -p "$WORK_ROOT/services" "$VTS_TOOL_BRIDGE_ROOT"
+if [[ -n "${VLOCR_REUSE_GROUP_ROOT:-}" ]]; then
+    export VLMEVAL_EVAL_ID="${VLMEVAL_EVAL_ID:-$RUN_ID}"
+    python3 - "$VLOCR_REUSE_GROUP_ROOT" "$VLOCR_MODEL_PATH" \
+        "$WORK_ROOT/dino_latest/VisualAgent-vllm/$VLMEVAL_EVAL_ID" <<'PY'
+import csv
+import os
+from pathlib import Path
+import shutil
+import sys
+
+previous, model, destination = map(Path, sys.argv[1:])
+with (previous / "checkpoints.tsv").open() as stream:
+    for checkpoint in csv.DictReader(stream, delimiter="\t"):
+        if Path(checkpoint["model_path"]).resolve() != model.resolve():
+            continue
+        label = f'{checkpoint["checkpoint"]}_step{checkpoint["step"]}'
+        source = previous / label / "dino_latest/VisualAgent-vllm"
+        if not source.is_dir():
+            continue
+        prediction_roots = sorted(path for path in source.iterdir() if path.is_dir())
+        if not prediction_roots:
+            continue
+        destination.mkdir(parents=True, exist_ok=True)
+        # Seed predictions only; VLMEvalKit retries API failures and recomputes scores.
+        for dataset in os.environ["EVAL_DATASETS"].split():
+            for suffix in (".xlsx", "_supp.pkl"):
+                cached = prediction_roots[-1] / f"VisualAgent-vllm_{dataset}{suffix}"
+                if cached.is_file():
+                    shutil.copy2(cached, destination / cached.name)
+                    print(f"Reusing predictions: {cached}", flush=True)
+PY
+fi
 if [[ " $EVAL_DATASETS " == *" FSC147_TEST "* ]]; then
     "$ENV_DIR/bin/python" "$REPO_ROOT/scripts/prepare_fsc147_eval.py" \
         --annotation-file "$FSC147_ANNOTATION_FILE" --image-root "$FSC147_IMAGE_ROOT" \
@@ -91,8 +124,7 @@ service_pids=()
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
-    # Each service is a setsid group leader; signal the whole group so the Python
-    # server under `conda run` exits and releases the GPU and port.
+    # Signal each service group so all subprocesses release their GPU and port.
     for pid in "${service_pids[@]}"; do
         kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     done
@@ -119,16 +151,15 @@ setsid env CUDA_VISIBLE_DEVICES=7 "$VTS_COUNT_ENV/bin/python3" \
     -m vts.tool_server --config "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml" \
     >"$WORK_ROOT/services/count.log" 2>&1 &
 service_pids+=("$!")
-# Same library path fix as training: this conda environment overrides LD_LIBRARY_PATH.
+# Keep the chart environment libraries and inherited platform driver paths.
 chart_library_path="$VTS_CHART_ENV/lib"
 for torch_library in "$VTS_CHART_ENV"/lib/python*/site-packages/torch/lib; do
     [[ ! -d "$torch_library" ]] || chart_library_path+=":$torch_library"
 done
 chart_library_path+="${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 setsid env CUDA_VISIBLE_DEVICES=7 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-    conda run --no-capture-output -p "$VTS_CHART_ENV" \
-    env LD_LIBRARY_PATH="$chart_library_path" \
-    python3 "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
+    LD_LIBRARY_PATH="$chart_library_path" \
+    "$VTS_CHART_ENV/bin/python3" "$REPO_ROOT/scripts/paddleocr_vl_chart_server.py" \
     --model-root "$PADDLEOCR_VL_MODEL_ROOT" --allowed-root "$VTS_TOOL_BRIDGE_ROOT" \
     --max-new-tokens "${CHART_PARSE_MAX_NEW_TOKENS:-1024}" --port 9007 \
     >"$WORK_ROOT/services/chart.log" 2>&1 &

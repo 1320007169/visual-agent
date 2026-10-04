@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Start from the base model; the 21-rank step-44 FSDP checkpoint cannot resume on 56 ranks.
+# Continue step 80 with the original step-83 batch excluded from the prepared data.
 export NNODES=8
 export TRAIN_BATCH_SIZE=336
 export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_n16_8node
+export RUN_ID=qwen3base_multitool_vlocr_quality_skip83_n16_8node_from_step80
+export TRAIN_SHUFFLE=False
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=0
-export RESUME_MODE=disable
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
+export RESUME_MODE=resume_path
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
 
@@ -25,7 +26,7 @@ export PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorag
 export COUNT_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
 export RL_ENV_DIR="${MULTITOOL_RL_ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/visual-agent-qwen3vl-rl}"
 export MODEL_PATH="${MODEL_PATH:-$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct}"
-export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/zwz_deepeyesv2_depth_tallyqa5k_multitool_20260924}"
+export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$REPO_ROOT/data/vlocr_quality_skip_step83_continuation_step80_20261004}"
 export TRAIN_FILES="${TRAIN_FILES:-$MULTITOOL_DATA_DIR/train.parquet}"
 export VAL_FILES="${VAL_FILES:-$MULTITOOL_DATA_DIR/val.parquet}"
 export NNODES="${NNODES:-2}"
@@ -37,9 +38,10 @@ export VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-112}"
 export ROLLOUT_N="${ROLLOUT_N:-8}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
-export RESUME_MODE="${RESUME_MODE:-disable}"
+export RESUME_MODE=resume_path
+export RESUME_FROM_PATH="${RESUME_FROM_PATH:-$MULTITOOL_DATA_DIR/resume/global_step_80}"
 export TEST_FREQ="${TEST_FREQ:-40}"
-export SAVE_FREQ="${SAVE_FREQ:-20}"
+export SAVE_FREQ="${SAVE_FREQ:-1}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
 export MAX_CHECKPOINTS_TO_KEEP="${MAX_CHECKPOINTS_TO_KEEP:-1}"
 export SAVE_BEST_ONLY=False
@@ -61,8 +63,8 @@ export VALIDATION_DATA_DIR="${VALIDATION_DATA_DIR:-$RL_OUTPUT_DIR/validation}"
 export ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-$BASE/rollouts/visual-agent-zwz-rl/$RUN_ID}"
 export RL_LOG_DIR="${RL_LOG_DIR:-$BASE/logs/visual-agent-zwz-rl}"
 
-export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-https://api-cn.hi-code.cc/v1}"
-export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4.1-flash}"
+export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-http://43.155.134.160:8080/v1}"
+export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4-flash}"
 export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api.deepseek.com/v1}"
 export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4-flash}"
 
@@ -72,23 +74,25 @@ export PPO_MINI_BATCH_SIZE=112
 export VAL_BATCH_SIZE=336
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=448
-export RUN_ID=qwen3base_multitool_vlocr_n16_8node
+export RUN_ID=qwen3base_multitool_vlocr_quality_skip83_n16_8node_from_step80
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
-export TRAINER_STOP_AFTER_SECONDS=0
-export RESUME_MODE=disable
+export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
+export RESUME_MODE=resume_path
 export TOOL_CONFIG_PATH=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/prompts/visual_agent_rl_system_multitool_vlocr.txt
 
 launcher="$REPO_ROOT"/scripts/run_visual_agent_multitool_vlocr_8node_64gpu.sh
 if [[ "${MULTITOOL_CONFIG_ONLY:-0}" == "1" ]]; then
+  export RESUME_MODE=disable
   source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+  export RESUME_MODE=resume_path
   for key in RL_ENV_DIR MODEL_PATH TRAIN_FILES VAL_FILES COUNT_SERVICE_CONFIG NNODES RL_CUDA_VISIBLE_DEVICES \
-    TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
+    TOOL_GPU RUN_ID RL_OUTPUT_DIR RL_LOG_DIR ROLLOUT_DATA_DIR RESUME_MODE TRAIN_SHUFFLE TRAIN_BATCH_SIZE PPO_MINI_BATCH_SIZE VAL_BATCH_SIZE \
     ROLLOUT_N TOTAL_TRAINING_STEPS TEST_FREQ SAVE_FREQ BEST_METRIC VAL_BEFORE_TRAIN \
     VISUAL_AGENT_IMAGE_TRANSPORT MAX_CONCURRENT_REQUESTS RL_SPLIT_OCR TOOL_CONFIG_PATH \
-    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS; do
+    VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE TRAINER_STOP_AFTER_SECONDS RESUME_FROM_PATH SYNC_DIR; do
     printf '%s=%s\n' "$key" "${!key:-}"
   done
   printf 'LAUNCHER=%s\n' "$launcher"
@@ -106,7 +110,18 @@ ensure_symlink /opt/huawei/dataset /opt/huawei/explorer-env/dataset
 ensure_symlink /opt/huawei/dataset /home/ma-user/work/dataset
 ensure_symlink /opt/huawei/schedule-train/algorithm/algorithmrefs/synaflow_wl /home/ma-user/work/algorithm/synaflow_wl
 ensure_symlink /opt/huawei/quoteModel/xiaoyi_tmpstorage /home/ma-user/work/model/xiaoyi_tmpstorage
+# Use fresh output and synchronization paths while restoring the source checkpoint.
+export RESUME_MODE=disable
 source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
+export RESUME_MODE=resume_path
+
+[[ -s "$RESUME_FROM_PATH/data.pt" ]] || { echo "error: missing resume dataloader state: $RESUME_FROM_PATH/data.pt" >&2; exit 2; }
+for ((rank = 0; rank < 56; rank++)); do
+    for component in model optim extra_state; do
+        checkpoint_file="$RESUME_FROM_PATH/actor/${component}_world_size_56_rank_${rank}.pt"
+        [[ -s "$checkpoint_file" ]] || { echo "error: missing resume shard: $checkpoint_file" >&2; exit 2; }
+    done
+done
 
 if [[ -z "${MULTITOOL_RL_ENV_DIR:-}" && ! -x "$RL_ENV_DIR/bin/python" ]]; then
   for dataset_root in /home/ma-user/work/dataset /opt/huawei/dataset; do
@@ -140,7 +155,7 @@ load_key() {
 }
 if [[ "${ENABLE_API_JUDGE:-1}" != "0" ]]; then
   load_key LLM_AS_A_JUDGE_BACKUP_KEY "${BACKUP_JUDGE_KEY_FILE:-$BASE/secrets/deepseek_api_key.txt}"
-  load_key LLM_AS_A_JUDGE_KEY "${JUDGE_KEY_FILE:-$BASE/secrets/hicode_judge_api_key.txt}"
+  load_key LLM_AS_A_JUDGE_KEY "${JUDGE_KEY_FILE:-$BASE/secrets/judge_api_43_155_134_160_key.txt}"
 fi
 
 OPENCV_HEADLESS_SITE_PACKAGES="${OPENCV_HEADLESS_SITE_PACKAGES:-${RL_ENV_DIR%/*}/fineanno_wdz/lib/python3.10/site-packages}"

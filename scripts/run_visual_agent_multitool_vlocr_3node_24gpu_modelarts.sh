@@ -7,7 +7,7 @@ export PPO_MINI_BATCH_SIZE=42
 export VAL_BATCH_SIZE=126
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=168
-export RUN_ID=qwen3base_multitool_vlocr_n16_3node_resume_step44
+export RUN_ID=qwen3base_multitool_vlocr_n16_3node_resume_step60
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
@@ -36,7 +36,7 @@ export ROLLOUT_N="${ROLLOUT_N:-8}"
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 export RESUME_MODE=resume_path
-export RESUME_FROM_PATH="$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_n16_3node_resume_step20_20260930T075142966836_dcaf3c62/global_step_44"
+export RESUME_FROM_PATH="$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_n16_3node_resume_step44_20260930T190545597224_5a18e952/global_step_60"
 export TEST_FREQ="${TEST_FREQ:-40}"
 export SAVE_FREQ="${SAVE_FREQ:-20}"
 export MAX_ACTOR_CKPT_TO_KEEP="${MAX_ACTOR_CKPT_TO_KEEP:-2}"
@@ -60,8 +60,8 @@ export VALIDATION_DATA_DIR="${VALIDATION_DATA_DIR:-$RL_OUTPUT_DIR/validation}"
 export ROLLOUT_DATA_DIR="${ROLLOUT_DATA_DIR:-$BASE/rollouts/visual-agent-zwz-rl/$RUN_ID}"
 export RL_LOG_DIR="${RL_LOG_DIR:-$BASE/logs/visual-agent-zwz-rl}"
 
-export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-https://api-cn.hi-code.cc/v1}"
-export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4.1-flash}"
+export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-http://43.155.134.160:8080/v1}"
+export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4-flash}"
 export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api.deepseek.com/v1}"
 export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4-flash}"
 
@@ -71,7 +71,7 @@ export PPO_MINI_BATCH_SIZE=42
 export VAL_BATCH_SIZE=126
 export ROLLOUT_N=16
 export MAX_CONCURRENT_REQUESTS=168
-export RUN_ID=qwen3base_multitool_vlocr_n16_3node_resume_step44
+export RUN_ID=qwen3base_multitool_vlocr_n16_3node_resume_step60
 export RL_SPLIT_OCR=0
 export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
@@ -153,7 +153,7 @@ load_key() {
 }
 if [[ "${ENABLE_API_JUDGE:-1}" != "0" ]]; then
   load_key LLM_AS_A_JUDGE_BACKUP_KEY "${BACKUP_JUDGE_KEY_FILE:-$BASE/secrets/deepseek_api_key.txt}"
-  load_key LLM_AS_A_JUDGE_KEY "${JUDGE_KEY_FILE:-$BASE/secrets/hicode_judge_api_key.txt}"
+  load_key LLM_AS_A_JUDGE_KEY "${JUDGE_KEY_FILE:-$BASE/secrets/judge_api_43_155_134_160_key.txt}"
 fi
 
 OPENCV_HEADLESS_SITE_PACKAGES="${OPENCV_HEADLESS_SITE_PACKAGES:-${RL_ENV_DIR%/*}/fineanno_wdz/lib/python3.10/site-packages}"

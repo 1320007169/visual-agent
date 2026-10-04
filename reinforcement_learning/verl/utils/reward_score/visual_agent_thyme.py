@@ -7,6 +7,7 @@ import os
 import re
 from collections import Counter
 from functools import lru_cache
+from math import isfinite
 from threading import Lock
 
 
@@ -88,7 +89,8 @@ def has_think_action_format(text: str) -> bool:
             except (ValueError, TypeError):
                 return False
             if not isinstance(call, dict) or call.get("name") not in {
-                "grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse", "ocr_read"
+                "grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse", "ocr_read",
+                "image_resize", "image_enhance", "image_rotate", "image_flip", "image_draw", "sam_segment", "bbox_geometry",
             } or not isinstance(call.get("arguments"), dict):
                 return False
     return True
@@ -245,6 +247,28 @@ def rule_match(prediction: str, ground_truth: str) -> bool:
     return False
 
 
+def formula_match(prediction: str, ground_truth: str) -> bool:
+    def tokens(text):
+        text = text.strip()
+        for opening, closing in (("$$", "$$"), ("$", "$"), (r"\(", r"\)"), (r"\[", r"\]")):
+            if text.startswith(opening) and text.endswith(closing):
+                text = text[len(opening):-len(closing)].strip()
+                break
+        return re.findall(r"\\[A-Za-z]+|\\.|[^\s]", text)
+
+    return tokens(prediction) == tokens(ground_truth)
+
+
+def chart_match(prediction: str, ground_truth: str) -> bool:
+    prediction, ground_truth = prediction.strip(), ground_truth.strip()
+    try:
+        pred = float(prediction.rstrip("%")) / (100 if prediction.endswith("%") else 1)
+        gold = float(ground_truth.rstrip("%")) / (100 if ground_truth.endswith("%") else 1)
+    except ValueError:
+        return prediction.lower() == ground_truth.lower()
+    return isfinite(pred) and isfinite(gold) and pred == gold
+
+
 def multiple_choice_match(prediction: str, ground_truth: str) -> bool:
     """Match a closed A-D answer, optionally followed by its option text."""
     gold = normalize_answer(ground_truth).upper()
@@ -349,6 +373,8 @@ def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> boo
 def judge_match(question: str, prediction: str, ground_truth: str) -> bool | None:
     _record_judge_stat("judge_samples")
     prompt = f"""Judge whether the candidate answer is semantically equivalent to the reference answer for the question.
+Numeric answers and category labels, including years and choice labels, must match exactly after accounting for equivalent notation and units. Do not apply a relative or absolute error tolerance.
+For transcription questions, preserve text and mathematical symbols; mathematical equivalence alone is insufficient.
 Return exactly TRUE or FALSE and nothing else.
 
 Question:
@@ -401,13 +427,13 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
             result["query_penalty"] = query_penalty
         return result
 
-    if _is_zwz_relation_task(extra_info):
+    is_relation_task = _is_zwz_relation_task(extra_info)
+    if is_relation_task:
         # Closed relation labels must not receive a semantic-judge fallback:
         # ambiguous answers such as "on" can otherwise match several labels.
         correct = relation_match(answer, ground_truth)
     elif _is_vision_opd_task(extra_info) or (extra_info or {}).get("data_source") == "visual-agent-hrbench4k":
-        # These are closed A-D tasks. Accept the option label with its displayed
-        # text, as the benchmark evaluator does, without using a semantic judge.
+        # Accept the option label with its displayed text before semantic verification.
         correct = multiple_choice_match(answer, ground_truth)
     elif (extra_info or {}).get("data_source") == "visual-agent-depth-raw":
         correct = (
@@ -415,17 +441,28 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
             if (extra_info or {}).get("original_source") == "ca_vqa_multichoice"
             else normalize_answer(answer) == normalize_answer(ground_truth)
         )
-    elif (extra_info or {}).get("data_source") == "visual-agent-tallyqa":
+    elif (extra_info or {}).get("data_source") in {"visual-agent-tallyqa", "visual-agent-fsc147"}:
         correct = answer.strip() == ground_truth.strip()
+    elif (extra_info or {}).get("data_source") == "visual-agent-ocr":
+        correct = any(
+            formula_match(answer, alias)
+            if extra_info.get("original_source") == "hme100k"
+            else normalize_answer(answer) == normalize_answer(alias)
+            for alias in [ground_truth, *extra_info.get("answer_aliases", [])]
+        )
+    elif (extra_info or {}).get("data_source") == "visual-agent-chartqa":
+        correct = any(
+            chart_match(answer, alias)
+            for alias in [ground_truth, *extra_info.get("answer_aliases", [])]
+        )
     else:
-        question = str((extra_info or {}).get("question", ""))
         correct = rule_match(answer, ground_truth)
-        if not correct:
-            correct = judge_match(question, answer, ground_truth)
-            if correct is None:
-                # Keep unresolved samples in GRPO, using the ordinary incorrect-
-                # answer reward (including format reward and query penalties).
-                correct = False
+    if not is_relation_task and not correct:
+        question = str((extra_info or {}).get("question", ""))
+        correct = judge_match(question, answer, ground_truth)
+        if correct is None:
+            # Keep unresolved samples in GRPO with the ordinary incorrect-answer reward.
+            correct = False
     accuracy_reward = 1.0 if correct else 0.0
     tool_used = 1.0 if "<tool_call>" in solution_str else 0.0
     result = {

@@ -17,8 +17,8 @@ if [[ -z "${MIXED_RL_ENV_DIR:-}" && ! -x "$RL_ENV_DIR/bin/python" ]]; then
     fi
   done
 fi
-export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-https://api-cn.hi-code.cc/v1}"
-export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4.1-flash}"
+export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-http://43.155.134.160:8080/v1}"
+export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4-flash}"
 export LLM_AS_A_JUDGE_BACKUP_BASE="${LLM_AS_A_JUDGE_BACKUP_BASE:-https://api.deepseek.com/v1}"
 export LLM_AS_A_JUDGE_BACKUP_MODEL="${LLM_AS_A_JUDGE_BACKUP_MODEL:-deepseek-v4-flash}"
 BACKUP_JUDGE_KEY_FILE="${BACKUP_JUDGE_KEY_FILE:-$BASE/secrets/deepseek_api_key.txt}"
@@ -29,7 +29,7 @@ if [[ -z "${LLM_AS_A_JUDGE_BACKUP_KEY:-}" && "${MIXED_CONFIG_ONLY:-0}" != "1" ]]
   [[ -n "$LLM_AS_A_JUDGE_BACKUP_KEY" ]] || { echo "error: backup judge key file is empty" >&2; exit 2; }
   export LLM_AS_A_JUDGE_BACKUP_KEY
 fi
-JUDGE_KEY_FILE="${JUDGE_KEY_FILE:-$BASE/secrets/hicode_judge_api_key.txt}"
+JUDGE_KEY_FILE="${JUDGE_KEY_FILE:-$BASE/secrets/judge_api_43_155_134_160_key.txt}"
 if [[ -z "${LLM_AS_A_JUDGE_KEY:-}" && "${MIXED_CONFIG_ONLY:-0}" != "1" ]]; then
   [[ -r "$JUDGE_KEY_FILE" ]] || { echo "error: judge key file is not readable: $JUDGE_KEY_FILE" >&2; exit 2; }
   IFS= read -r LLM_AS_A_JUDGE_KEY < "$JUDGE_KEY_FILE" || true
