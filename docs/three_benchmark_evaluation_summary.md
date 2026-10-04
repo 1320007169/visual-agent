@@ -285,7 +285,74 @@ tool_first 相比 auto 的三榜提升约为 0.52 / 1.12 / 0.38 个百分点（�
 direct 与两组 agent 的提示词及回合预算不同；这些结果也不能与历史 KL-step130 旧口径
 直接作为严格控制变量的比较。
 
+## 64 卡训练 step80：OCR observation 反斜杠消融（2026-10-04）
+
+本实验在本地两张 A800 80GB 上评测同一份 64 卡训练 step80 权重，验证 OCR observation
+中的反斜杠转义是否影响公式识别。结果于 2026-10-05 记录，两组均完整评测 OCRBench
+1000 题，其中手写公式 100 题（原始 index 900–999），其余分项共 900 题。
+
+### 配置与唯一改动
+
+- 权重（相对于仓库根目录）：
+  `saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_ocr_chart1600_n16_8node_20261001T072342925318_021ea85c/global_step_80/actor/huggingface`。
+- 基线 `json_observation`：`VISUAL_AGENT_OCR_RAW_BACKSLASH=0`，保留原有 JSON 序列化。
+- 实验组 `raw_ocr_backslash`：`VISUAL_AGENT_OCR_RAW_BACKSLASH=1`，仍使用 `json.dumps`，
+  只在 `ocr_read` 返回的 `text` 字段中把双反斜杠 `\\` 还原为单反斜杠 `\`；
+  引号转义 `\"`、换行转义 `\n`、其他字段及外层格式保持原有呈现。改动位于
+  `scripts/visual_agent_inference.py`，不改变工具服务和训练侧。
+- 两组均使用 PaddleOCR-VL-1.6、native tools / Hermes parser、temperature 0、
+  最多 8 个 assistant 回合、每回合最多 512 tokens、上下文上限 32768。
+- GPU 0 跑模型，GPU 1 跑工具；评测并发 1，模型显存比例 0.80。
+  两组顺序执行，不复用历史预测，不限时（`EVAL_TIMEOUT_SECONDS=0`）。
+- 本地入口：[两卡 A/B 脚本](../scripts/run_visual_agent_eval_ocr_ab_2gpu.sh)；
+  汇总入口：[逐题对比脚本](../scripts/summarize_ocr_hme_ab.py)。
+
+### 结果与逐题变化
+
+| 指标 | 基线 | 仅还原反斜杠 | 变化 |
+|---|---:|---:|---:|
+| OCRBench 正确数 | 856/1000 | 860/1000 | +4 题 |
+| OCRBench 归一化分数 | 85.6 | 86.0 | +0.4 分 |
+| 手写公式正确数 | 47/100 | 51/100 | +4 题 |
+| 其他 900 题正确数 | 809/900 | 809/900 | 0 |
+| 最终 API failed | 0 | 0 | 0 |
+| 失败轨迹文件数 | 0 | 0 | 0 |
+| 退出码 | 0 | 0 | — |
+| 单组启动至退出耗时 | 3255 秒（54 分 15 秒） | 2905 秒（48 分 25 秒） | — |
+
+两组总耗时 6160 秒（1 小时 42 分 40 秒，包含服务启动及退出清理）。
+按 OCRBench 原始 index 比较，变化均发生在手写公式题中：
+
+- 错→对：`926`、`951`、`953`、`959`、`989`，共 5 题。
+- 对→错：`980`，共 1 题。
+- 其他 900 题没有正确性变化；这不等同于所有回答文本完全一致。
+
+本次同场基线为 47/100，不能用先前讨论的 44 分或其他历史评测分数替代，计算修复收益。
+实验组取得小幅净收益，但没有达到预期的 60 分以上，因此不能据此认定反斜杠转义是
+公式低分的主要根因。这里记录的是单次 A/B 观测，尚未通过重复运行量化波动。
+下一步可检查实验组仍答错的 49 道公式题，区分 OCR 输出错误与模型读取 OCR 后的回答错误；
+该错误归因尚未完成。
+
+### 结果文件
+
+本次运行 ID：`ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241`。
+以下链接相对于本文件：
+
+- [分数与分项对比 comparison.json](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/comparison.json)
+- [1000 题配对记录 paired_examples.jsonl](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/paired_examples.jsonl)
+- [退出状态及耗时 status.tsv](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/status.tsv)
+- [基线组产物](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/json_observation/)
+- [实验组产物](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/raw_ocr_backslash/)
+
+两组最终预测 JSON 的具体路径见 `comparison.json` 中的 `prediction_file`，
+其中保留成功样本的完整文本轨迹及工具结果，消息中的图片数据以占位符代替。
+后台主日志位于仓库上级目录的
+`logs/visual-agent-eval/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241-driver.log`。
+
 ## 当前结论
+
+- 64 卡训练 step80 的 OCR 反斜杠消融已完成：OCRBench 856→860，手写公式 47→51，
+  其他 900 题正确性无变化，两组 API failed 均为 0；尚不能确认反斜杠转义是主要根因。
 
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
 - RFT-SFT 纯工具版为 85.34 / 79.13 / 75.00，1:1 Mixed 版为
