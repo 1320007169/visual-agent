@@ -492,6 +492,25 @@ Base 的预测没有触发原规则，增加该条件也不会改变其 873 / 80
 这次只核验附加条件，没有将启发式规则默认接入通用推理入口，也未修改训练。
 轨迹与统计见 [whole_answer_escape_audit.json](../outputs/vlmeval/ocrbench_answer_backslash_20261005/whole_answer_escape_audit.json)。
 
+#### 新评测入口自动恢复最终答案转义（2026-10-06）
+
+64 卡 step53 + 16 卡 step210 的新入口已启用
+`VISUAL_AGENT_NORMALIZE_ANSWER_BACKSLASH=1`。适配器提取最终答案后先恢复命令反斜杠，
+再将答案交给官方评分代码；无需另跑离线后处理，也不调用 API judge。
+该开关默认关闭，由本次双权重入口开启，对 Agent 和直答模式使用同一个处理函数。
+完整 `raw_response` 和消息轨迹保留模型原始输出，仅评分使用的最终答案被处理。
+
+接入规则比早期离线规则更保守：答案中所有“反斜杠 + 英文字母”片段必须恰好有两个
+反斜杠，且命令名属于代码中明确列出的常见 LaTeX 命令。单反斜杠公式、混合转义、
+未知命令、三个以上反斜杠命令以及包含 `begin` / `end` 的多行环境保持原样。
+`x=1\\y=2` 中的 `y` 不在命令集合内，整条答案也保持原样。这仍是保守启发式，
+不等于可对任意文本无损执行一次通用 JSON 解码；未修改训练侧 observation 或奖励。
+
+已通过单反斜杠保留、混合转义、换行、多行环境、重复处理不变、开关与原始轨迹保留测试。
+对原五组共 5000 条预测重放后，每题对错均与之前后处理结果一致，总分仍为
+874 / 872 / 872 / 875 / 874。核验记录见
+[integrated_postprocessing_verification.json](../outputs/vlmeval/ocrbench_answer_backslash_20261005/integrated_postprocessing_verification.json)。
+
 ### 后处理后的公式失分与 API judge 的用途（2026-10-05）
 
 为分析剩余问题，使用保留完整工具轨迹的 step80 两卡 A/B。下面的 66 / 65 来自

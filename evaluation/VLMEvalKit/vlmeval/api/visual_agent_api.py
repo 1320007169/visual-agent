@@ -33,6 +33,22 @@ ANSWER_RE = re.compile(r"<answer>\s*(.*?)\s*</answer>", re.DOTALL | re.IGNORECAS
 DIRECT_SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer the user's question directly and concisely."
 )
+LATEX_BACKSLASH_COMMANDS = frozenset(
+    "frac dfrac tfrac sqrt times div cdot neq ne geq leq ge le approx equiv cong sim "
+    "infty pm mp alpha beta gamma delta theta lambda mu pi rho sigma phi omega "
+    "Delta Omega angle circ cos sin tan triangle bot perp left right text mathrm mathbf".split()
+)
+
+
+def _normalize_answer_backslashes(answer: str) -> str:
+    commands = list(re.finditer(r"(?<!\\)(\\+)([A-Za-z]+)", answer))
+    # Preserve mixed escaping, custom commands, and multiline environments.
+    if not commands or any(
+        len(match.group(1)) != 2 or match.group(2) not in LATEX_BACKSLASH_COMMANDS
+        for match in commands
+    ):
+        return answer
+    return re.sub(r"(?<!\\)\\\\(?=[A-Za-z])", lambda match: "\\", answer)
 
 
 def _resolve_agent_system_prompt(
@@ -166,7 +182,10 @@ class VisualAgentAPI(BaseAPI):
     def generate_inner(self, inputs: list[dict[str, Any]], **kwargs: Any):
         state: dict[str, Any] = {}
         try:
-            return self._generate_inner(inputs, state, **kwargs)
+            code, response, trace = self._generate_inner(inputs, state, **kwargs)
+            if os.getenv("VISUAL_AGENT_NORMALIZE_ANSWER_BACKSLASH", "0") == "1":
+                response["response"] = _normalize_answer_backslashes(response["response"])
+            return code, response, trace
         except Exception as exc:
             failure_dir = os.getenv("VISUAL_AGENT_FAILURE_TRACE_DIR", "").strip()
             if failure_dir:

@@ -45,12 +45,14 @@ PY
 # Keep both runs on the existing full ten-benchmark evaluation protocol.
 unset VLOCR_REUSE_GROUP_ROOT VLOCR_RETRY_FAILED_ONLY VLMEVAL_EVAL_ID
 export VISUAL_AGENT_OCR_RAW_BACKSLASH=0 VLOCR_NATIVE_TOOLS=1
+export VISUAL_AGENT_NORMALIZE_ANSWER_BACKSLASH=1
 export GPU_MEMORY_UTILIZATION=0.80 VLMEVAL_API_NPROC=7
 export MODEL_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 TOOL_CUDA_VISIBLE_DEVICES=7
 export EVAL_DATASETS="VStarBench HRBench8K OCRBench MME-RealWorld-Lite HRBench4K MME-RealWorld-CN CV-Bench-2D CV-Bench-3D ChartQA_TEST FSC147_TEST"
 group_id="${RUN_ID:-vlocr_64gpu_step53_16gpu_step210_$(date +%Y%m%dT%H%M%S%N)_$$}"
 group_root="${WORK_ROOT:-$REPO_ROOT/outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/$group_id}"
 printf 'Results: %s\nDatasets: %s\n' "$group_root" "$EVAL_DATASETS"
+printf 'Final-answer backslash normalization: enabled; original responses remain in traces\n'
 if [[ "${CHECKPOINT_EVAL_CONFIG_ONLY:-0}" == 1 ]]; then
     exit 0
 fi
