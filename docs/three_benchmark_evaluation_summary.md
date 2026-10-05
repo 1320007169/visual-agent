@@ -502,6 +502,55 @@ HME100K 样本，不能将其中混合 OCR 验证正确率视为 HME 正确率�
 逐题 index 与训练统计见
 [backslash_diagnosis.json](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/backslash_diagnosis.json)。
 
+### 对规则错题进行 LLM 复判：两版提示词（2026-10-05）
+
+保留每组规则判对的答案，仅对基线 53 条、反斜杠实验组 49 条 HME 错题调用 API。
+两组答案与全部参考变体相同的请求共用一次判定，每版去重后为 64 个候选答案。
+多个参考变体作为 `Alternative 1/2/...` 列在参考答案字段；预测文本保持原样。
+最终分数为“规则正确数 + LLM 从规则错题中接受的数量”。其余 900 题未做 LLM 复判。
+
+两版使用同一个 `deepseek-v4-flash` API、temperature 0、最多 1024 输出 tokens、
+关闭 thinking 参数。模板来自本地 DeepEyesV2 的
+`evaluation/VLMEvalKit/vlmeval/dataset/utils/judge_prompt/verify.md`，并通过其
+`judge_utils.py::build_prompt_judge` 构造用户消息：
+
+- **DeepEyesV2 原始模板版**：不附加 system message，沿用模板原文。模板允许忽略
+  客观题答案的排版、LaTeX 表达和大小写等差异。
+- **转录约束版**：用户消息与原始版完全一致，另外添加 system message，允许空白、
+  排版、数学定界符及命令前多余反斜杠等差异，但要求忠实转录，拒绝增删符号、改数字、
+  改变量或只在数学意义上等价的改写。
+
+DeepEyesV2 本地 ChartQA 路径确有规则判错后的 LLM 回退；其 OCRBench 类仍使用规则。
+这里复用的是评测模板，API 模型使用本项目现有配置，不是复现 DeepEyesV2 README 中的
+Qwen judge 部署。最终判定读取完整的 `\boxed{Yes/No}`；模板解析辅助函数对不规范结束
+标签的一次误解析已依据保存的完整 boxed 结论修复。原始响应保留可查。
+
+| HME 指标 | 原 observation | 只还原 observation 反斜杠 |
+|---|---:|---:|
+| 原始规则正确数 | 47/100 | 51/100 |
+| DeepEyesV2 原始模板额外接受 | 30 | 28 |
+| 规则 + 原始模板复判 | **77/100** | **79/100** |
+| 转录约束版额外接受 | 26 | 23 |
+| 规则 + 转录约束复判 | **73/100** | **74/100** |
+
+每版最终 64 个候选答案均有有效判定，无未决项；转录约束版出现的 4 次超时已补判完成。
+横向比较衡量 observation 改动，纵向比较衡量 judge 提示词差异，不能混为一组对照。
+原始模板版比转录约束版多接受基线 4 题、实验组 5 题；反向分歧为 0：
+
+- 两组均有分歧：`904, 936, 940, 952`。
+- 仅反斜杠实验组有分歧：`937`。
+- 差异包括将参考变量 `u` 写成 `U`、`P` 写成 `p`，以及补写乘号等；原始模板版更宽松。
+
+前面单靠反斜杠归一化能恢复的 19 / 14 题，两版 LLM 均接受。额外恢复说明还存在
+其他表达差异；这些是 judge 判定，尚未逐题看图确认为忠实识别，不能直接改写原始
+OCRBench 分数。本次 observation 改动在两种复判口径下的净收益分别为 2 / 1 题。
+
+两版完整提示词、请求、原始 API 响应和逐题判定均已保存：
+
+- [两版对比及分歧 index](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/api_judge_comparison.json)
+- [DeepEyesV2 原始模板版](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/api_judge_deepeyes_original_20261005T122128/)
+- [转录约束版](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/api_judge_transcription_20261005T121007/)
+
 ### 结果文件
 
 本次运行 ID：`ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241`。
