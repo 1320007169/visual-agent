@@ -31,6 +31,9 @@ export RL_CHART_PARSE=1
 export VTS_VL_OCR=1
 export TOOL_CONFIG_PATH="$REPO_ROOT/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml"
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE="$REPO_ROOT/prompts/visual_agent_rl_system_multitool_vlocr.txt"
+export LLM_AS_A_JUDGE_BASE="${LLM_AS_A_JUDGE_BASE:-https://api-cn.hi-code.cc/v1}"
+export LLM_AS_A_JUDGE_MODEL="${LLM_AS_A_JUDGE_MODEL:-deepseek-v4.1-flash}"
+export JUDGE_KEY_FILE="${JUDGE_KEY_FILE:-$BASE/secrets/hicode_judge_api_key.txt}"
 
 if [[ "${MULTITOOL_CONFIG_ONLY:-0}" != "1" ]]; then
     [[ -s "$MULTITOOL_DATA_DIR/manifest.json" ]] || {

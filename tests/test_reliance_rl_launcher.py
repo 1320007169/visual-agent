@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 
@@ -9,6 +10,21 @@ LAUNCHER = ROOT / "scripts/run_visual_agent_multitool_vlocr_reliance_2node_16gpu
 
 
 class RelianceLauncherTest(unittest.TestCase):
+    def test_judge_defaults_match_the_existing_modelarts_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            common = root / "scripts/run_visual_agent_multitool_depth_count_modelarts_2node_16gpu.sh"
+            common.write_text(
+                'printf "%s\\n" "$LLM_AS_A_JUDGE_BASE" "$LLM_AS_A_JUDGE_MODEL" "$JUDGE_KEY_FILE"\n'
+            )
+            env = {"PATH": os.environ["PATH"], "BASE": "/shared", "REPO_ROOT": directory,
+                   "MULTITOOL_CONFIG_ONLY": "1"}
+            result = subprocess.run(["bash", str(LAUNCHER)], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.splitlines(), [
+                "https://api-cn.hi-code.cc/v1", "deepseek-v4.1-flash", "/shared/secrets/hicode_judge_api_key.txt",
+            ])
+
     def test_fresh_counterfactual_run_ignores_inherited_resume_and_data_files(self):
         env = {
             "PATH": os.environ["PATH"], "BASE": str(ROOT.parent), "REPO_ROOT": str(ROOT),
