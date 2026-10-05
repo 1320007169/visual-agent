@@ -407,6 +407,38 @@ python3 scripts/rejudge_ocrbench.py \
 - [完整协议 protocol.json](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/protocol.json)
 - [预测来源 manifest.json](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/manifest.json)
 
+### 最终答案反斜杠后处理 + 官方 OCRBench 评分（2026-10-05）
+
+对三份历史权重结果和两组 observation 消融的已保存最终答案进行离线后处理，
+再直接调用仓库中的 `OCRBench.evaluate`。没有重新推理，也没有使用 LLM judge。
+处理规则固定应用于每条预测，不参考标准答案或原始对错：仅把恰好连续两个
+反斜杠且后接英文字母的情况折叠成一个，例如 `\\frac` → `\frac`。
+正则为 `r'(?<!\\)\\\\(?=[A-Za-z])'`，三个及以上连续反斜杠不匹配。
+
+| 预测来源 | 总分：原始→后处理 / 1000 | HME：原始→后处理 / 100 | 修改答案数 | 错→对 | 对→错 |
+|---|---:|---:|---:|---:|---:|
+| 历史 64 卡 step80 | 854→**874** | 45→65 | 24 | 20 | 0 |
+| 历史 16 卡 step110 | 850→**872** | 44→66 | 28 | 22 | 0 |
+| 历史 16 卡 step150 | 850→**872** | 43→65 | 26 | 22 | 0 |
+| 两卡消融：原 observation，64 卡 step80 权重 | 856→**875** | 47→66 | 23 | 19 | 0 |
+| 两卡消融：只还原 observation 反斜杠，同一权重 | 860→**874** | 51→65 | 17 | 14 | 0 |
+
+五组中其他 900 题的预测文本及对错均未变化。收益来自最终答案的格式修正；
+两组消融在后处理后的 HME 分数为 66 和 65，不能据此认为修改 observation
+提升了公式识别能力。该处理仍可能影响合法的 LaTeX 换行后紧接字母的文本，
+本批没有观察到规则正确样本变错，不代表对所有未来样本都无损。
+
+本结果应标注为“最终答案经反斜杠后处理，使用官方 OCRBench 评分”，与原始分数、
+LLM 复判分数分别记录。本次仅保存独立预测副本及评分，未将后处理默认接入
+`visual_agent_api.py`。原始预测文件通过 SHA-256 核对未变，原始评分未覆盖。
+已核对 5000 条逐题结果与官方总分、HME 分数一致，并检查单反斜杠、数字、
+方括号、三/四个连续反斜杠和真实换行等边界情形。
+
+- [分项汇总 summary.json](../outputs/vlmeval/ocrbench_answer_backslash_20261005/summary.json)
+- [逐题原始/后处理答案及对错 paired_examples.jsonl](../outputs/vlmeval/ocrbench_answer_backslash_20261005/paired_examples.jsonl)
+- [离线评分脚本 rescore.py](../outputs/vlmeval/ocrbench_answer_backslash_20261005/rescore.py)
+- [固定处理协议 protocol.json](../outputs/vlmeval/ocrbench_answer_backslash_20261005/protocol.json)
+
 ## 64 卡训练 step80：OCR observation 反斜杠消融（2026-10-04）
 
 本实验在本地两张 A800 80GB 上评测同一份 64 卡训练 step80 权重，验证 OCR observation
