@@ -410,10 +410,97 @@ FSC147 无效输出从 1 条增加到 88 条，原因尚未逐例归因。因此
 - 其他 900 题没有正确性变化；这不等同于所有回答文本完全一致。
 
 本次同场基线为 47/100，不能用先前讨论的 44 分或其他历史评测分数替代，计算修复收益。
-实验组取得小幅净收益，但没有达到预期的 60 分以上，因此不能据此认定反斜杠转义是
-公式低分的主要根因。这里记录的是单次 A/B 观测，尚未通过重复运行量化波动。
-下一步可检查实验组仍答错的 49 道公式题，区分 OCR 输出错误与模型读取 OCR 后的回答错误；
-该错误归因尚未完成。
+实验组取得小幅净收益，但没有达到预期的 60 分以上。这只能说明当前 observation 的改动
+不足以解决失分，不能推导出“最终答案的双反斜杠不是重要失分原因”。下面的进一步核验
+修正了此前过早的归因。这里记录的是单次 A/B 观测，尚未通过重复运行量化波动。
+
+### 最终答案反斜杠诊断与训练奖励核验（2026-10-05）
+
+对 `paired_examples.jsonl` 中解码后的 `prediction` 字符串计数，区别真实的双反斜杠和
+JSON 文件用于存储单反斜杠的转义形式。仅将最终答案中的双反斜杠替换成单反斜杠，再按
+原 OCRBench HME 规则处理空白并匹配答案，得到以下诊断结果；不覆盖官方评分。
+
+| HME 100 题 | 原 observation | 仅还原 observation 反斜杠 |
+|---|---:|---:|
+| 原始正确数 | 47 | 51 |
+| 最终答案含真实双反斜杠 | 23 | 17 |
+| 仅归一化最终答案即可恢复的错题 | 19 | 14 |
+| 最终答案归一化后正确数（诊断值） | 66 | 65 |
+| 归一化导致对→错 | 0 | 0 |
+
+实验组可恢复的 14 题 index 为 `906, 909, 928, 933, 935, 943, 947, 957, 958, 965,
+969, 976, 982, 994`。例如第 906 题，OCR 原文和实验组 observation 中的 `\frac` 都是
+单反斜杠，但模型最终答案仍输出 `\\frac`；这不是查看 JSON 时的显示转义。
+两组 HME 的 OCR 工具原始 `text` 均未发现真实双反斜杠。
+
+因此，修改 observation 后，最终答案的重复反斜杠仍是可直接确认的重要失分来源：
+实验组 49 道错题中有 14 道只需这一项格式归一化即可恢复。该现象支持“模型输出格式
+倾向并不完全由当前 observation 决定”，但尚不能仅凭此实验确定该倾向由哪一阶段训练形成。
+剩余 35 道错误不能全部归因于 OCR，仍需区分识别、表达格式和模型改写等原因。
+其他 900 题正确性未变，只能说明本次样本未观察到正确性副作用，不能证明普遍无副作用。
+
+历史产物也已复核：“44→66”来自 **16 卡 step110** 的预测；同批 **64 卡 step80**
+是“45→65”。它们与本次两卡重跑的“47→66 / 51→65”趋势一致，但不能混作同一次评测。
+
+复核时需对参考答案和预测都执行 `strip()`、真实换行替换及去空格；参考答案含末尾换行，
+仅 `replace(' ', '')` 会错误地把可恢复题数算成 0。可在结果目录执行以下 CPU 命令：
+
+```bash
+python3 - <<'PY'
+import json
+
+with open('paired_examples.jsonl') as stream:
+    rows = [json.loads(line) for line in stream]
+hme = [row for row in rows if row['json_observation']['category'] ==
+       'Handwritten Mathematical Expression Recognition']
+backslash = chr(92)
+
+def normalize(text):
+    return text.strip().replace('\n', ' ').replace(' ', '')
+
+for arm in ('json_observation', 'raw_ocr_backslash'):
+    predictions = [row[arm] for row in hme]
+    doubled = sum(backslash * 2 in row['prediction'] for row in predictions)
+    recovered = sum(
+        not row['correct'] and any(
+            normalize(answer) in normalize(row['prediction'].replace(backslash * 2, backslash))
+            for answer in row['answers']
+        )
+        for row in predictions
+    )
+    print(arm, 'double_backslash:', doubled, 'recoverable_errors:', recovered)
+PY
+```
+
+训练侧 `reinforcement_learning/verl/tools/visual_tool.py` 仍使用 `json.dumps` 生成 OCR
+observation；评测侧的开关不会改变训练侧。HME 的 `formula_match` 确实保留 LaTeX 命令
+边界，单反斜杠参考答案不会与双反斜杠预测匹配。但 `compute_score` 在规则判错后仍会
+进入 LLM judge，因此不能说当前完整奖励链路已严格拒绝双反斜杠。
+
+核验新数据训练
+`qwen3base_multitool_vlocr_hme_chartqa_tallyhalf_fsc3000_n16_8node_20261003T202135115738_f9c41af7`
+保存的 HME100K 轨迹（按 `source_image` 的 `hme100k` 来源筛选）：
+
+| 训练 step | HME 轨迹数 | 已记录 acc=1 | 公式规则匹配数 | 双反斜杠答案数 | 双反斜杠且规则判错但 acc=1 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 304 | 133 | 95 | 46 | 38 |
+| 10 | 256 | 99 | 57 | 109 | 26 |
+| 20 | 208 | 125 | 109 | 33 | 13 |
+| 30 | 416 | 287 | 270 | 26 | 0 |
+| 40 | 304 | 216 | 154 | 0 | 0 |
+| 42 | 416 | 240 | 203 | 0 | 0 |
+
+这里的轨迹数包含每题 16 次 rollout，不是独立题目数；不同 step 的题目不同，不能把
+正确率差异直接解释为能力趋势。step40 / step42 没有双反斜杠答案，是输出改善的迹象，
+仍需固定 HME 验证集确认。现有 `validation/0.jsonl` 和 `validation/40.jsonl` 没有
+HME100K 样本，不能将其中混合 OCR 验证正确率视为 HME 正确率。
+
+后续训练修复应同时评估 OCR observation 的呈现和 HME 规则判错后的 judge 回退，
+不能只修改公式匹配函数，也不应禁止 LaTeX 中合法的 `\\` 换行。这次仅诊断和记录，
+未改动正在运行的训练配置或奖励代码。
+
+逐题 index 与训练统计见
+[backslash_diagnosis.json](../outputs/vlmeval/ocrbench_backslash_ab_64gpu_step80/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241/backslash_diagnosis.json)。
 
 ### 结果文件
 
@@ -436,7 +523,9 @@ FSC147 无效输出从 1 条增加到 88 条，原因尚未逐例归因。因此
 - VL-OCR 的 64 卡 step80、16 卡 step110 / step150 十榜成绩已补齐，API failed 分别为
   55 / 19 / 19；step150 相比 step110 有升有降，且 FSC147 无效输出增至 88/1190。
 - 64 卡训练 step80 的 OCR 反斜杠消融已完成：OCRBench 856→860，手写公式 47→51，
-  其他 900 题正确性无变化，两组 API failed 均为 0；尚不能确认反斜杠转义是主要根因。
+  其他 900 题正确性无变化，两组 API failed 均为 0。进一步归一化最终答案可得 66 / 65；
+  最终答案重复反斜杠仍是重要失分来源，单改 observation 不足以消除。训练 HME 规则
+  判错后仍有 judge 回退，不能仅凭规则代码认定格式错误不会获奖。
 
 - KL step 130 的失败样本已经补测完成，当前记录为 91.10 / 83.00 / 79.88。
 - RFT-SFT 纯工具版为 85.34 / 79.13 / 75.00，1:1 Mixed 版为
