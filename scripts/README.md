@@ -52,10 +52,28 @@ OCR 服务使用 `PIPELINE_ROOT/.env` 中的 `VTS_OCR_ENV`，模型目录由 `PA
 | 64 卡、16 卡 VL-OCR 最新 checkpoint 对照 | [run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh](run_visual_agent_eval_multitool_vlocr_64gpu_16gpu_latest_8gpu_modelarts.sh) | 单节点 8 卡，依次评测两个运行的最新完整 checkpoint；使用训练时的五工具和 PaddleOCR-VL-1.6 |
 | 工具行为诊断 | [run_visual_agent_eval_tool_diagnostic_modelarts.sh](run_visual_agent_eval_tool_diagnostic_modelarts.sh) | direct、auto、tool-first 等诊断模式 |
 | 两卡评测入口 | [run_visual_agent_eval_qwen3_local_2gpu.sh](run_visual_agent_eval_qwen3_local_2gpu.sh) | 通用评测的两卡配置 |
+| 已有 OCRBench 预测的 LLM 复判 | [rejudge_ocrbench.py](rejudge_ocrbench.py) | 保留规则正确项；全部非空规则错题使用 DeepEyesV2 原始评测模板调用 API，单独保存合并分数 |
 
 历史文件名 `four_tool` 对应当前五工具评测。该评测使用 `ocr_read` 和 `ground_depth`；新 RL 使用拆分后的 `text_detect`/`text_recognize` 和批量 `depth_measure`，两套工具协议不同。
 
 五工具评测的默认卡位：GPU 0 为 GroundingDINO，GPU 1 为 PP-OCRv5 与 depth，GPU 2 为 count，GPU 3-7 为五个模型推理副本。实验记录见 [五工具 prompt 评测](../docs/qwen3_vl_8b_four_tool_prompt_experiment.md)，成绩见 [评测汇总](../docs/three_benchmark_evaluation_summary.md)。
+
+### OCRBench 结果复判
+
+OCRBench 复判在已有 `qwenvl3_xmx_vLLM` 环境运行，不需要 GPU。`--manifest` 接受 JSON
+对象，将运行名称映射到完整 OCRBench 预测的 XLSX 或 JSON 路径；预测旁需保留官方
+`_score.json`，脚本会先核对规则分数。相同输出目录重跑只处理未决请求，成功判定可复用。
+
+```bash
+python3 scripts/rejudge_ocrbench.py --manifest /path/to/manifest.json --output-dir /path/to/rejudge_results
+```
+
+默认使用现有 `deepseek-v4-flash` API、DeepEyesV2 的 `verify.md` 原文，不追加 system
+约束。接口、模型、密钥文件可分别用 `--api-base`、`--model`、`--key-file` 指定。
+`summary.json` 包含各运行及分项的规则正确数、额外接受数、合并正确数和未决 index；
+`predictions.jsonl`、`requests.jsonl`、`protocol.json` 保留逐题结果、API 响应及完整协议。
+空预测、推理 API failed 不送 judge；judge API 失败保持未决，脚本以非零状态退出。
+复判结果不覆盖原预测和官方分数。
 
 ## SFT 入口
 

@@ -367,6 +367,46 @@ FSC147 无效输出从 1 条增加到 88 条，原因尚未逐例归因。因此
   最终预测与评分位于 `dino_latest/VisualAgent-vllm/T20261004_G/`；
   最后一项 FSC147 评分文件修改时间为 2026-10-04 23:29（北京时间）。
 
+### 三份十榜运行的 OCRBench 全量规则错题 LLM 复判（2026-10-05）
+
+已针对上面三份运行各自保存的 1000 条 OCRBench 预测执行复判，覆盖全部 OCRBench
+分项的规则错题，不仅是 HME。使用 DeepEyesV2 原始 `verify.md` 评测模板，不附加
+system 约束；API 为 `deepseek-v4-flash`，temperature 0，最多 1024 输出 tokens，
+关闭 thinking 参数。多个参考变体全部列在参考答案字段，预测内容保持原样。
+
+| 权重 | 规则正确数 / 1000 | judge 额外接受 | 合并正确数 / 1000 | HME：规则→合并 / 100 |
+|---|---:|---:|---:|---:|
+| 64 卡 step80 | 854 | 61 | **915（91.5）** | 45→78 |
+| 16 卡 step110 | 850 | 59 | **909（90.9）** | 44→80 |
+| 16 卡 step150 | 850 | 61 | **911（91.1）** | 43→78 |
+
+合计 446 条规则错题，其中 step110 有 1 条空预测，保持错误且不送 judge。
+其余 445 条候选去重为 230 次 API 请求，全部返回有效判定，无 API 失败和未决项。
+相同题目、参考答案、预测及判分协议共用一次 judge 结果；规则已判对的样本保留。
+已逐条核对 3000 条合并结果与汇总一致，并确认再次运行时 pending 为 0，不重复调用 API。
+
+分数以新增“规则 + LLM 回退”口径记录，不覆盖三份原始 `_score.json`，不改变其余九榜。
+同一 16 卡训练 step110→step150 的合并总分为 909→911，HME 为 80→78；这次没有运行
+额外转录约束版。这些数值与后面的两卡 A/B 基于不同预测文件，应分别引用。
+
+可复用脚本：[rejudge_ocrbench.py](../scripts/rejudge_ocrbench.py)。在仓库根目录、已有
+`qwenvl3_xmx_vLLM` Python 环境中运行下面命令即可复用本次配置；只需 CPU 和 API：
+
+```bash
+python3 scripts/rejudge_ocrbench.py \
+    --manifest outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/manifest.json \
+    --output-dir outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411
+```
+
+重跑会复用已有成功判定，只请求未决候选。换一批预测时，准备新的 manifest JSON
+（运行名称到预测 XLSX/JSON 路径的映射）及新的输出目录即可。
+
+- [分项汇总 summary.json](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/summary.json)
+- [3000 条逐题结果 predictions.jsonl](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/predictions.jsonl)
+- [API 请求与原始响应 requests.jsonl](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/requests.jsonl)
+- [完整协议 protocol.json](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/protocol.json)
+- [预测来源 manifest.json](../outputs/vlmeval/ocrbench_llm_rejudge/latest_checkpoints_20261005T123411/manifest.json)
+
 ## 64 卡训练 step80：OCR observation 反斜杠消融（2026-10-04）
 
 本实验在本地两张 A800 80GB 上评测同一份 64 卡训练 step80 权重，验证 OCR observation
@@ -585,6 +625,8 @@ OCRBench 分数。本次 observation 改动在两种复判口径下的净收益�
 
 - VL-OCR 的 64 卡 step80、16 卡 step110 / step150 十榜成绩已补齐，API failed 分别为
   55 / 19 / 19；step150 相比 step110 有升有降，且 FSC147 无效输出增至 88/1190。
+- 上述三份 OCRBench 的规则错题已用 DeepEyesV2 原始模板复判，合并分数分别为
+  915 / 909 / 911，原始规则分数仍为 854 / 850 / 850；复判无未决项。
 - 64 卡训练 step80 的 OCR 反斜杠消融已完成：OCRBench 856→860，手写公式 47→51，
   其他 900 题正确性无变化，两组 API failed 均为 0。进一步归一化最终答案可得 66 / 65；
   最终答案重复反斜杠仍是重要失分来源，单改 observation 不足以消除。训练 HME 规则
