@@ -778,7 +778,7 @@ class RayPPOTrainer:
         metadata = []
         for index in range(len(batch)):
             row = {"dataset_split": dataset_split}
-            for key in ("source_index", "source_image", "data_source", "question"):
+            for key in ("source_index", "source_image", "data_source", "question", "reliance_branch"):
                 values = batch.non_tensor_batch.get(key)
                 if values is None:
                     continue
@@ -1382,6 +1382,9 @@ class RayPPOTrainer:
                 if 'raw_prompt' in batch.non_tensor_batch.keys():
                     gen_batch.non_tensor_batch['raw_prompt'] = batch.non_tensor_batch.pop('raw_prompt')
                     print(' [DEBUG raw prompt] raw_prompt pop into gen_batch')
+                if "reliance_fault" in batch.non_tensor_batch:
+                    # Counterfactual prefix rows replay their fault when the same call is repeated.
+                    gen_batch.non_tensor_batch["reliance_fault"] = batch.non_tensor_batch["reliance_fault"]
 
                 print(f' [DEBUG config] config={self.config.actor_rollout_ref.rollout.agent}')
                 if self.config.actor_rollout_ref.rollout.multi_turn.enable and "origin_multi_modal_data" in batch.non_tensor_batch:

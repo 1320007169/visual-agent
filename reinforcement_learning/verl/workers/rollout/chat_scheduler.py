@@ -357,11 +357,17 @@ class ToolCompletionCallback(CompletionCallback):
         tool_response = ""
         tool_metrics: Dict[str, Any] = {}
         tool_error: Exception | None = None
+        fault = info.get("reliance_fault")
         try:
             if tool is None:
                 raise KeyError(f"Model requested unknown tool: {tool_name}")
-            instance_id = await tool.create(images=info.get("images", []))
-            tool_response, tool_reward_score, tool_metrics = await tool.execute(instance_id, tool_args)
+            if fault and fault["tool"] == tool_name and fault["arguments"] == tool_args:
+                # A counterfactual prefix's fault persists, as a deterministic tool would repeat it.
+                tool_response = fault["observation"]
+                tool_trace["replayed_fault"] = True
+            else:
+                instance_id = await tool.create(images=info.get("images", []))
+                tool_response, tool_reward_score, tool_metrics = await tool.execute(instance_id, tool_args)
         except Exception as exc:
             tool_error = exc
             logger.exception("Error when executing tool %s: %s", tool_name, exc)
@@ -836,6 +842,7 @@ class ChatCompletionScheduler:
         # validation dataset has already been repeated in `PPOTrainer._validate`.
         n = 1 if batch.meta_info.get("validate", False) else int(batch.meta_info.get("rollout_n", self.config.n))
         tools_enabled = not bool(batch.meta_info.get("disable_tools", False))
+        reliance_faults = batch.non_tensor_batch.get("reliance_fault")
         tasks, batch_conversations = [], [None] * len(batch) * n
         image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
         encoded_image_cache: Dict[int, List[str]] = {}
@@ -844,7 +851,8 @@ class ChatCompletionScheduler:
             # raw_prompt: [{"role": "user", "content": ""}, ["role": "assistant", "content"], ...]
             # Repeated rollouts share the underlying dicts. Image attachment
             # must not mutate raw_prompt or another rollout/Native stream.
-            batch_conversations[batch_index] = copy.deepcopy(conversation.tolist())
+            # Prompts with prefix messages make raw_prompt ragged, so rows may be lists.
+            batch_conversations[batch_index] = copy.deepcopy(list(conversation))
             source_index = batch_index // n
             images = []
             if "origin_multi_modal_data" in batch.non_tensor_batch:
@@ -874,6 +882,7 @@ class ChatCompletionScheduler:
                 model_images, source_index, "source_cached", encoded_model_image_cache
             )
             _attach_images_to_messages(batch_conversations[batch_index], model_images)
+            fault = reliance_faults[source_index] if reliance_faults is not None else ""
 
             tasks.append(
                 asyncio.create_task(
@@ -883,6 +892,7 @@ class ChatCompletionScheduler:
                         sampling_params=kwargs,
                         images=images,
                         tools_enabled=tools_enabled,
+                        reliance_fault=json.loads(fault) if fault else None,
                     )
                 )
             )
@@ -914,6 +924,7 @@ class ChatCompletionScheduler:
         sampling_params: Dict[str, Any],
         images: List[Any] | None = None,
         tools_enabled: bool = True,
+        reliance_fault: Dict[str, Any] | None = None,
     ):
         # Hold one slot for the full trajectory, including all recursive tool
         # turns. This bounds vLLM and visual-tool load while allowing a large
@@ -945,6 +956,7 @@ class ChatCompletionScheduler:
                 "response_budget": budget,
                 "max_tokens_per_turn": sampling_params.get("max_tokens", self.config.response_length),
                 "sampled_turns": [],
+                "reliance_fault": reliance_fault,
             }
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
