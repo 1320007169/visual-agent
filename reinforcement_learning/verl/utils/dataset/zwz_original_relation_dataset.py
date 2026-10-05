@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -42,10 +43,14 @@ class ZwzOriginalRelationDataset(RLHFDataset):
         images = example.get(self.image_key) or []
         user_content = [{"type": "image"} for _ in images]
         user_content.append({"type": "text", "text": question})
-        return [
+        messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
+        # Reliance pairs continue after a fixed tool call and its factual or faulted observation.
+        if example.get("reliance_prefix"):
+            messages.extend(json.loads(example["reliance_prefix"]))
+        return messages
 
     def __getitem__(self, item: int) -> dict[str, Any]:
         source_image_values = list(self.dataframe[item].get(self.image_key) or [])
@@ -82,7 +87,10 @@ class ZwzOriginalRelationDataset(RLHFDataset):
                 "dual-stream visual training requires a multimodal processor; "
                 "check that the RL environment supports Qwen3VLProcessor"
             )
-        native_messages = copy.deepcopy(row["raw_prompt"])
+        # The tool-free stream keeps only the question, never a reliance prefix's call or observation.
+        messages = row["raw_prompt"]
+        first_user = next(index for index, message in enumerate(messages) if message.get("role") == "user")
+        native_messages = copy.deepcopy(messages[: first_user + 1])
         if native_messages and native_messages[0].get("role") == "system":
             native_messages[0]["content"] = NATIVE_SYSTEM_PROMPT
         else:

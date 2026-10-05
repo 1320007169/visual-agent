@@ -214,6 +214,43 @@ def test_actor_and_rollout_see_identical_inputs(qwen, dataset_factory, monkeypat
         assert crop_tool.sources == [(1, (4096, 2048))] * 2
 
 
+def test_reliance_prefix_reaches_agent_prompt_but_not_native_prompt(qwen, tmp_path, monkeypatch):
+    tokenizer, processor = qwen
+    monkeypatch.setattr(zwz, "DUAL_STREAM_ENABLED", True)
+    image_path = tmp_path / "image.png"
+    Image.fromarray(np.zeros((256, 256, 3), dtype=np.uint8)).save(image_path)
+    prefix = [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "call_0", "type": "function", "function": {
+            "name": "grounding_detect", "arguments": json.dumps({"query": "sign", "target_image": 0}),
+        }}]},
+        {"role": "tool", "tool_call_id": "call_0", "content": json.dumps({"boxes": [], "confidence": [], "labels": []})},
+    ]
+    data_path = tmp_path / "data.parquet"
+    pq.write_table(pa.Table.from_pylist([{
+        "images": [str(image_path)], "question": "Where is the sign relative to the car?", "solution": "above",
+        "source_image": "original", "bbox": [], "reliance_prefix": json.dumps(prefix),
+    }]), data_path)
+    config = OmegaConf.create({
+        "max_prompt_length": 8192, "return_raw_chat": True, "filter_overlong_prompts": False,
+        "filter_overlong_prompts_workers": 1, "tool_config_path": str(TOOL_CONFIG), "truncation": "error",
+        "cache_dir": str(tmp_path / "cache"),
+    })
+    row = zwz.ZwzOriginalRelationDataset(str(data_path), tokenizer, config, processor)[0]
+
+    assert row["raw_prompt"][2:] == prefix
+    # The actor prompt and the rollout request render the prefixed conversation identically.
+    rollout_text = tokenizer.apply_chat_template(
+        row["raw_prompt"], tools=load_tool_schemas_from_config(str(TOOL_CONFIG)), add_generation_prompt=True, tokenize=False,
+    )
+    assert "<tool_response>" in rollout_text
+    rollout_ids = processor(text=[rollout_text], images=row["multi_modal_data"]["image"], return_tensors="pt")["input_ids"][0]
+    assert torch.equal(rollout_ids, row["input_ids"][row["attention_mask"].bool()])
+
+    assert [message["role"] for message in row["native_raw_prompt"]] == ["system", "user"]
+    native_text = tokenizer.decode(row["native_input_ids"][row["native_attention_mask"].bool()])
+    assert "<tool_response>" not in native_text and "<tool_call>" not in native_text
+
+
 def test_prompt_length_filter_counts_tool_definitions(qwen, dataset_factory):
     _, processor = qwen
     row = dataset_factory()[0]

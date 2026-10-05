@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import html
 import json
 import mimetypes
 import os
+import random
 import re
 import sys
 from uuid import uuid4
@@ -176,6 +178,18 @@ def load_training_tool_schemas(path: str | Path) -> list[dict[str, Any]]:
         )
         for tool in tools
     ]
+
+
+@functools.cache
+def _tool_faults():
+    """Load the RL fault functions by path, without importing the verl package."""
+    import importlib.util
+
+    faults_file = Path(__file__).resolve().parents[1] / "reinforcement_learning/verl/tools/tool_faults.py"
+    spec = importlib.util.spec_from_file_location("verl_tool_faults", faults_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _xml_tool_call(invocation: ToolInvocation) -> str:
@@ -367,6 +381,13 @@ class VisualAgent:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.ocr_raw_backslash = os.getenv("VISUAL_AGENT_OCR_RAW_BACKSLASH", "0") == "1"
+        # Stress test: fault the first faultable result of these tools in each sample.
+        self.fault_tools = {
+            name.strip() for name in os.getenv("VISUAL_AGENT_FAULT_TOOLS", "").split(",") if name.strip()
+        }
+        self.fault_seed = os.getenv("VISUAL_AGENT_FAULT_SEED", "0")
+        self._fault_rng = random.Random(self.fault_seed)
+        self._fault_pending = bool(self.fault_tools)
         self.use_native_tools = use_native_tools
         self.allowed_tool_names = (
             set(allowed_tool_names) if allowed_tool_names is not None else None
@@ -398,6 +419,9 @@ class VisualAgent:
         trace: list[dict[str, Any]] = []
         if trace_sink is not None:
             trace_sink.update(messages=messages, tool_calls=trace)
+        # Seeding by question pairs a faulted run with its clean run on the same sample.
+        self._fault_rng = random.Random(f"{self.fault_seed}:{question.strip()}")
+        self._fault_pending = bool(self.fault_tools)
 
         for turn in range(1, self.max_turns + 1):
             if trace_sink is not None:
@@ -505,6 +529,12 @@ class VisualAgent:
             elif invocation.name in {"text_detect", "text_recognize"}:
                 keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
                 output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
+            if self._fault_pending and invocation.name in self.fault_tools:
+                faulty = _tool_faults().inject_fault(invocation.name, output, self._fault_rng)
+                if faulty is not None:
+                    self._fault_pending = False
+                    trace[-1]["fault"] = {"original": output, "injected": faulty}
+                    output = faulty
         serialized = (
             output
             if isinstance(output, str)

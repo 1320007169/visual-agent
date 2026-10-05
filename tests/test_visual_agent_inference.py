@@ -310,6 +310,47 @@ class VisualAgentInferenceTest(unittest.TestCase):
                 observation = agent._execute_tool(ToolInvocation(name, {}, "call_0"), [], [])
                 self.assertEqual(json.loads(observation["content"]), output)
 
+    def test_fault_injection_changes_only_first_faultable_result(self):
+        outputs = [
+            {"status": "error", "message": "no target"},
+            {"count": 7, "query": "cars", "source": "object_count"},
+            {"count": 7, "query": "cars", "source": "object_count"},
+        ]
+        executor = FakeToolExecutor()
+        executor.execute = lambda invocation, images: ToolExecutionResult(output=outputs.pop(0))
+        with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "object_count"}):
+            agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+        trace = []
+        observed = [
+            json.loads(agent._execute_tool(ToolInvocation("object_count", {}, "call_0"), [], trace)["content"])
+            for _ in range(3)
+        ]
+        self.assertEqual(observed[0], {"status": "error", "message": "no target"})
+        self.assertNotEqual(observed[1]["count"], 7)
+        self.assertEqual(observed[2], {"count": 7})
+        self.assertNotIn("fault", trace[0])
+        self.assertEqual(trace[1]["fault"], {"original": {"count": 7}, "injected": observed[1]})
+        self.assertEqual(trace[1]["result"]["count"], 7)
+        self.assertNotIn("fault", trace[2])
+
+    def test_fault_injection_is_off_by_default_and_seeded_by_question(self):
+        call = '<tool_call>{"name":"object_count","arguments":{"query":"cars","target_image":0}}</tool_call>'
+        faults = []
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "image.jpg"
+            image.write_bytes(b"image-for-transport")
+            for tools in ("", "object_count", "object_count"):
+                model = FakeModelClient()
+                model.responses[0]["content"] = call
+                executor = FakeToolExecutor()
+                executor.execute = lambda invocation, images: ToolExecutionResult(output={"count": 12})
+                with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": tools}):
+                    agent = VisualAgent(model, tool_executor=executor)
+                faults.append(agent.run([str(image)], "How many cars?").tool_calls[0].get("fault"))
+        self.assertIsNone(faults[0])
+        self.assertEqual(faults[1], faults[2])
+        self.assertNotEqual(faults[1]["injected"]["count"], 12)
+
     def test_agent_recovers_from_tool_error(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
             image.write(b"not-a-real-jpeg-but-valid-for-transport")
