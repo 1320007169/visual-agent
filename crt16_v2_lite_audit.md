@@ -77,5 +77,8 @@ CPU 审计和数据构造已完成，成本为分钟量级。若后续沿用现�
 
 机器可读统计：[crt16_v2_lite_audit.json](crt16_v2_lite_audit.json)。
 
-独立训练入口已准备：[v2-lite 16 卡启动脚本](scripts/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh)。默认从 Qwen3-VL 原始权重开始，禁用断点恢复，使用 v2-lite 数据与独立运行名，每 5 步验证和保存，训练计时 10 小时后完成当前步并保存退出。
+独立训练入口已准备：[v2-lite 16 卡启动脚本](scripts/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh)。首次默认从 Qwen3-VL 原始权重开始，使用 v2-lite 数据与独立运行名，每 5 步验证和保存。时间限制默认关闭（`TRAINER_STOP_AFTER_SECONDS=0`），总计划仍为 1 epoch、269 步；需要分段运行时可设为 `36000`，到时完成当前步并保存退出。
 ModelArts 提交文件：`/home/ma-user/work/algorithm/codebkp/run_visual_agent/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh`。沿用 v1 的软链接与运行环境初始化；尚未启动训练。
+
+续训时，在两节点任务中设置相同的 `RESUME_FROM_PATH`，指向已有 v2-lite 运行的完整 `global_step_N` 目录，重新提交同一个入口。启动前检查 `data.pt` 和 14 个训练 rank 的模型、优化器、extra_state 共 42 个分片；恢复模型、Adam、学习率调度器、随机状态、global step 和数据游标，从下一步继续。不要改用 `actor/huggingface` 作为续训路径。
+恢复来源必须位于当前 v2-lite 运行名前缀下，不能使用 v1 的数据游标。新任务生成独立输出、日志和同步目录，保留源 checkpoint；以后从最近一次任务的 checkpoint 继续。续训时保持同一数据文件、模型、14 卡训练拓扑和 batch 配置，训练上限为整个 epoch 的 269 步，不会额外重跑一轮。
