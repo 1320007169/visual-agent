@@ -1,0 +1,747 @@
+{
+  "snapshot_beijing": "2026-10-06T17:58:59.286464+08:00",
+  "files": [
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/1.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/2.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/3.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/4.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/5.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/6.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/7.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/8.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/9.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/10.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/11.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/12.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/13.jsonl",
+    "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/14.jsonl"
+  ],
+  "composition": [
+    {
+      "source": "visual-agent-chartqa",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 1,
+      "all_correct": 0,
+      "all_wrong": 1,
+      "mixed_accuracy": 0,
+      "constant_reward": 1,
+      "mixed_reward": 0,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0,
+      "mixed_reward_share": 0.0
+    },
+    {
+      "source": "visual-agent-chartqa",
+      "branch": "counterfactual",
+      "prefix_tool": "ocr_read",
+      "groups": 12,
+      "all_correct": 3,
+      "all_wrong": 7,
+      "mixed_accuracy": 2,
+      "constant_reward": 8,
+      "mixed_reward": 4,
+      "all_wrong_mixed_reward": 2,
+      "mixed_accuracy_share": 0.16666666666666666,
+      "mixed_reward_share": 0.3333333333333333
+    },
+    {
+      "source": "visual-agent-chartqa",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 4,
+      "all_correct": 3,
+      "all_wrong": 1,
+      "mixed_accuracy": 0,
+      "constant_reward": 4,
+      "mixed_reward": 0,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0,
+      "mixed_reward_share": 0.0
+    },
+    {
+      "source": "visual-agent-chartqa",
+      "branch": "factual",
+      "prefix_tool": "object_count",
+      "groups": 1,
+      "all_correct": 0,
+      "all_wrong": 1,
+      "mixed_accuracy": 0,
+      "constant_reward": 1,
+      "mixed_reward": 0,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0,
+      "mixed_reward_share": 0.0
+    },
+    {
+      "source": "visual-agent-chartqa",
+      "branch": "factual",
+      "prefix_tool": "ocr_read",
+      "groups": 16,
+      "all_correct": 4,
+      "all_wrong": 7,
+      "mixed_accuracy": 5,
+      "constant_reward": 9,
+      "mixed_reward": 7,
+      "all_wrong_mixed_reward": 2,
+      "mixed_accuracy_share": 0.3125,
+      "mixed_reward_share": 0.4375
+    },
+    {
+      "source": "visual-agent-deepeyesv2",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 11,
+      "all_correct": 3,
+      "all_wrong": 4,
+      "mixed_accuracy": 4,
+      "constant_reward": 7,
+      "mixed_reward": 4,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.36363636363636365,
+      "mixed_reward_share": 0.36363636363636365
+    },
+    {
+      "source": "visual-agent-deepeyesv2",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 10,
+      "all_correct": 3,
+      "all_wrong": 5,
+      "mixed_accuracy": 2,
+      "constant_reward": 7,
+      "mixed_reward": 3,
+      "all_wrong_mixed_reward": 1,
+      "mixed_accuracy_share": 0.2,
+      "mixed_reward_share": 0.3
+    },
+    {
+      "source": "visual-agent-deepeyesv2",
+      "branch": "factual",
+      "prefix_tool": "ocr_read",
+      "groups": 6,
+      "all_correct": 2,
+      "all_wrong": 1,
+      "mixed_accuracy": 3,
+      "constant_reward": 3,
+      "mixed_reward": 3,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.5,
+      "mixed_reward_share": 0.5
+    },
+    {
+      "source": "visual-agent-depth-raw",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 26,
+      "all_correct": 3,
+      "all_wrong": 10,
+      "mixed_accuracy": 13,
+      "constant_reward": 13,
+      "mixed_reward": 13,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.5,
+      "mixed_reward_share": 0.5
+    },
+    {
+      "source": "visual-agent-depth-raw",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 18,
+      "all_correct": 4,
+      "all_wrong": 9,
+      "mixed_accuracy": 5,
+      "constant_reward": 13,
+      "mixed_reward": 5,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.2777777777777778,
+      "mixed_reward_share": 0.2777777777777778
+    },
+    {
+      "source": "visual-agent-fsc147",
+      "branch": "counterfactual",
+      "prefix_tool": "object_count",
+      "groups": 15,
+      "all_correct": 0,
+      "all_wrong": 14,
+      "mixed_accuracy": 1,
+      "constant_reward": 14,
+      "mixed_reward": 1,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.06666666666666667,
+      "mixed_reward_share": 0.06666666666666667
+    },
+    {
+      "source": "visual-agent-fsc147",
+      "branch": "factual",
+      "prefix_tool": "object_count",
+      "groups": 25,
+      "all_correct": 8,
+      "all_wrong": 17,
+      "mixed_accuracy": 0,
+      "constant_reward": 25,
+      "mixed_reward": 0,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0,
+      "mixed_reward_share": 0.0
+    },
+    {
+      "source": "visual-agent-ocr",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 3,
+      "all_correct": 2,
+      "all_wrong": 0,
+      "mixed_accuracy": 1,
+      "constant_reward": 2,
+      "mixed_reward": 1,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.3333333333333333,
+      "mixed_reward_share": 0.3333333333333333
+    },
+    {
+      "source": "visual-agent-ocr",
+      "branch": "counterfactual",
+      "prefix_tool": "ocr_read",
+      "groups": 10,
+      "all_correct": 2,
+      "all_wrong": 5,
+      "mixed_accuracy": 3,
+      "constant_reward": 7,
+      "mixed_reward": 3,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.3,
+      "mixed_reward_share": 0.3
+    },
+    {
+      "source": "visual-agent-ocr",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 5,
+      "all_correct": 3,
+      "all_wrong": 0,
+      "mixed_accuracy": 2,
+      "constant_reward": 3,
+      "mixed_reward": 2,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.4,
+      "mixed_reward_share": 0.4
+    },
+    {
+      "source": "visual-agent-ocr",
+      "branch": "factual",
+      "prefix_tool": "ocr_read",
+      "groups": 16,
+      "all_correct": 13,
+      "all_wrong": 2,
+      "mixed_accuracy": 1,
+      "constant_reward": 15,
+      "mixed_reward": 1,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0625,
+      "mixed_reward_share": 0.0625
+    },
+    {
+      "source": "visual-agent-tallyqa",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 10,
+      "all_correct": 6,
+      "all_wrong": 0,
+      "mixed_accuracy": 4,
+      "constant_reward": 6,
+      "mixed_reward": 4,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.4,
+      "mixed_reward_share": 0.4
+    },
+    {
+      "source": "visual-agent-tallyqa",
+      "branch": "counterfactual",
+      "prefix_tool": "object_count",
+      "groups": 2,
+      "all_correct": 0,
+      "all_wrong": 1,
+      "mixed_accuracy": 1,
+      "constant_reward": 1,
+      "mixed_reward": 1,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.5,
+      "mixed_reward_share": 0.5
+    },
+    {
+      "source": "visual-agent-tallyqa",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 19,
+      "all_correct": 14,
+      "all_wrong": 3,
+      "mixed_accuracy": 2,
+      "constant_reward": 17,
+      "mixed_reward": 2,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.10526315789473684,
+      "mixed_reward_share": 0.10526315789473684
+    },
+    {
+      "source": "visual-agent-tallyqa",
+      "branch": "factual",
+      "prefix_tool": "object_count",
+      "groups": 4,
+      "all_correct": 3,
+      "all_wrong": 1,
+      "mixed_accuracy": 0,
+      "constant_reward": 4,
+      "mixed_reward": 0,
+      "all_wrong_mixed_reward": 0,
+      "mixed_accuracy_share": 0.0,
+      "mixed_reward_share": 0.0
+    },
+    {
+      "source": "visual-agent-zwz-relation",
+      "branch": "counterfactual",
+      "prefix_tool": "grounding_detect",
+      "groups": 78,
+      "all_correct": 14,
+      "all_wrong": 25,
+      "mixed_accuracy": 39,
+      "constant_reward": 38,
+      "mixed_reward": 40,
+      "all_wrong_mixed_reward": 1,
+      "mixed_accuracy_share": 0.5,
+      "mixed_reward_share": 0.5128205128205128
+    },
+    {
+      "source": "visual-agent-zwz-relation",
+      "branch": "factual",
+      "prefix_tool": "grounding_detect",
+      "groups": 73,
+      "all_correct": 16,
+      "all_wrong": 28,
+      "mixed_accuracy": 29,
+      "constant_reward": 42,
+      "mixed_reward": 31,
+      "all_wrong_mixed_reward": 2,
+      "mixed_accuracy_share": 0.3972602739726027,
+      "mixed_reward_share": 0.4246575342465753
+    }
+  ],
+  "bypass_definition": "A successful new call to the prefix tool with a different argument dict and no replayed_fault flag. This obtains a live tool response; success is not proof of ground-truth correctness. Calls about a different object may be ordinary task decomposition.",
+  "restored_definition": "For grounding_detect, nonempty boxes exactly match the original factual prefix boxes; for other tools, the full original observation matches. Original tool observations are not guaranteed ground truth.",
+  "bypass": {
+    "visual-agent-deepeyesv2": {
+      "trajectories": 176,
+      "correct": 68,
+      "same_tool_changed_args_live_response": 29,
+      "changed_args_and_final_correct": 11,
+      "changed_args_same_image": 26,
+      "changed_args_same_image_same_query": 0,
+      "changed_args_same_image_different_query": 26,
+      "restored_original_boxes_or_observation": 0,
+      "restored_original_and_final_correct": 0,
+      "replayed_same_args_fault": 0,
+      "same_args_unfaulted_success": 0,
+      "changed_args_share": 0.16477272727272727,
+      "restored_original_share": 0.0
+    },
+    "visual-agent-depth-raw": {
+      "trajectories": 416,
+      "correct": 134,
+      "same_tool_changed_args_live_response": 379,
+      "changed_args_and_final_correct": 122,
+      "changed_args_same_image": 371,
+      "changed_args_same_image_same_query": 0,
+      "changed_args_same_image_different_query": 371,
+      "restored_original_boxes_or_observation": 0,
+      "restored_original_and_final_correct": 0,
+      "replayed_same_args_fault": 14,
+      "same_args_unfaulted_success": 0,
+      "changed_args_share": 0.9110576923076923,
+      "restored_original_share": 0.0
+    },
+    "visual-agent-zwz-relation": {
+      "trajectories": 1248,
+      "correct": 534,
+      "same_tool_changed_args_live_response": 1238,
+      "changed_args_and_final_correct": 534,
+      "changed_args_same_image": 1225,
+      "changed_args_same_image_same_query": 0,
+      "changed_args_same_image_different_query": 1225,
+      "restored_original_boxes_or_observation": 0,
+      "restored_original_and_final_correct": 0,
+      "replayed_same_args_fault": 50,
+      "same_args_unfaulted_success": 0,
+      "changed_args_share": 0.9919871794871795,
+      "restored_original_share": 0.0
+    }
+  },
+  "examples_restoring_original": {},
+  "most_frequent_argument_changes": {
+    "visual-agent-deepeyesv2": [
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "dough",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "sandwich",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 11
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "noodles",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "vegetables",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 5
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "wine bottles on the top rack",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "top wine rack",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 5
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "dough",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "bread",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 4
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "noodles",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "vegetables",
+          "target_image": 1
+        },
+        "restored_original": false,
+        "calls": 3
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "wine bottles on the top rack",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "third wine bottle from the right on the top rack",
+          "target_image": 1
+        },
+        "restored_original": false,
+        "calls": 3
+      }
+    ],
+    "visual-agent-depth-raw": [
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "box",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "cabinets",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 30
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "elephant",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "tree",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 17
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "zebra",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "log",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 17
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "radiator",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "washing machine",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "electrical outlet",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "snooker table",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "electrical outlet",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "shelf",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      }
+    ],
+    "visual-agent-zwz-relation": [
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "tie",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "microphone",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 24
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "sofa",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "ottoman",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 20
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "jacket",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "door frame",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "water bottle",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "power outlet",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "man",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "child",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      },
+      {
+        "tool": "grounding_detect",
+        "prefix_arguments": {
+          "query": "soccer goal",
+          "target_image": 0
+        },
+        "new_arguments": {
+          "query": "soccer ball",
+          "target_image": 0
+        },
+        "restored_original": false,
+        "calls": 16
+      }
+    ]
+  },
+  "lexical_overlap_definition": "Among successful changed-argument calls on the same image, non-stopword query tokens of one query are a subset of the other. This flags related wording for review, not proven semantic equivalence or recovered truth.",
+  "lexical_overlap": {
+    "visual-agent-zwz-relation": {
+      "trajectories": 1248,
+      "same_image_query_token_subset": 30,
+      "subset_and_final_correct": 15
+    },
+    "visual-agent-depth-raw": {
+      "trajectories": 416,
+      "same_image_query_token_subset": 47,
+      "subset_and_final_correct": 5
+    },
+    "visual-agent-deepeyesv2": {
+      "trajectories": 176,
+      "same_image_query_token_subset": 5,
+      "subset_and_final_correct": 2
+    }
+  },
+  "lexical_overlap_examples": {
+    "visual-agent-zwz-relation": [
+      {
+        "old_query": "ivy-covered wall",
+        "new_query": "wall with ivy",
+        "calls": 12
+      },
+      {
+        "old_query": "jacket",
+        "new_query": "person wearing jacket",
+        "calls": 11
+      },
+      {
+        "old_query": "ivy-covered wall",
+        "new_query": "ivy-covered wall on the right",
+        "calls": 3
+      },
+      {
+        "old_query": "ivy-covered wall",
+        "new_query": "ivy-covered wall on the left",
+        "calls": 3
+      },
+      {
+        "old_query": "jacket",
+        "new_query": "blue jacket",
+        "calls": 2
+      },
+      {
+        "old_query": "jacket",
+        "new_query": "person wearing blue jacket",
+        "calls": 1
+      },
+      {
+        "old_query": "jacket",
+        "new_query": "woman wearing blue jacket",
+        "calls": 1
+      }
+    ],
+    "visual-agent-depth-raw": [
+      {
+        "old_query": "building",
+        "new_query": "building with bbox [0.792000, 0.001000, 0.900000, 0.275000]",
+        "calls": 8
+      },
+      {
+        "old_query": "trailer",
+        "new_query": "blue trailer",
+        "calls": 7
+      },
+      {
+        "old_query": "girl",
+        "new_query": "girl with american flag",
+        "calls": 6
+      },
+      {
+        "old_query": "building",
+        "new_query": "object to the left of the building and behind the boy",
+        "calls": 5
+      },
+      {
+        "old_query": "person",
+        "new_query": "object to the left of the person",
+        "calls": 3
+      },
+      {
+        "old_query": "building",
+        "new_query": "object to the left of the building and behind it in depth",
+        "calls": 2
+      },
+      {
+        "old_query": "building",
+        "new_query": "building to the left of the building",
+        "calls": 2
+      },
+      {
+        "old_query": "person",
+        "new_query": "object to the left of the person and behind them in depth",
+        "calls": 2
+      },
+      {
+        "old_query": "elephant",
+        "new_query": "baby elephant",
+        "calls": 2
+      },
+      {
+        "old_query": "elephant",
+        "new_query": "object to the left of the elephant",
+        "calls": 2
+      },
+      {
+        "old_query": "electrical outlet",
+        "new_query": "recessed shelf with electrical outlet",
+        "calls": 1
+      },
+      {
+        "old_query": "building",
+        "new_query": "object to the left of the building and behind it",
+        "calls": 1
+      }
+    ],
+    "visual-agent-deepeyesv2": [
+      {
+        "old_query": "wine bottles on the top rack",
+        "new_query": "top wine rack",
+        "calls": 5
+      }
+    ]
+  }
+}
