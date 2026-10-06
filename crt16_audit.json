@@ -1,0 +1,1318 @@
+{
+  "rollouts": {
+    "files": [
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/1.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/2.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/3.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/4.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/5.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/6.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/7.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/8.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/9.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/10.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/11.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/12.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/13.jsonl",
+      "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/rollouts/visual-agent-zwz-rl/qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94/14.jsonl"
+    ],
+    "sources": {
+      "visual-agent-chartqa": {
+        "trajectories": 2112,
+        "acc": 0.5430871212121212,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.15293560606060605,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.08617424242424243,
+            "error_status_rate": 0.06043956043956044,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.23579545454545456,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.08433734939759036,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.022727272727272728,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.08333333333333333,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.8839962121212122,
+            "error_status_rate": 0.044456347080878415,
+            "empty_rate": null,
+            "copy_rate": 0.5698982324584896,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.043560606060606064,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.0004734848484848485,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.19318181818181818,
+            "paired_questions": 6,
+            "acc_gap_vs_answer": -0.20833333333333334
+          },
+          "object_count": {
+            "share": 0.01893939393939394,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": -0.5
+          },
+          "ocr_read": {
+            "share": 0.743844696969697,
+            "paired_questions": 13,
+            "acc_gap_vs_answer": 0.20005827505827506
+          }
+        }
+      },
+      "visual-agent-chartqa#counterfactual": {
+        "trajectories": 208,
+        "acc": 0.3173076923076923,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.03365384615384615,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.08653846153846154,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.038461538461538464,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.25,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.09615384615384616,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.7980769230769231,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.009615384615384616,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          },
+          "depth_measure": {
+            "share": 0.07692307692307693,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.038461538461538464,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          },
+          "ocr_read": {
+            "share": 0.07692307692307693,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-chartqa#factual": {
+        "trajectories": 336,
+        "acc": 0.44642857142857145,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.08035714285714286,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.17261904761904762,
+            "error_status_rate": 0.034482758620689655,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.11904761904761904,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.2,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.2619047619047619,
+            "error_status_rate": 0.11363636363636363,
+            "empty_rate": null,
+            "copy_rate": 0.2727272727272727,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.6160714285714286,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.03571428571428571,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          },
+          "depth_measure": {
+            "share": 0.08630952380952381,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.09821428571428571,
+            "paired_questions": 3,
+            "acc_gap_vs_answer": 0.0
+          },
+          "ocr_read": {
+            "share": 0.1636904761904762,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          }
+        }
+      },
+      "visual-agent-deepeyesv2": {
+        "trajectories": 1968,
+        "acc": 0.4476626016260163,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.755589430894309,
+            "error_status_rate": 0.0006724949562878278,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.00508130081300813,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.6295731707317073,
+            "error_status_rate": 0.002421307506053269,
+            "empty_rate": 0.08151735270379339,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.0005081300813008131,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.49898373983739835,
+            "error_status_rate": 0.23930753564154786,
+            "empty_rate": null,
+            "copy_rate": 0.3890020366598778,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.03048780487804878,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.15701219512195122,
+            "paired_questions": 3,
+            "acc_gap_vs_answer": 0.0
+          },
+          "grounding_detect": {
+            "share": 0.6265243902439024,
+            "paired_questions": 7,
+            "acc_gap_vs_answer": 0.0
+          },
+          "object_count": {
+            "share": 0.0005081300813008131,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "ocr_read": {
+            "share": 0.18546747967479674,
+            "paired_questions": 3,
+            "acc_gap_vs_answer": -0.1388888888888889
+          }
+        }
+      },
+      "visual-agent-deepeyesv2#counterfactual": {
+        "trajectories": 176,
+        "acc": 0.38636363636363635,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 1.0,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.16477272727272727,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.0,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.5056818181818182,
+            "error_status_rate": 0.5056179775280899,
+            "empty_rate": null,
+            "copy_rate": 0.1797752808988764,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "crop_zoom": {
+            "share": 0.8522727272727273,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.14772727272727273,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-deepeyesv2#factual": {
+        "trajectories": 256,
+        "acc": 0.54296875,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.5703125,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.16015625,
+            "error_status_rate": 0.5853658536585366,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.375,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.56640625,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "ocr_read": {
+            "share": 0.05859375,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-depth-raw": {
+        "trajectories": 3024,
+        "acc": 0.4923941798941799,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.1626984126984127,
+            "error_status_rate": 0.0020325203252032522,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.8528439153439153,
+            "error_status_rate": 0.010856921287320668,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.9990079365079365,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.23270440251572327,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.00496031746031746,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.04298941798941799,
+            "error_status_rate": 0.5692307692307692,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "depth_measure": {
+            "share": 0.01521164021164021,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.9847883597883598,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-depth-raw#counterfactual": {
+        "trajectories": 416,
+        "acc": 0.32211538461538464,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.16826923076923078,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.875,
+            "error_status_rate": 0.013736263736263736,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.9134615384615384,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.13157894736842105,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.007211538461538462,
+            "error_status_rate": 0.3333333333333333,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.016826923076923076,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.028846153846153848,
+            "paired_questions": 3,
+            "acc_gap_vs_answer": 0.2380952380952381
+          },
+          "depth_measure": {
+            "share": 0.1346153846153846,
+            "paired_questions": 3,
+            "acc_gap_vs_answer": 0.2916666666666667
+          },
+          "grounding_detect": {
+            "share": 0.8173076923076923,
+            "paired_questions": 5,
+            "acc_gap_vs_answer": 0.31666666666666665
+          },
+          "ocr_read": {
+            "share": 0.002403846153846154,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          }
+        }
+      },
+      "visual-agent-depth-raw#factual": {
+        "trajectories": 288,
+        "acc": 0.3125,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.2673611111111111,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.8055555555555556,
+            "error_status_rate": 0.017241379310344827,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.8506944444444444,
+            "error_status_rate": 0.004081632653061225,
+            "empty_rate": 0.3551020408163265,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.03125,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.010416666666666666,
+            "error_status_rate": 0.3333333333333333,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "crop_zoom": {
+            "share": 0.1388888888888889,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "depth_measure": {
+            "share": 0.4166666666666667,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.4444444444444444,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-fsc147": {
+        "trajectories": 2400,
+        "acc": 0.37416666666666665,
+        "tools": {
+          "grounding_detect": {
+            "call_rate": 0.015833333333333335,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.0,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.9941666666666666,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 1.0,
+            "checked": 2386,
+            "tool_error_rate": 0.6236378876781223,
+            "wrong_copy_rate": 1.0,
+            "wrong_correction_rate": 0.0
+          }
+        },
+        "first_action_effect": {
+          "grounding_detect": {
+            "share": 0.015833333333333335,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "object_count": {
+            "share": 0.9841666666666666,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-fsc147#counterfactual": {
+        "trajectories": 240,
+        "acc": 0.0375,
+        "tools": {},
+        "first_action_effect": {
+          "answer": {
+            "share": 1.0,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-fsc147#factual": {
+        "trajectories": 400,
+        "acc": 0.32,
+        "tools": {},
+        "first_action_effect": {
+          "answer": {
+            "share": 1.0,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-ocr": {
+        "trajectories": 2112,
+        "acc": 0.7921401515151515,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.1434659090909091,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.000946969696969697,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.18039772727272727,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.14435695538057744,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.9185606060606061,
+            "error_status_rate": 0.008762886597938144,
+            "empty_rate": null,
+            "copy_rate": 0.734020618556701,
+            "checked": 1923,
+            "tool_error_rate": 0.2823712948517941,
+            "wrong_copy_rate": 0.4180478821362799,
+            "wrong_correction_rate": 0.2965009208103131
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.001893939393939394,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.0023674242424242425,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.18039772727272727,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          },
+          "ocr_read": {
+            "share": 0.8153409090909091,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-ocr#counterfactual": {
+        "trajectories": 208,
+        "acc": 0.5673076923076923,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.1971153846153846,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.07692307692307693,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.3125,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.12980769230769232,
+            "error_status_rate": 0.2962962962962963,
+            "empty_rate": null,
+            "copy_rate": 0.2962962962962963,
+            "checked": 19,
+            "tool_error_rate": 0.5789473684210527,
+            "wrong_copy_rate": 0.0,
+            "wrong_correction_rate": 1.0
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.7692307692307693,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.1201923076923077,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.07692307692307693,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "ocr_read": {
+            "share": 0.03365384615384615,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-ocr#factual": {
+        "trajectories": 336,
+        "acc": 0.8511904761904762,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.1636904761904762,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.19047619047619047,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.5625,
+            "checked": 64,
+            "tool_error_rate": 0.421875,
+            "wrong_copy_rate": 0.0,
+            "wrong_correction_rate": 0.5555555555555556
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.7619047619047619,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.1636904761904762,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "ocr_read": {
+            "share": 0.0744047619047619,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-tallyqa": {
+        "trajectories": 1440,
+        "acc": 0.6111111111111112,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.15138888888888888,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.03333333333333333,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.34444444444444444,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.16733870967741934,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.7361111111111112,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.8481132075471698,
+            "checked": 1060,
+            "tool_error_rate": 0.5169811320754717,
+            "wrong_copy_rate": 0.7062043795620438,
+            "wrong_correction_rate": 0.23722627737226276
+          },
+          "ocr_read": {
+            "call_rate": 0.03888888888888889,
+            "error_status_rate": 0.08928571428571429,
+            "empty_rate": null,
+            "copy_rate": 0.03571428571428571,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.0006944444444444445,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.003472222222222222,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.3173611111111111,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          },
+          "object_count": {
+            "share": 0.6784722222222223,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          }
+        }
+      },
+      "visual-agent-tallyqa#counterfactual": {
+        "trajectories": 192,
+        "acc": 0.8125,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.15104166666666666,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.005208333333333333,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.24479166666666666,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.2553191489361702,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.10416666666666667,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.85,
+            "checked": 20,
+            "tool_error_rate": 0.15,
+            "wrong_copy_rate": 0.0,
+            "wrong_correction_rate": 1.0
+          },
+          "ocr_read": {
+            "call_rate": 0.10416666666666667,
+            "error_status_rate": 1.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.6510416666666666,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.0625,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.19270833333333334,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.3571428571428571
+          },
+          "object_count": {
+            "share": 0.09375,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.21190476190476187
+          }
+        }
+      },
+      "visual-agent-tallyqa#factual": {
+        "trajectories": 368,
+        "acc": 0.8152173913043478,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.005434782608695652,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.043478260869565216,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.20380434782608695,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.21333333333333335,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.16032608695652173,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.5423728813559322,
+            "checked": 59,
+            "tool_error_rate": 0.5084745762711864,
+            "wrong_copy_rate": 0.1,
+            "wrong_correction_rate": 0.8666666666666667
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.5978260869565217,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.002717391304347826,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          },
+          "depth_measure": {
+            "share": 0.043478260869565216,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          },
+          "grounding_detect": {
+            "share": 0.1956521739130435,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          },
+          "object_count": {
+            "share": 0.16032608695652173,
+            "paired_questions": 2,
+            "acc_gap_vs_answer": 0.0
+          }
+        }
+      },
+      "visual-agent-zwz-relation": {
+        "trajectories": 9328,
+        "acc": 0.4058747855917667,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.1483704974271012,
+            "error_status_rate": 0.0050578034682080926,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.6920025728987993,
+            "error_status_rate": 0.004647560030983733,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.9653730703259005,
+            "error_status_rate": 0.001665741254858412,
+            "empty_rate": 0.07717934480843976,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.002572898799313894,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.02722984562607204,
+            "error_status_rate": 0.3779527559055118,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.029802744425385934,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "crop_zoom": {
+            "share": 0.003537735849056604,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.9650514579759862,
+            "paired_questions": 36,
+            "acc_gap_vs_answer": 0.044865319865319865
+          },
+          "object_count": {
+            "share": 0.0001072041166380789,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": -1.0
+          },
+          "ocr_read": {
+            "share": 0.0015008576329331046,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": -0.08333333333333333
+          }
+        }
+      },
+      "visual-agent-zwz-relation#counterfactual": {
+        "trajectories": 1248,
+        "acc": 0.42788461538461536,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.4671474358974359,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.49439102564102566,
+            "error_status_rate": 0.0032414910858995136,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.999198717948718,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.136327185244587,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.0008012820512820513,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.06891025641025642,
+            "error_status_rate": 0.46511627906976744,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "crop_zoom": {
+            "share": 0.028846153846153848,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.9711538461538461,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          }
+        }
+      },
+      "visual-agent-zwz-relation#factual": {
+        "trajectories": 1168,
+        "acc": 0.4083904109589041,
+        "tools": {
+          "crop_zoom": {
+            "call_rate": 0.05051369863013699,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "depth_measure": {
+            "call_rate": 0.7731164383561644,
+            "error_status_rate": 0.0011074197120708748,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "grounding_detect": {
+            "call_rate": 0.9965753424657534,
+            "error_status_rate": 0.0,
+            "empty_rate": 0.09621993127147767,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "object_count": {
+            "call_rate": 0.0136986301369863,
+            "error_status_rate": 0.0,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          },
+          "ocr_read": {
+            "call_rate": 0.01797945205479452,
+            "error_status_rate": 0.19047619047619047,
+            "empty_rate": null,
+            "copy_rate": 0.0,
+            "checked": 0,
+            "tool_error_rate": null,
+            "wrong_copy_rate": null,
+            "wrong_correction_rate": null
+          }
+        },
+        "first_action_effect": {
+          "answer": {
+            "share": 0.003424657534246575,
+            "paired_questions": 0,
+            "acc_gap_vs_answer": null
+          },
+          "grounding_detect": {
+            "share": 0.9965753424657534,
+            "paired_questions": 1,
+            "acc_gap_vs_answer": 0.0
+          }
+        }
+      }
+    }
+  }
+}
