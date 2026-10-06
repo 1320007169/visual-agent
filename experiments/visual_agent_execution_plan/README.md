@@ -654,3 +654,151 @@ MME-RealWorld-Lite 7条、MME-RealWorld-CN 16条，共55条。
 9项补测测试、9项既有入口用例、Bash语法检查及真实 step80 八分片权重预检通过。
 当前仅完成补测准备与配置预检，未启动 GPU 推理，尚无补测后成绩。
 恢复双权重完整评测时，将 ModelArts 外部入口开头该变量改为 `0`。
+
+## 16 卡反事实 RL 首轮训练进展（2026-10-06）
+
+核对时间：北京时间 2026-10-06 15:53。以下统计固定覆盖已完成的 step1–10，
+以及 step0、step5、step10 的验证；记录时 step11 正在运行，任务尚未结束。
+step10 已保存，`latest_checkpointed_iteration.txt` 和 `best_checkpoint.json` 均指向 step10。
+普通验证宏平均从 57.53% 提高至 63.92%，但尚不能将提升归因于反事实训练。
+
+### 实验目的与实际配置
+
+本轮验证远端 main 的工具观察反事实训练方法，从原始 `Qwen3-VL-8B-Instruct`
+开始训练，使用新的优化器和数据游标。初始权重不是已有 16 卡 step210。
+factual 分支提供历史真实工具观察，counterfactual 分支提供同题被扰动的工具观察，
+模型在该前缀之后继续生成。两种分支作为独立训练行分别进行 GRPO 分组，
+固定前缀不参与生成 loss；本轮没有增加成对差分奖励。
+
+| 项目 | 本轮实际设置 |
+|---|---|
+| Run ID | `qwen3base_multitool_vlocr_reliance_n16_2node_20261006T005557607690_90df3b94` |
+| 启动前代码版本 | `858dda1`；反事实功能来源为 main 的 `6801dfa` |
+| 仓库入口 | [run_visual_agent_multitool_vlocr_reliance_2node_16gpu_modelarts.sh](../../scripts/run_visual_agent_multitool_vlocr_reliance_2node_16gpu_modelarts.sh) |
+| ModelArts 提交入口 | `/home/ma-user/work/algorithm/codebkp/run_visual_agent/run_visual_agent_multitool_vlocr_reliance_2node_16gpu_modelarts.sh` |
+| 资源 | 2 节点 × 8 卡；14 卡训练、2 卡工具，每节点 GPU7 为工具卡 |
+| 初始模型 | `$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct` |
+| train batch / PPO mini-batch / rollout n | `126 / 42 / 16`，每 step 2,016 条轨迹 |
+| val batch / 最大并发 | `126 / 112` |
+| 恢复与 shuffle | `RESUME_MODE=disable`，`TRAIN_SHUFFLE=True` |
+| 总训练计划 | 1 epoch，269 step；本次提交另受 10 小时时限约束 |
+| 验证 / 保存周期 | 外部提交入口设置 `TEST_FREQ=5`、`SAVE_FREQ=5` |
+| 退出设置 | 外部提交入口设置 `TRAINER_STOP_AFTER_SECONDS=36000`，到时完成当前 step 后保存退出 |
+
+`BASE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx`。
+仓库入口本身默认保存周期为 10、时间限制为 0，本次实际的 5 步保存和 10 小时限制
+来自 ModelArts 外部入口，复现实验时需要保留这三个覆盖参数。
+外部入口先建立与原 16 卡任务相同的四处数据/存储软链接，再访问仓库；
+沿用原有 CUDA、编译器、Python 环境回退和 OpenCV overlay 配置。
+实际训练 Python 为
+`/home/ma-user/work/dataset/Common_wl/miniconda3/envs/visual-agent-qwen3vl-rl/bin/python3`。
+
+### 数据总量与配比
+
+数据目录：`data/vlocr_reliance_pairs_tallyhalf_fsc3000_20261006`。
+使用 [prepare_reliance_pairs.py](../../scripts/prepare_reliance_pairs.py)，
+从 `data/zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004` 构造，
+`fraction=0.2`、`seed=20261005`；替换原训练行，不扩大训练总行数。
+
+| 划分 / 分支 | 行数 | 占训练集比例 |
+|---|---:|---:|
+| 普通训练行 | 27,137 | 80.00% |
+| factual 训练行 | 3,392 | 10.00% |
+| counterfactual 训练行 | 3,392 | 10.00% |
+| 训练总计 | 33,921 | 100.00% |
+| 验证集 | 1,312 | — |
+| 训练 + 验证 | 35,233 | — |
+
+3,392 对 factual/counterfactual 同题数据各占两行，因此上述行数不等于独立题目数。
+替换后的训练来源为：ZWZ 14,605、depth 4,266、OCR 3,297、ChartQA 3,294、
+FSC147 3,110、DeepEyesV2 2,904、TallyQA 2,445。
+验证集沿用原文件，没有注入反事实观察。
+
+前缀来源为 64 卡运行
+`qwen3base_multitool_vlocr_hme_chartqa_tallyhalf_fsc3000_n16_8node_20261003T202135115738_f9c41af7`
+的 step1–53 rollout。当前构造器只选择首轮第一个成功且可扰动的工具调用，
+3,392 对中 `grounding_detect` 为 2,379 对、`ocr_read` 609 对、
+`object_count` 403 对、`depth_measure` 1 对。
+定位工具约占 70.14%，工具覆盖明显不均衡，尤其不能据此评估深度工具纠错能力。
+本轮仍使用 80/10/10，60/20/20 只是候选后续对照，尚未实施。
+
+### 训练 reward
+
+下表 reward 为训练轨迹 `score` 的均值，与日志 `critic/rewards/mean` 对齐。
+逐条核对 step1–10 共 20,160 条轨迹，本轮均满足
+`score = 0.9 × acc + 0.1 × format`，`query_penalty` 均为 0，
+`reward_valid` 均为 1。reward 包含格式分，不能直接当作答案准确率。
+
+| Step | 平均 reward | 答案准确率 |
+|---|---:|---:|
+| 1 | 0.4240 | 37.25% |
+| 2 | 0.5198 | 47.07% |
+| 3 | 0.4838 | 42.76% |
+| 4 | 0.5447 | 49.50% |
+| 5 | 0.5183 | 46.68% |
+| 6 | 0.4771 | 42.06% |
+| 7 | 0.5252 | 47.37% |
+| 8 | 0.5379 | 48.81% |
+| 9 | 0.5237 | 47.17% |
+| 10 | 0.5543 | 50.50% |
+
+按轨迹数加权比较前后两个窗口：
+
+| 分支 | step1–5 轨迹数 | 平均 reward | 答案准确率 | step6–10 轨迹数 | 平均 reward | 答案准确率 |
+|---|---:|---:|---:|---:|---:|---:|
+| 全部 | 10,080 | 0.4981 | 44.65% | 10,080 | 0.5237 | 47.18% |
+| 普通 | 7,984 | 0.5032 | 45.22% | 7,968 | 0.5431 | 49.35% |
+| factual | 1,168 | 0.5174 | 47.09% | 1,008 | 0.4971 | 44.25% |
+| counterfactual | 928 | 0.4303 | 36.75% | 1,104 | 0.4078 | 34.24% |
+
+整体 reward 有波动，后五步均值比前五步高 0.0255，提升主要体现在普通分支。
+反事实分支的窗口均值尚未上升；两个窗口题目不同，也不是同题配对评测，
+不能直接据此认定反事实能力下降或方法有效。
+前十步实际包含 2,032 条反事实轨迹，来自 127 个训练行，每行采样 16 条；
+这些轨迹不是 2,032 道独立问题。
+
+### 普通验证集结果
+
+准确率单位为 %。五个来源等权计算宏平均，非按 1,312 条样本汇总的微平均。
+每次验证各来源样本数相同，step0、step5、step10 的 `reward_valid=0` 数量均为 0。
+
+| 验证来源 | 样本数 | step0 | step5 | step10 |
+|---|---:|---:|---:|---:|
+| HRBench4K | 800 | 69.50 | 68.88 | 70.50 |
+| depth | 84 | 52.38 | 55.95 | 55.95 |
+| TallyQA | 108 | 63.89 | 64.81 | 73.15 |
+| ChartQA | 160 | 25.63 | 26.88 | 30.63 |
+| OCR | 160 | 76.25 | 90.63 | 89.38 |
+| **宏平均** | — | **57.53** | **61.43** | **63.92** |
+
+step10 宏平均较初始提高 6.39 个百分点，较 step5 提高 2.49 个百分点。
+计数和图表继续改善，OCR 较 step5 回落 1.25 个百分点。
+当前最佳指标为 `val-core/visual-agent/acc/macro_mean=0.6392010582010581`。
+这些是训练内验证结果，本轮尚无新的完整三榜成绩，也没有独立反事实验证成绩。
+
+### 运行情况、限制与后续判断
+
+截至 step10 验证完成，主 judge 累计 7,328 次请求均失败，日志显示 HTTP 403；
+备用 judge 接管 7,328 次，失败数为 0，`final_unresolved=0`。
+主配置为 `deepseek-v4.1-flash`，实际外部 judge 评分来自备用 `deepseek-v4-flash`；
+确定性规则可判定的题目不请求外部 judge。后续对照需要统一实际评分口径。
+
+普通 step 日志耗时约 29–33 分钟；step5 和 step10 含验证、保存，约 65 分钟。
+step10 结束时训练计时约 6 小时 15 分，10 小时时限从初始验证后计时。
+按该快照预计北京时间 19:30 后完成当前 step 并保存退出，具体时间依后续耗时变化；
+此处不是已完成或已正常退出的记录。
+
+当前可以确认训练已完成十次更新并保存权重，普通验证出现提升。
+要验证反事实方法的贡献，还需同初始权重、数据来源、训练预算和 judge 的普通 RL 对照，
+以及同题 factual/counterfactual 的独立错误注入评测，观察错误观察下的最终答对率和纠错行为。
+仅增加反事实比例或观察总 reward，不能代替上述对照。
+
+原始证据路径（`RUN` 为上表完整 Run ID，以下文件未纳入 Git）：
+
+- 数据构造信息：`data/vlocr_reliance_pairs_tallyhalf_fsc3000_20261006/manifest.json`。
+- 训练日志：`$BASE/logs/visual-agent-zwz-rl/$RUN/$RUN-node0.log`。
+- 训练轨迹：`$BASE/rollouts/visual-agent-zwz-rl/$RUN/{1..10}.jsonl`。
+- 验证轨迹：`saves/visual_agent_zwz_rl/qwen3/$RUN/validation/{0,5,10}.jsonl`。
+- 最近保存：`saves/visual_agent_zwz_rl/qwen3/$RUN/global_step_10/`。
+- 最佳权重：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_huggingface/`。
+- 最佳指标：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_checkpoint.json`。
