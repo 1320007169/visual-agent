@@ -76,3 +76,6 @@ CPU 审计和数据构造已完成，成本为分钟量级。若后续沿用现�
 方案 A 的强制核查分支不在本次改动范围内，尚未实现或启动。数据已准备好不代表方法效果已得到验证。
 
 机器可读统计：[crt16_v2_lite_audit.json](crt16_v2_lite_audit.json)。
+
+独立训练入口已准备：[v2-lite 16 卡启动脚本](scripts/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh)。默认从 Qwen3-VL 原始权重开始，禁用断点恢复，使用 v2-lite 数据与独立运行名，每 5 步验证和保存，训练计时 10 小时后完成当前步并保存退出。
+ModelArts 提交文件：`/home/ma-user/work/algorithm/codebkp/run_visual_agent/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh`。沿用 v1 的软链接与运行环境初始化；尚未启动训练。
