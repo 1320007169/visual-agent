@@ -805,6 +805,9 @@ step10 结束时训练计时约 6 小时 15 分，10 小时时限从初始验证
 
 ## 16 卡 v2-lite 反事实 RL 训练进展（2026-10-07）
 
+最新快照（17:53）：已完成 step28，最新及最佳保存为 step25，验证宏平均为 67.65%。
+本节保留 12:37 的历史快照，最新结果见末尾“17:53 增量更新”。
+
 核对时间：北京时间 2026-10-07 12:37。本节固定覆盖已完成的 step1–20，
 以及 step0、step5、step10、step15、step20 的验证，不代表整轮训练已经结束。
 最近保存和最佳 checkpoint 均为 step20，普通验证宏平均由 57.68% 提高至 67.52%。
@@ -951,3 +954,76 @@ extra_state 共 42 个 `.pt` 分片均非空，Hugging Face 索引引用的 8 �
 - 最近保存：`saves/visual_agent_zwz_rl/qwen3/$RUN/global_step_20/`。
 - 最佳权重：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_huggingface/`。
 - 最佳指标：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_checkpoint.json`。
+
+### 17:53 增量更新（截至 step28）
+
+北京时间 2026-10-07 17:53，以上同一运行已确认完成 step28。
+step29 的 rollout 已落盘，但快照时尚无该步更新完成的日志，因此本次统计只纳入 step1–28。
+最新验证为 step25，最新保存和最佳 checkpoint 均为 step25；尚无 step30 验证结果。
+
+**普通验证。** step25 宏平均为 67.65%，较 step20 提高 0.13 个百分点，
+较本轮 step0 提高 9.97 个百分点。准确率单位为 %，宏平均仍为五个来源等权平均。
+
+| 验证来源 | 样本数 | step20 | step25 |
+|---|---:|---:|---:|
+| HRBench4K | 800 | 74.25 | 74.50 |
+| depth | 84 | 55.95 | 54.76 |
+| TallyQA | 108 | 82.41 | 81.48 |
+| ChartQA | 160 | 35.00 | 36.88 |
+| OCR | 160 | 90.00 | 90.63 |
+| **宏平均** | — | **67.52** | **67.65** |
+
+step25 的 1,312 条验证样本均无无效 reward。HRBench4K、ChartQA 和 OCR 上升，
+depth 与 TallyQA 回落，整体增益已比前期小；当前不能据此认定收敛或退化。
+最佳指标为 `val-core/visual-agent/acc/macro_mean=0.6764867724867725`。
+
+**训练 reward。** 本次新增 step21–28 共 16,128 条轨迹，累计 56,448 条。
+累计轨迹的 `reward_valid` 均为 1，均满足 `score = 0.9 × acc + 0.1 × format`。
+
+| 训练窗口 | 轨迹数 | 平均 reward | 答案准确率 |
+|---|---:|---:|---:|
+| step16–20 | 10,080 | 0.6150 | 57.26% |
+| step21–25 | 10,080 | 0.6172 | 57.53% |
+| step26–28 | 6,048 | 0.5955 | 55.11% |
+
+step21–25 与前一窗口接近，最近三步有所回落；step28 的日志 reward 为 0.578。
+最后一个窗口只有三步，且各窗口题目不同，不能解释为同题准确率下降。
+
+**反事实分支与组构成。** 下表重新汇总 step1–28，每组均为 16 条轨迹，
+沿用上文的 acc 分类与首轮直接作答口径。表中轨迹数不等于独立问题数。
+
+| 来源 / 前缀工具 | 分支 | 轨迹数 | 答案准确率 | 直接作答率 | 组数 | 全对 | 全错 | 混合 | reward 有差异 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ChartQA / ocr_read | factual | 2,160 | 56.48% | 84.54% | 135 | 62 | 44 | 29 | 40 |
+| ChartQA / ocr_read | counterfactual | 2,480 | 54.64% | 83.31% | 155 | 64 | 50 | 41 | 50 |
+| OCR / ocr_read | factual | 1,856 | 71.93% | 98.44% | 116 | 75 | 27 | 14 | 16 |
+| OCR / ocr_read | counterfactual | 2,064 | 56.98% | 95.30% | 129 | 60 | 41 | 28 | 31 |
+| TallyQA / object_count | factual | 512 | 83.40% | 96.88% | 32 | 26 | 5 | 1 | 1 |
+| TallyQA / object_count | counterfactual | 336 | 61.61% | 82.44% | 21 | 10 | 5 | 6 | 6 |
+
+ChartQA、OCR、TallyQA 的反事实答案混合组比例分别为 26.45%、21.71%、28.57%。
+三类仍有组内答题奖励差异；reward 有差异组中的格式分差异不能单独视为纠错信号。
+以首轮工具调用为核查代理，factual/counterfactual 分别为 ChartQA 15.46%/16.69%、
+OCR 1.56%/4.70%、TallyQA 3.13%/17.56%。累计统计中反事实分支均更常首轮调用工具，
+但 ChartQA 差距很小，TallyQA 反事实仅 21 组，且两分支不是同题、同 checkpoint 对照；
+这些差异只能作为后续验证线索，尚不足以证明已经学会选择性核查。
+
+**评分、工具与权重。** 截至 step28，训练加六次验证共 64,320 条评分样本，
+主 judge 累计 20,003 次外部请求均失败，备用 judge 完成全部 20,003 次，
+备用失败数和 `final_unresolved` 均为 0，实际外部评分仍使用 `deepseek-v4-flash`。
+累计 118,890 次工具调用中有 1,650 次 error（1.39%），其中 OCR 调用错误 1,334 次；
+累计截断轨迹仍为 2 条。已完成步骤的日志未发现 CUDA OOM、RayTaskError 或任务退出错误。
+
+step28 结束时训练计时约 18 小时 26 分，总计划尚余 241 步。
+step25 含验证和保存约 71 分钟；step26–28 分别约 28、33、38 分钟。
+`global_step_25/data.pt`、actor 下 42 个 `.pt` 分片和索引引用的 8 个 Hugging Face
+权重分片均已核验存在且非空。`latest_checkpointed_iteration.txt` 与
+`best_checkpoint.json` 均指向 step25，实际 GPU 恢复仍未测试。
+
+本次新增证据为 `$BASE/rollouts/visual-agent-zwz-rl/$RUN/{21..28}.jsonl`、
+`saves/visual_agent_zwz_rl/qwen3/$RUN/validation/25.jsonl` 和
+`saves/visual_agent_zwz_rl/qwen3/$RUN/global_step_25/`，运行日志路径沿用上文。
+
+后续应优先用原始模型与当前最佳 step25 做固定同题的独立错误注入评测，
+核对错误照抄、纠错和两分支核查率差；普通验证的小幅提升与当前累计训练统计，
+仍不能替代反事实专项评测和同预算普通 RL 对照。
