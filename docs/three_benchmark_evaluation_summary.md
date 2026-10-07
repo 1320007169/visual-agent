@@ -773,7 +773,78 @@ OCRBench 分数。本次 observation 改动在两种复判口径下的净收益�
 后台主日志位于仓库上级目录的
 `logs/visual-agent-eval/ocrbench_backslash_ab_64gpu_step80_local2gpu_20261004T184241-driver.log`。
 
+## 新 64 卡 step53、16 卡 step210 与旧 step80 对比（2026-10-08 核验）
+
+本次评测于 2026-10-06 使用单节点 8 卡顺序运行。新 64 卡 step53 来自包含 HME、
+ChartQA、TallyQA 抽半和 FSC3000 的训练任务，与旧 64 卡 step80 不属于同一训练运行。
+两份新权重的具体路径记录在本次 `checkpoints.tsv` 中。
+
+- 新 64 卡 step53：十榜评分齐全，退出码 **0**，耗时 **21916 秒（6 小时 5 分 16 秒）**。
+- 16 卡 step210：十榜共 **16955 条预测**均已保存，已有九榜评分；MME-CN 的
+  5917 条预测完整，但评分文件缺失。退出码 **1**，耗时 **19531 秒（5 小时 25 分 31 秒）**，
+  模型服务于 10 月 6 日约 20:14 关闭。缺失评分不能记为零分，退出的具体错误原因尚未确认。
+
+下表 OCRBench 使用“最终答案反斜杠后处理 + 官方规则评分”，不包含 API judge。
+旧 step80 取历史十榜预测的离线后处理分数 874，不取两卡消融重跑的 875。
+新两组在输出适配器中直接后处理；此前已验证更保守的接入规则不改变旧结果的逐题对错。
+除 OCRBench 正确数、HME 子项及 FSC147 指标外，表内均为百分制。
+
+| 指标 | 旧 64 卡 step80 | 新 64 卡 step53 | 16 卡 step210 |
+|---|---:|---:|---:|
+| VStarBench | **87.96** | 83.77 | 84.82 |
+| HRBench4K | **83.63** | 80.00 | 81.13 |
+| HRBench8K | **79.13** | 75.13 | 77.50 |
+| OCRBench，后处理后 / 1000 | **874** | 868 | 873 |
+| OCRBench 手写公式 / 100 | 65 | **68** | 66 |
+| MME-RealWorld-Lite | **55.50** | 50.60 | 54.87 |
+| MME-RealWorld-CN | **68.19** | 64.78 | 待评分 |
+| CV-Bench-2D | **81.32** | 80.68 | 80.78 |
+| CV-Bench-3D | **91.08** | 88.00 | 90.92 |
+| ChartQA_TEST | **76.96** | 76.80 | 70.88 |
+| FSC147 MAE_valid，越低越好 | 17.04 | **15.78** | 31.36 |
+| FSC147 RMSE_valid，越低越好 | **120.12** | 129.28 | 132.69 |
+| FSC147 有效输出 / 1190 | 1188 | **1189** | 1122 |
+| FSC147 无效输出 / 1190 | 2 | **1** | 68 |
+
+FSC147 三组均有无效输出，官方全量 MAE / RMSE 字段为空；上表误差仅统计各组有效输出，
+样本集合不同。新 step53 的 MAE_valid 和有效率改善，但 RMSE_valid 高于旧 step80，
+因此不能笼统认为所有计数指标均改善。
+
+新 step53 的 OCRBench 原始答案为 **867/1000、HME 67/100**；后处理实际修改
+index 939，恢复 1 题，得到 **868/1000、HME 68/100**。两组新结果的 OCRBench
+均无 API failed、无空预测、无回合耗尽。
+
+| 最终预测中的 API failed | 旧 64 卡 step80 | 新 64 卡 step53 | 16 卡 step210 |
+|---|---:|---:|---:|
+| HRBench4K | 10 | 4 | 4 |
+| HRBench8K | 22 | 27 | 5 |
+| MME-RealWorld-Lite | 7 | 13 | 7 |
+| MME-RealWorld-CN | 16 | 16 | 11 |
+| 其余六榜 | 0 | 0 | 0 |
+| 合计 / 16955 | **55** | **60** | **27** |
+
+另外，新 step53 有 77 条回合耗尽输出（HR8K 3、MME-Lite 10、MME-CN 57、CV3D 6、
+FSC147 1），ChartQA 有 1 条空预测。step210 没有回合耗尽输出，但 MME-CN 有 5 条、
+FSC147 有 11 条空预测。这些与 API failed 分开统计，未从预测文件中剔除；FSC147
+误差仍只统计有效输出，MME-CN step210 尚无评分。
+
+当前结果不支持新权重全面替换旧 step80：新 step53 的公式多对 3 题，但 VStar、
+HRBench、MME 等下降；step210 的 OCRBench 和 CV3D 接近旧模型，ChartQA 低
+**6.08 个百分点**，且计数表现变差。三组失败样本不同，不能把全部分差直接归因于
+训练后的模型能力。这里只报告已保存结果，未重跑推理或补判 API judge。
+
+本次结果来源：
+
+- [checkpoint 清单](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/checkpoints.tsv)
+- [退出状态与耗时](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/status.tsv)
+- [新 64 卡 step53 预测与评分](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/64gpu_step53/dino_latest/VisualAgent-vllm/T20261006_G/)
+- [16 卡 step210 预测与评分](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/16gpu_step210/dino_latest/VisualAgent-vllm/T20261006_G/)
+
 ## 当前结论
+
+- 最新 step53 / step210 的结果已补入上表：OCRBench 后处理后为 868 / 873，HME 为
+  68 / 66；旧 step80 为 874 / 65。新权重多数榜未超过旧 step80，step210 的 ChartQA
+  与计数下降明显。step210 的 MME-CN 尚缺评分，其评测退出码为 1。
 
 - OCRBench 最终主表采用固定反斜杠后处理 + 官方评分：Base 直答 873、64 卡 step80
   874、16 卡 step110 / step150 均为 872；HME 分别为 80 / 65 / 66 / 65。原始分数
