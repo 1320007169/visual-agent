@@ -386,8 +386,10 @@ class VisualAgent:
             name.strip() for name in os.getenv("VISUAL_AGENT_FAULT_TOOLS", "").split(",") if name.strip()
         }
         self.fault_seed = os.getenv("VISUAL_AGENT_FAULT_SEED", "0")
+        self.fault_type = os.getenv("VISUAL_AGENT_FAULT_TYPE", "training")
         self._fault_rng = random.Random(self.fault_seed)
         self._fault_pending = bool(self.fault_tools)
+        self._faulted_call = None
         self.use_native_tools = use_native_tools
         self.allowed_tool_names = (
             set(allowed_tool_names) if allowed_tool_names is not None else None
@@ -422,6 +424,7 @@ class VisualAgent:
         # Seeding by question pairs a faulted run with its clean run on the same sample.
         self._fault_rng = random.Random(f"{self.fault_seed}:{question.strip()}")
         self._fault_pending = bool(self.fault_tools)
+        self._faulted_call = None
 
         for turn in range(1, self.max_turns + 1):
             if trace_sink is not None:
@@ -488,6 +491,16 @@ class VisualAgent:
                 "Set --tool-api-base or VISUAL_TOOL_API_BASE."
             )
 
+        replay_arguments = invocation.arguments
+        if invocation.name == "ocr_read":
+            replay_arguments = {"mode": "text", "bbox_2d": [0, 0, 1000, 1000], **replay_arguments}
+        if self._faulted_call is not None:
+            name, arguments, fault, serialized = self._faulted_call
+            if invocation.name == name and replay_arguments == arguments:
+                trace.append({"name": name, "arguments": invocation.arguments, "fault": fault,
+                              "replayed_fault": True, "returned_images": 0})
+                return _observation(serialized, invocation)
+
         try:
             tool_result = self.tool_executor.execute(invocation, images)
         except InferenceError as exc:
@@ -530,7 +543,9 @@ class VisualAgent:
                 keys = ("bbox_2d", "text") if invocation.name == "text_recognize" else ("bbox_2d",)
                 output = {"regions": [{key: region[key] for key in keys} for region in output["regions"]]}
             if self._fault_pending and invocation.name in self.fault_tools:
-                faulty = _tool_faults().inject_fault(invocation.name, output, self._fault_rng)
+                faulty = _tool_faults().inject_fault(
+                    invocation.name, output, self._fault_rng, variant=self.fault_type,
+                )
                 if faulty is not None:
                     self._fault_pending = False
                     trace[-1]["fault"] = {"original": output, "injected": faulty}
@@ -552,6 +567,8 @@ class VisualAgent:
                 '"text": ' + encoded_text.replace("\\\\", "\\"),
                 1,
             )
+        if "fault" in trace[-1]:
+            self._faulted_call = (invocation.name, dict(replay_arguments), trace[-1]["fault"], serialized)
         message = _observation(serialized, invocation)
         if tool_result.images:
             images.extend(tool_result.images)

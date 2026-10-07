@@ -45,6 +45,10 @@ def question_key(data_source, source_image, question) -> tuple[str, str, str]:
     return str(data_source), str(source_image), str(question).strip()
 
 
+def replacement_source(row: dict) -> tuple[str, str]:
+    return row["data_source"], row.get("original_source") or ""
+
+
 def prefix_candidates(paths: list[Path], keys: set, stats: Counter) -> dict[tuple, list[dict]]:
     """First successful, faultable first-turn tool call of each rollout, grouped by question."""
     candidates = defaultdict(list)
@@ -101,25 +105,36 @@ def build_pair(row: dict, call: dict, rng: random.Random, pair_id: str) -> tuple
 
 
 def select_pairs(rows_by_key: dict, candidates: dict, count: int, profile: dict | None,
-                 rng: random.Random, stats: Counter) -> list[tuple[dict, dict]]:
+                 rng: random.Random, stats: Counter,
+                 source_limits: dict | None = None) -> list[tuple[dict, dict]]:
     """Sample questions without replacement, weighted by the profile's fault probability."""
     ranked = []
     for key in sorted(candidates):
-        call = rng.choice(candidates[key])
+        calls = candidates[key]
+        if source_limits is not None:
+            calls = [call for call in calls if tool_faults.fault_probability(profile, key[0], call["tool"]) > 0]
+        if not calls:
+            continue
+        call = rng.choice(calls)
         weight = tool_faults.fault_probability(profile, key[0], call["tool"])
         if weight > 0:
             # Efraimidis-Spirakis keys give weighted sampling without replacement.
             ranked.append((rng.random() ** (1 / weight), key, call))
     ranked.sort(reverse=True)
     pairs = []
+    selected_sources = Counter()
     for _, key, call in ranked:
         if len(pairs) == count:
             break
+        source = replacement_source(rows_by_key[key])
+        if source_limits is not None and selected_sources[source] >= source_limits[source]:
+            continue
         pair = build_pair(rows_by_key[key], call, rng, f"pair_{len(pairs):06d}")
         if pair is None:
             stats["unfaultable_observation"] += 1
             continue
         pairs.append(pair)
+        selected_sources[source] += 1
     if len(pairs) < count:
         raise ValueError(f"Only {len(pairs)} pairs are available for the requested {count}")
     return pairs
@@ -127,7 +142,7 @@ def select_pairs(rows_by_key: dict, candidates: dict, count: int, profile: dict 
 
 def prepare(base_dir: Path, rollout_dirs: list[Path], output_dir: Path, steps: tuple[int, int],
             fraction: float = 0.2, profile_path: Path | None = None, seed: int = 20261005,
-            factual_only: bool = False) -> dict:
+            factual_only: bool = False, same_source: bool = False) -> dict:
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -154,17 +169,36 @@ def prepare(base_dir: Path, rollout_dirs: list[Path], output_dir: Path, steps: t
     stats = Counter()
     candidates = prefix_candidates(paths, set(rows_by_key), stats)
     replaced_count = int(len(rows) * fraction) // 2 * 2
-    if factual_only:
+    source_counts = Counter(row["data_source"] for row in rows)
+    replacement_groups = Counter(replacement_source(row) for row in rows)
+    if same_source:
+        pairs = select_pairs(rows_by_key, candidates, replaced_count // 2, profile, rng, stats,
+                             {source: count // 2 for source, count in replacement_groups.items()})
+        # Keep paired questions, replacement positions, and shuffle identical in the ablation.
+        added = [row for factual, counterfactual in pairs
+                 for row in (factual, factual if factual_only else counterfactual)]
+    elif factual_only:
         # Ablation: the same number of replaced rows, each a factual prefix of a distinct question.
         pairs = select_pairs(rows_by_key, candidates, replaced_count, profile, rng, stats)
         added = [factual for factual, _ in pairs]
     else:
         pairs = select_pairs(rows_by_key, candidates, replaced_count // 2, profile, rng, stats)
         added = [row for pair in pairs for row in pair]
-    replaced = sorted(rng.sample(range(len(rows)), len(added)))
     mixed = list(rows)
-    for index, row in zip(replaced, added, strict=True):
-        mixed[index] = row
+    if same_source:
+        replaced = []
+        for source in sorted({replacement_source(row) for row in added}):
+            additions = [row for row in added if replacement_source(row) == source]
+            positions = sorted(rng.sample([i for i, row in enumerate(rows) if replacement_source(row) == source],
+                                          len(additions)))
+            replaced.extend(positions)
+            for index, row in zip(positions, additions, strict=True):
+                mixed[index] = row
+        replaced.sort()
+    else:
+        replaced = sorted(rng.sample(range(len(rows)), len(added)))
+        for index, row in zip(replaced, added, strict=True):
+            mixed[index] = row
     rng.shuffle(mixed)
 
     schema = train.schema
@@ -179,6 +213,10 @@ def prepare(base_dir: Path, rollout_dirs: list[Path], output_dir: Path, steps: t
             shutil.copyfile(base_dir / filename, output_dir / filename)
     manifest = {
         "base_data_dir": str(base_dir), "seed": seed, "replaced_fraction": fraction, "factual_only": factual_only,
+        "replacement_scope": "same_source" if same_source else "global",
+        "train_sources_before": dict(source_counts),
+        "replacement_groups_before": {"|".join(key): count for key, count in replacement_groups.items()},
+        "replacement_groups_after": dict(Counter("|".join(replacement_source(row)) for row in mixed)),
         "train_rows": len(mixed), "pairs": len(pairs), "replaced_rows": len(added),
         "replaced_indices_before_shuffle": replaced,
         "prefix_source_rollouts": [str(path) for path in paths],
@@ -209,12 +247,14 @@ def main() -> None:
     parser.add_argument("--profile", type=Path, help="Fault profile from analyze_tool_reliance.py; uniform when omitted")
     parser.add_argument("--seed", type=int, default=20261005)
     parser.add_argument("--factual-only", action="store_true", help="Ablation: replace rows with factual prefixes only")
+    parser.add_argument("--same-source", action="store_true",
+                        help="Match data_source and original_source; factual-only keeps paired questions and positions")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     low, high = (int(value) for value in args.steps.split("-"))
     manifest = prepare(args.base_data_dir.resolve(), [path.resolve() for path in args.rollout_dir],
                        args.output_dir.resolve(), (low, high), args.fraction, args.profile, args.seed,
-                       args.factual_only)
+                       args.factual_only, args.same_source)
     print(json.dumps({key: value for key, value in manifest.items() if key != "replaced_indices_before_shuffle"}, indent=2))
 
 

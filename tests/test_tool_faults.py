@@ -68,6 +68,22 @@ class ToolFaultTest(unittest.TestCase):
         self.assertEqual(tool_faults.fault_probability(profile, "visual-agent-ocr", "ocr_read"), 0.5)
         self.assertEqual(tool_faults.fault_probability(profile, "visual-agent-ocr", "depth_measure"), 0.2)
 
+    def test_confusable_ocr_faults_preserve_schema_and_support_multichar_substitutions(self):
+        for text, expected in {"0": "O", "O": "0", "1": "l", "l": "1", "rn": "m", "m": "rn"}.items():
+            faulty = tool_faults.inject_fault("ocr_read", {"text": text, "truncated": False},
+                                             random.Random(0), variant="ocr_confusable")
+            self.assertEqual(faulty, {"text": expected, "truncated": False})
+        self.assertIsNone(tool_faults.inject_fault("ocr_read", {"text": "ABC"}, random.Random(0),
+                                                  variant="ocr_confusable"))
+        self.assertIsNone(tool_faults.inject_fault("object_count", {"count": 3}, random.Random(0),
+                                                  variant="ocr_confusable"))
+        self.assertIsNone(tool_faults.inject_fault("ocr_read", {"text": r"\mathrm"}, random.Random(0),
+                                                  variant="ocr_confusable"))
+        self.assertTrue(tool_faults.inject_fault("ocr_read", {"text": r"\mathrm{0}"}, random.Random(0),
+                                                 variant="ocr_confusable")["text"].startswith(r"\mathrm{"))
+        with self.assertRaises(ValueError):
+            tool_faults.inject_fault("ocr_read", {"text": "0"}, random.Random(0), variant="unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,7 @@
+{
+    "default": 0,
+    "by_source": {
+        "visual-agent-ocr": {"ocr_read": 1},
+        "visual-agent-tallyqa": {"object_count": 1}
+    }
+}

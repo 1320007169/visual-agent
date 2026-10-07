@@ -310,7 +310,7 @@ class VisualAgentInferenceTest(unittest.TestCase):
                 observation = agent._execute_tool(ToolInvocation(name, {}, "call_0"), [], [])
                 self.assertEqual(json.loads(observation["content"]), output)
 
-    def test_fault_injection_changes_only_first_faultable_result(self):
+    def test_fault_injection_replays_same_parameters_without_executing_again(self):
         outputs = [
             {"status": "error", "message": "no target"},
             {"count": 7, "query": "cars", "source": "object_count"},
@@ -327,11 +327,52 @@ class VisualAgentInferenceTest(unittest.TestCase):
         ]
         self.assertEqual(observed[0], {"status": "error", "message": "no target"})
         self.assertNotEqual(observed[1]["count"], 7)
-        self.assertEqual(observed[2], {"count": 7})
+        self.assertEqual(observed[2], observed[1])
         self.assertNotIn("fault", trace[0])
         self.assertEqual(trace[1]["fault"], {"original": {"count": 7}, "injected": observed[1]})
         self.assertEqual(trace[1]["result"]["count"], 7)
-        self.assertNotIn("fault", trace[2])
+        self.assertEqual(trace[2]["fault"], trace[1]["fault"])
+        self.assertTrue(trace[2]["replayed_fault"])
+        self.assertEqual(len(outputs), 1)
+
+    def test_fault_replay_leaves_changed_parameters_unfaulted(self):
+        executor = FakeToolExecutor()
+        executor.execute = lambda invocation, images: ToolExecutionResult(output={"count": 7})
+        with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "object_count"}):
+            agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+        trace = []
+        agent._execute_tool(ToolInvocation("object_count", {"target_image": 0}, "first"), [], trace)
+        response = agent._execute_tool(ToolInvocation("object_count", {"target_image": 1}, "next"), [], trace)
+        self.assertEqual(json.loads(response["content"]), {"count": 7})
+        self.assertNotIn("fault", trace[-1])
+
+    def test_confusable_replay_preserves_serialization_and_new_call_id(self):
+        executor = FakeToolExecutor()
+        executor.execute = lambda invocation, images: ToolExecutionResult(output={"text": r"\(0\)"})
+        with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "ocr_read",
+                                   "VISUAL_AGENT_FAULT_TYPE": "ocr_confusable", "VISUAL_AGENT_OCR_RAW_BACKSLASH": "1"}):
+            agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+        trace = []
+        first = agent._execute_tool(ToolInvocation("ocr_read", {"target_image": 0}, "first"), [], trace)
+        executor.execute = lambda invocation, images: self.fail("Replay must not execute the tool")
+        replay = agent._execute_tool(ToolInvocation("ocr_read", {"target_image": 0}, "second"), [], trace)
+        self.assertEqual(first["content"], replay["content"])
+        self.assertEqual(replay["tool_call_id"], "second")
+        self.assertIn("O", replay["content"])
+
+    def test_ocr_replay_normalizes_default_mode_and_full_image_bbox(self):
+        executor = FakeToolExecutor()
+        executor.execute = lambda invocation, images: ToolExecutionResult(output={"text": "0"})
+        with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "ocr_read",
+                                   "VISUAL_AGENT_FAULT_TYPE": "ocr_confusable"}):
+            agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+        trace = []
+        agent._execute_tool(ToolInvocation("ocr_read", {"target_image": 0, "mode": "text"}, "first"), [], trace)
+        executor.execute = lambda invocation, images: self.fail("Equivalent arguments must replay the fault")
+        for arguments in [{"target_image": 0}, {"target_image": 0, "bbox_2d": [0, 0, 1000, 1000]}]:
+            observed = agent._execute_tool(ToolInvocation("ocr_read", arguments, "again"), [], trace)
+            self.assertEqual(json.loads(observed["content"]), {"text": "O"})
+            self.assertTrue(trace[-1]["replayed_fault"])
 
     def test_fault_injection_is_off_by_default_and_seeded_by_question(self):
         call = '<tool_call>{"name":"object_count","arguments":{"query":"cars","target_image":0}}</tool_call>'
@@ -350,6 +391,23 @@ class VisualAgentInferenceTest(unittest.TestCase):
         self.assertIsNone(faults[0])
         self.assertEqual(faults[1], faults[2])
         self.assertNotEqual(faults[1]["injected"]["count"], 12)
+
+    def test_fault_replay_is_reset_between_samples(self):
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image:
+            image.write(b"image-for-transport")
+            image.flush()
+            executor = FakeToolExecutor()
+            model = FakeModelClient()
+            responses = [
+                {"role": "assistant", "content": '<tool_call>{"name":"object_count","arguments":{}}</tool_call>'},
+                {"role": "assistant", "content": "<answer>2</answer>"},
+            ]
+            model.responses = responses + responses
+            with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "object_count"}):
+                agent = VisualAgent(model, tool_executor=executor)
+            agent.run([image.name], "First sample")
+            agent.run([image.name], "Second sample")
+            self.assertEqual(len(executor.calls), 2)
 
     def test_agent_recovers_from_tool_error(self):
         with tempfile.NamedTemporaryFile(suffix=".jpg") as image:

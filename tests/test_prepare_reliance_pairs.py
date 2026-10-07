@@ -115,6 +115,62 @@ class ReliancePairTest(unittest.TestCase):
             self.assertEqual(Counter(row["reliance_branch"] for row in train), Counter({"": 6, "factual": 4}))
             self.assertEqual(len({row["question"] for row in train if row["reliance_branch"]}), 4)
 
+    @unittest.skipUnless(importlib.util.find_spec("pyarrow"), "pyarrow is required")
+    def test_same_source_ablation_matches_questions_positions_and_untouched_sources(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        sources = ["visual-agent-ocr", "visual-agent-tallyqa", "visual-agent-depth-raw"]
+        rows = [{"images": [f"{source}_{i}.jpg"], "source_image": f"{source}_{i}.jpg",
+                 "question": f"{source}_{i}", "solution": "5", "data_source": source,
+                 "original_source": "hme100k" if source == "visual-agent-ocr" and i == 0 else "other"}
+                for source in sources for i in range(4)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base, rollouts = root / "base", root / "rollouts"
+            base.mkdir()
+            rollouts.mkdir()
+            pq.write_table(pa.Table.from_pylist(rows), base / "train.parquet")
+            pq.write_table(pa.Table.from_pylist(rows[:1]), base / "val.parquet")
+            profile = root / "profile.json"
+            profile.write_text(json.dumps({"default": 0, "by_source": {
+                "visual-agent-ocr": {"ocr_read": 1}, "visual-agent-tallyqa": {"object_count": 1}}}))
+            records = [record(row["data_source"], row["source_image"], row["question"], [
+                ("ocr_read", {"target_image": 0}, 1, "success", {"text": "5"})
+                if row["data_source"] == "visual-agent-ocr" else COUNT_CALL]) for row in rows]
+            (rollouts / "1.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+            manifests, outputs = [], []
+            for factual_only in [False, True]:
+                output = root / str(factual_only)
+                manifests.append(pairs.prepare(base, [rollouts], output, (1, 1), fraction=0.5,
+                                               profile_path=profile, same_source=True, factual_only=factual_only))
+                outputs.append(pq.read_table(output / "train.parquet").to_pylist())
+                self.assertEqual((output / "val.parquet").read_bytes(), (base / "val.parquet").read_bytes())
+            self.assertEqual(manifests[0]["replaced_indices_before_shuffle"],
+                             manifests[1]["replaced_indices_before_shuffle"])
+            for output in outputs:
+                self.assertEqual(Counter(r["data_source"] for r in output), Counter(r["data_source"] for r in rows))
+                self.assertEqual(Counter(pairs.replacement_source(r) for r in output),
+                                 Counter(pairs.replacement_source(r) for r in rows))
+                self.assertFalse(any(r["reliance_branch"] for r in output if r["original_source"] == "hme100k"))
+                depth = [{k: v for k, v in r.items() if k not in pairs.RELIANCE_FIELDS}
+                         for r in output if r["data_source"] == "visual-agent-depth-raw"]
+                self.assertEqual(sorted(depth, key=lambda r: r["question"]), rows[8:])
+            factual_prefixes = {r["reliance_pair_id"]: r["reliance_prefix"] for r in outputs[0]
+                                if r["reliance_branch"] == "factual"}
+            for paired, control in zip(*outputs, strict=True):
+                if paired["reliance_branch"] == "counterfactual":
+                    expected = {**paired, "reliance_branch": "factual", "reliance_fault": "",
+                                "reliance_prefix": factual_prefixes[paired["reliance_pair_id"]]}
+                    self.assertEqual(control, expected)
+                else:
+                    self.assertEqual(control, paired)
+            self.assertEqual(Counter(r["reliance_branch"] for r in outputs[1]), {"": 6, "factual": 6})
+            with self.assertRaisesRegex(ValueError, "Only 3 pairs"):
+                pairs.prepare(base, [rollouts], root / "too_many", (1, 1), fraction=0.9,
+                              profile_path=profile, same_source=True)
+            self.assertFalse((root / "too_many").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ load it by file path without importing the verl package.
 from __future__ import annotations
 
 import random
+import re
 import string
 from typing import Any
 
@@ -96,6 +97,20 @@ def _ocr_fault(observation: dict, rng: random.Random, ground_truth: Any) -> dict
     return None if faulty == text else {**observation, "text": faulty}
 
 
+def _ocr_confusable_fault(observation: dict, rng: random.Random, ground_truth: Any) -> dict | None:
+    text = observation.get("text")
+    if not isinstance(text, str):
+        return None
+    commands = list(re.finditer(r"\\[a-zA-Z]+", text))
+    matches = [match for match in re.finditer(r"rn|[0O1lm]", text)
+               if not any(command.start() <= match.start() < command.end() for command in commands)]
+    if not matches:
+        return None
+    match = rng.choice(matches)
+    replacement = {"0": "O", "O": "0", "1": "l", "l": "1", "rn": "m", "m": "rn"}[match.group()]
+    return {**observation, "text": text[:match.start()] + replacement + text[match.end():]}
+
+
 _FAULTS = {
     "object_count": _count_fault,
     "grounding_detect": _detection_fault,
@@ -104,15 +119,20 @@ _FAULTS = {
 }
 
 
-def inject_fault(tool_name: str, observation: Any, rng: random.Random, ground_truth: Any = None) -> dict | None:
+def inject_fault(tool_name: str, observation: Any, rng: random.Random, ground_truth: Any = None,
+                 *, variant: str = "training") -> dict | None:
     """Return a wrong but well-formed observation, or None when it cannot be faulted.
 
     ``ground_truth`` is optional; when given, count faults avoid the true count
     and OCR faults corrupt the span containing the answer.
     """
+    if variant not in {"training", "ocr_confusable"}:
+        raise ValueError(f"Unknown fault variant: {variant}")
     if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
         return None
-    fault = _FAULTS.get(tool_name)
+    fault = _FAULTS.get(tool_name) if variant == "training" else (
+        _ocr_confusable_fault if tool_name == "ocr_read" else None
+    )
     return fault(observation, rng, ground_truth) if fault else None
 
 
