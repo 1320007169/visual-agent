@@ -802,3 +802,152 @@ step10 结束时训练计时约 6 小时 15 分，10 小时时限从初始验证
 - 最近保存：`saves/visual_agent_zwz_rl/qwen3/$RUN/global_step_10/`。
 - 最佳权重：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_huggingface/`。
 - 最佳指标：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_checkpoint.json`。
+
+## 16 卡 v2-lite 反事实 RL 训练进展（2026-10-07）
+
+核对时间：北京时间 2026-10-07 12:37。本节固定覆盖已完成的 step1–20，
+以及 step0、step5、step10、step15、step20 的验证，不代表整轮训练已经结束。
+最近保存和最佳 checkpoint 均为 step20，普通验证宏平均由 57.68% 提高至 67.52%。
+这说明当前训练配置能带来普通验证提升，尚不能证明提升来自反事实机制。
+
+### 实验目的、数据与启动配置
+
+v2-lite 检验错误工具观察前缀与现有 GRPO 能否在有组内答题差异的场景中学到纠错，
+以及遇到错误观察时是否会更有针对性地核查。数据选择依据见
+[v1 组构成、重调审计与 v2-lite 准备记录](../../crt16_v2_lite_audit.md)；
+该文件的“尚未启动”描述属于准备阶段，本节补充实际运行结果。
+
+本轮继续从原始 `Qwen3-VL-8B-Instruct` 开始，未继承 v1 权重或优化器。
+factual 与 counterfactual 训练行各自组成 16 条采样的 GRPO 组；固定工具前缀不参与生成 loss，
+本轮没有增加成对差分奖励或强制核查分支。
+
+| 项目 | 本轮设置 |
+|---|---|
+| Run ID | `qwen3base_multitool_vlocr_reliance_v2lite_n16_2node_20261006T141420415217_5464e0b8` |
+| 启动时间 | 北京时间 2026-10-06 22:14 左右 |
+| 仓库入口 | [run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh](../../scripts/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh) |
+| ModelArts 提交入口 | `/home/ma-user/work/algorithm/codebkp/run_visual_agent/run_visual_agent_multitool_vlocr_reliance_v2_lite_2node_16gpu_modelarts.sh` |
+| 资源 | 2 节点 × 8 卡；14 卡训练、2 卡工具，每节点 GPU7 为工具卡 |
+| 初始模型 | `$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct` |
+| train batch / PPO mini-batch / rollout n | `126 / 42 / 16`，每 step 2,016 条轨迹 |
+| val batch / 最大并发 | `126 / 112` |
+| 实际恢复配置 | `trainer.resume_mode=disable`，本次为首次训练 |
+| shuffle / 总计划 | `TRAIN_SHUFFLE=True`；1 epoch，269 step |
+| 验证 / 保存周期 | `TEST_FREQ=5`、`SAVE_FREQ=5` |
+| 时间限制 | `TRAINER_STOP_AFTER_SECONDS=0`，已取消原 10 小时限制 |
+
+`BASE=/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx`。
+外部入口沿用原 16 卡任务的四处软链接、CUDA/toolchain 和 Python 环境初始化。
+脚本已支持显式设置 `RESUME_FROM_PATH`，恢复同一 v2-lite 数据与训练拓扑下的完整
+`global_step_N`，包括优化器和数据游标；本次从原始模型开始，尚未实测中断后的 GPU 恢复。
+
+数据目录为 `data/vlocr_reliance_pairs_v2_lite_20261006`，使用
+[严格来源与工具 profile](../../configs/tool_reliance_v2_lite.json)，
+`fraction=0.17`、`seed=20261005`。前缀仍来自原 64 卡运行的 step1–53。
+
+| 划分 / 分支 | 行数 | 占训练集比例 |
+|---|---:|---:|
+| 普通训练行 | 28,155 | 约 83% |
+| factual 训练行 | 2,883 | 约 8.5% |
+| counterfactual 训练行 | 2,883 | 约 8.5% |
+| 训练总计 | 33,921 | 100% |
+| 验证集 | 1,312 | — |
+| 训练 + 验证 | 35,233 | — |
+
+2,883 对中，ChartQA/ocr_read 为 1,367 对，OCR/ocr_read 为 1,250 对，
+TallyQA/object_count 为 266 对。严格筛选后当前算法与种子最多可提供 2,936 对，
+不足原 20% 替换所需的 3,392 对，因此本轮使用已确认的 17% 替换比例。
+普通行仍覆盖原有七类来源，验证文件与基础数据保持一致，未注入反事实观察。
+
+### 训练 reward 与普通验证
+
+逐条核对 step1–20 共 40,320 条轨迹，均满足
+`score = 0.9 × acc + 0.1 × format`，`reward_valid` 均为 1。
+reward 包含格式分，不能直接当作答案准确率；下表按每五步的全部轨迹汇总。
+
+| 训练窗口 | 轨迹数 | 平均 reward | 答案准确率 |
+|---|---:|---:|---:|
+| step1–5 | 10,080 | 0.5029 | 45.31% |
+| step6–10 | 10,080 | 0.5467 | 49.79% |
+| step11–15 | 10,080 | 0.5795 | 53.35% |
+| step16–20 | 10,080 | 0.6150 | 57.26% |
+
+窗口均值上升，但单步仍有波动；step18、step19、step20 的日志 reward 分别为
+0.513、0.662、0.669。各窗口题目不同，不能把窗口差值当成同题能力提升。
+
+验证准确率单位为 %。每次验证共 1,312 条，均无无效 reward；
+宏平均为下列五个来源等权平均，不是全部样本的微平均。
+
+| 验证来源 | 样本数 | step0 | step5 | step10 | step15 | step20 |
+|---|---:|---:|---:|---:|---:|---:|
+| HRBench4K | 800 | 69.00 | 70.88 | 71.13 | 73.38 | 74.25 |
+| depth | 84 | 52.38 | 55.95 | 54.76 | 58.33 | 55.95 |
+| TallyQA | 108 | 63.89 | 74.07 | 77.78 | 81.48 | 82.41 |
+| ChartQA | 160 | 26.88 | 29.38 | 33.75 | 33.75 | 35.00 |
+| OCR | 160 | 76.25 | 88.75 | 90.00 | 89.38 | 90.00 |
+| **宏平均** | — | **57.68** | **63.81** | **65.48** | **67.26** | **67.52** |
+
+step20 较本轮初始提高 9.84 个百分点，较 step15 提高 0.26 个百分点，
+其中 depth 较 step15 回落。最佳指标为
+`val-core/visual-agent/acc/macro_mean=0.6752195767195767`。
+本轮初始成绩是 57.68%，不能误用 v1 的 57.53% 作为基线。
+
+### 反事实分支表现与组内学习信号
+
+以下固定汇总 step1–20。直接作答指首个生成轮次没有工具调用，与
+`analyze_tool_reliance.py` 的 `first_action_effect.answer.share` 口径一致，
+不计固定前缀中的工具调用。每组都已核验为 16 条轨迹；全对、全错和混合按答案 acc 分类。
+
+| 来源 / 前缀工具 | 分支 | 轨迹数 | 答案准确率 | 直接作答率 | 组数 | 全对 | 全错 | 混合 | reward 有差异 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ChartQA / ocr_read | factual | 1,536 | 50.00% | 83.98% | 96 | 40 | 38 | 18 | 28 |
+| ChartQA / ocr_read | counterfactual | 1,712 | 55.55% | 90.19% | 107 | 43 | 33 | 31 | 35 |
+| OCR / ocr_read | factual | 1,296 | 68.75% | 97.92% | 81 | 49 | 20 | 12 | 13 |
+| OCR / ocr_read | counterfactual | 1,440 | 54.10% | 95.83% | 90 | 38 | 32 | 20 | 22 |
+| TallyQA / object_count | factual | 336 | 79.46% | 100.00% | 21 | 16 | 4 | 1 | 1 |
+| TallyQA / object_count | counterfactual | 272 | 52.57% | 78.31% | 17 | 6 | 5 | 6 | 6 |
+
+反事实组的答案混合比例分别为 ChartQA 28.97%、OCR 22.22%、TallyQA 35.29%，
+说明存在组内答题奖励差异，并非全部整组同分。单纯格式分差异也会产生 reward 差异，
+不能把最后一列全部解释为纠错学习信号。
+
+以首轮调用工具作为核查的代理指标，ChartQA 的 factual/counterfactual 为
+16.02%/9.81%，OCR 为 2.08%/4.17%，TallyQA 为 0%/21.69%。
+不同来源未表现出一致的选择性核查，TallyQA 反事实仅有 17 个训练组，样本尤其有限。
+这些分支来自不同训练题和不同更新阶段，不是同题、同 checkpoint 的配对对照。
+直接作答也可能是直接看图纠正错误观察，不能仅据此认定盲从或方法失败。
+
+### 运行健康、保存与后续验证
+
+截至 step20，训练加五次验证共记录 46,880 条评分样本。
+主 judge 的 14,909 次外部请求均失败；备用 judge 接管全部 14,909 次，
+备用失败数为 0，`final_unresolved=0`。主配置为 `deepseek-v4.1-flash`，
+实际外部 judge 评分由备用 `deepseek-v4-flash` 完成；后续对照需统一实际 judge。
+
+step1–20 共记录 83,840 次工具调用，其中 1,120 次为 error（1.34%），
+包含 OCR 空响应与工具参数校验等错误；2 条训练轨迹被截断。
+日志中未发现 CUDA OOM、RayTaskError 或任务退出错误。
+最近普通 step 约 29–35 分钟，step20 含验证和保存约 70 分钟；
+step20 结束时训练计时约 13 小时 25 分，总计划尚余 249 步。
+
+已核验 `global_step_20/data.pt` 非空，actor 下 14 个训练 rank 的模型、优化器和
+extra_state 共 42 个 `.pt` 分片均非空，Hugging Face 索引引用的 8 个权重分片均存在且非空。
+`latest_checkpointed_iteration.txt` 与 `best_checkpoint.json` 均指向 step20。
+文件完整性核验不等同于已完成实际恢复训练测试。
+
+当前结论是训练 reward 和普通验证改善，反事实组存在部分学习信号，
+但尚未证明模型学会了识别错误工具观察或选择性核查。
+下一步应使用 step0 与 step20 在同一批独立题目上做 factual/counterfactual 配对评测，
+统计错误观察下答对率、错误内容照抄率、纠错率及两分支核查率差；
+若要归因到反事实方法，还需同初始模型、来源、预算与 judge 的普通 RL 对照。
+目前没有独立反事实评测或同预算普通 RL 对照结果。
+
+原始证据路径（`RUN` 为本节完整 Run ID，以下文件未纳入 Git）：
+
+- 数据构造信息：`data/vlocr_reliance_pairs_v2_lite_20261006/manifest.json`。
+- 训练日志：`$BASE/logs/visual-agent-zwz-rl/$RUN/$RUN-node0.log`。
+- 训练轨迹：`$BASE/rollouts/visual-agent-zwz-rl/$RUN/{1..20}.jsonl`。
+- 验证轨迹：`saves/visual_agent_zwz_rl/qwen3/$RUN/validation/{0,5,10,15,20}.jsonl`。
+- 最近保存：`saves/visual_agent_zwz_rl/qwen3/$RUN/global_step_20/`。
+- 最佳权重：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_huggingface/`。
+- 最佳指标：`saves/visual_agent_zwz_rl/qwen3/$RUN/best_checkpoint.json`。
