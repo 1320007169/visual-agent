@@ -155,7 +155,11 @@ def _ocr_confusable_fault(observation: dict, rng: random.Random, ground_truth: A
         return None
     match = rng.choice(matches)
     replacement = replacements[match.group()]
-    return {**observation, "text": text[:match.start()] + replacement + text[match.end():]}
+    faulty = text[:match.start()] + replacement + text[match.end():]
+    # A digit replaced by a letter can extend the preceding LaTeX command.
+    if re.findall(r"\\[a-zA-Z]+", faulty) != [command.group() for command in commands]:
+        return None
+    return {**observation, "text": faulty}
 
 
 _FAULTS = {

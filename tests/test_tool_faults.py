@@ -1,5 +1,6 @@
 import importlib.util
 import random
+import re
 import unittest
 from pathlib import Path
 
@@ -11,6 +12,23 @@ SPEC.loader.exec_module(tool_faults)
 
 
 class ToolFaultTest(unittest.TestCase):
+    def test_hme_and_confusable_faults_cannot_extend_latex_command_names(self):
+        for variant in ("hme", "ocr_confusable"):
+            with self.subTest(variant=variant):
+                self.assertIsNone(tool_faults.inject_fault(
+                    "ocr_read", {"text": r"\neq0"}, random.Random(0), variant=variant))
+                original = r"\neq0 + \frac{1}{0}"
+                valid = []
+                for seed in range(20):
+                    faulty = tool_faults.inject_fault(
+                        "ocr_read", {"text": original}, random.Random(seed), variant=variant)
+                    if faulty is not None:
+                        valid.append(faulty)
+                        self.assertEqual(re.findall(r"\\[a-zA-Z]+", faulty["text"]),
+                                         re.findall(r"\\[a-zA-Z]+", original))
+                        self.assertNotEqual(faulty["text"], original)
+                self.assertTrue(valid)
+
     def test_replay_normalizes_defaults_and_duplicate_image_indices(self):
         images = ["same-image", "other-image", "same-image"]
         expected = {"target_image": 0, "mode": "text", "bbox_2d": [0, 0, 1000, 1000]}

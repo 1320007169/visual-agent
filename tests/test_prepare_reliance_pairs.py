@@ -29,6 +29,102 @@ COUNT_CALL = ("object_count", {"query": "apples", "target_image": 0}, 1, "succes
 
 
 class ReliancePairTest(unittest.TestCase):
+    def test_ocr_pair_rejects_every_accepted_answer_alias(self):
+        row = {"solution": "35 of 42", "answer_aliases": ["35 of 42", "35"],
+               "data_source": "visual-agent-ocr", "original_source": "docvqa"}
+        call = {"tool": "ocr_read", "arguments": {"target_image": 0},
+                "observation": {"text": "35 of 42"}}
+        self.assertIsNone(pairs.build_pair(row, call, random.Random(1), "pair"))
+        for text in ("35 of 62", "\\(\\mathrm{35}\\) of 62"):
+            with patch.object(pairs.tool_faults, "inject_fault", return_value={"text": text}):
+                self.assertIsNone(pairs.build_pair(row, call, random.Random(0), "pair"))
+        with patch.object(pairs.tool_faults, "inject_fault", return_value={"text": "36 of 42"}):
+            self.assertIsNotNone(pairs.build_pair(row, call, random.Random(0), "pair"))
+
+    def test_original_correct_is_recorded_without_rejecting_natural_errors(self):
+        row = {"solution": "5", "data_source": "visual-agent-tallyqa"}
+        for count, expected in ((5, True), (7, False)):
+            call = {"tool": "object_count", "arguments": {"target_image": 0, "query": "apples"},
+                    "observation": {"count": count}}
+            group = pairs.build_pair(row, call, random.Random(0), "pair")
+            self.assertIsNotNone(group)
+            self.assertTrue(all(r["original_correct"] is expected for r in group))
+        row = {"solution": "OPEN", "answer_aliases": ["open", "opened"],
+               "data_source": "visual-agent-ocr"}
+        for text, expected in (("Sign: opened", True), ("CLOSED", False)):
+            call = {"tool": "ocr_read", "arguments": {"target_image": 0}, "observation": {"text": text}}
+            with patch.object(pairs.tool_faults, "inject_fault", return_value={"text": "XYZ"}):
+                group = pairs.build_pair(row, call, random.Random(0), "pair")
+            self.assertTrue(all(r["original_correct"] is expected for r in group))
+
+    def test_multiple_faults_are_distinct_and_insufficient_groups_are_skipped(self):
+        row = {"solution": "5", "data_source": "visual-agent-tallyqa"}
+        call = {"tool": "object_count", "arguments": {"query": "apples", "target_image": 0},
+                "observation": {"count": 7}}
+        group = pairs.build_pair(row, call, random.Random(0), "pair", counterfactual_variants=2)
+        self.assertEqual(len(group), 3)
+        self.assertEqual([r["reliance_branch"] for r in group], ["factual", "counterfactual", "counterfactual"])
+        self.assertEqual(len({r["reliance_fault"] for r in group[1:]}), 2)
+        for r in group[1:]:
+            self.assertNotIn(json.loads(json.loads(r["reliance_fault"])["observation"])["count"], (5, 7))
+        row = {"solution": "x", "data_source": "visual-agent-ocr", "original_source": "hme100k"}
+        call = {"tool": "ocr_read", "arguments": {"target_image": 0}, "observation": {"text": "x"}}
+        self.assertIsNone(pairs.build_pair(row, call, random.Random(0), "pair", counterfactual_variants=2))
+
+    @unittest.skipUnless(importlib.util.find_spec("pyarrow"), "pyarrow is required")
+    def test_k2_p_f_v_match_questions_slots_order_and_correctness_metadata(self):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        sources = ["visual-agent-ocr", "visual-agent-tallyqa", "visual-agent-depth-raw"]
+        rows = [{"source_image": f"{source}_{i}.jpg", "images": [f"{source}_{i}.jpg"],
+                 "question": f"{source}_{i}", "solution": "x=5" if source == "visual-agent-ocr" else "5",
+                 "data_source": source, "original_source": "hme100k" if source == "visual-agent-ocr" else "other"}
+                for source in sources for i in range(12)]
+        root = Path(tempfile.mkdtemp(prefix="reliance-k2-test-"))
+        base, rollouts = root / "base", root / "rollouts"
+        base.mkdir()
+        rollouts.mkdir()
+        pq.write_table(pa.Table.from_pylist(rows), base / "train.parquet")
+        pq.write_table(pa.Table.from_pylist(rows[:1]), base / "val.parquet")
+        profile = root / "profile.json"
+        profile.write_text(json.dumps({"default": 0, "by_source": {
+            "visual-agent-ocr": {"ocr_read": 1}, "visual-agent-tallyqa": {"object_count": 1}}}))
+        records = [record(r["data_source"], r["source_image"], r["question"], [
+            ("ocr_read", {"target_image": 0}, 1, "success", {"text": "x=5"})
+            if r["data_source"] == "visual-agent-ocr" else COUNT_CALL]) for r in rows]
+        (rollouts / "1.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
+        manifests, outputs = [], []
+        for variant, flags in (("P", {}), ("F", {"factual_only": True}), ("V", {"unprefixed_only": True})):
+            output = root / variant
+            manifests.append(pairs.prepare(base, [rollouts], output, (1, 1), fraction=0.25,
+                                           profile_path=profile, same_source=True, counterfactual_variants=2, **flags))
+            outputs.append(pq.read_table(output / "train.parquet").to_pylist())
+            self.assertEqual((output / "val.parquet").read_bytes(), (base / "val.parquet").read_bytes())
+        for manifest, output in zip(manifests, outputs):
+            self.assertEqual((manifest["pairs"], manifest["replaced_rows"], manifest["counterfactual_variants"]), (3, 9, 2))
+            self.assertEqual(manifest["replaced_indices_before_shuffle"], manifests[0]["replaced_indices_before_shuffle"])
+            self.assertEqual(manifest["original_correct_by_source"], manifests[0]["original_correct_by_source"])
+            self.assertEqual(Counter(pairs.replacement_source(r) for r in output), Counter(pairs.replacement_source(r) for r in rows))
+            for source, count in manifest["prefixed_groups"].items():
+                self.assertLessEqual(count * 2, manifest["replacement_groups_before"][source])
+        self.assertEqual(Counter(r["reliance_branch"] for r in outputs[0]), {"": 27, "factual": 3, "counterfactual": 6})
+        self.assertEqual(Counter(r["reliance_branch"] for r in outputs[1]), {"": 27, "factual": 9})
+        self.assertEqual(Counter(r["reliance_branch"] for r in outputs[2]), {"": 36})
+        self.assertEqual(manifests[2]["prefixed_groups"], {})
+        prefixes = {r["reliance_pair_id"]: r["reliance_prefix"] for r in outputs[0] if r["reliance_branch"] == "factual"}
+        for paired, factual, vanilla in zip(*outputs, strict=True):
+            if paired["reliance_pair_id"]:
+                self.assertEqual(factual, {**paired, "reliance_prefix": prefixes[paired["reliance_pair_id"]],
+                                          "reliance_branch": "factual", "reliance_fault": ""})
+                self.assertEqual(vanilla, {**paired, "reliance_prefix": "", "reliance_fault": "", "reliance_branch": ""})
+            else:
+                self.assertEqual(paired, factual)
+                self.assertEqual(paired, vanilla)
+                self.assertIsNone(paired["original_correct"])
+        for source, stats in manifests[0]["original_correct_by_source"].items():
+            self.assertEqual(stats["correct_fraction"], 1.0 if source == "visual-agent-ocr" else 0.0)
+
     def test_ocr_pair_is_rejected_when_normalized_answer_survives_injection(self):
         row = {"solution": "x = 5", "data_source": "visual-agent-ocr", "original_source": "hme100k"}
         call = {"tool": "ocr_read", "arguments": {"target_image": 0}, "observation": {"text": "x=5"}}
