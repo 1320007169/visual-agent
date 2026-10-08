@@ -80,7 +80,14 @@ class RolloutSourceMetadataTest(unittest.TestCase):
             "validation",
         )
 
-        self.assertEqual(metadata, [{"dataset_split": "validation", "question": "Which side?", "ground_truth": "below"}])
+        self.assertEqual(metadata, [{"dataset_split": "validation", "dataset_index": 7,
+                                     "question": "Which side?", "ground_truth": "below"}])
+
+    def test_repeated_question_variants_keep_distinct_training_slots(self):
+        rows = [{"source_index": 42, "extra_info": {"index": np.int64(index)}} for index in (10, 20, 30)]
+        metadata = Trainer._generation_source_metadata(Batch([rows[2], rows[0], rows[1], rows[2]]), "train")
+        self.assertEqual([row["dataset_index"] for row in metadata], [30, 10, 20, 30])
+        self.assertEqual([row["source_index"] for row in metadata], [42, 42, 42, 42])
 
     def test_dump_roundtrip_keeps_source_and_output_together(self):
         trainer = Trainer()

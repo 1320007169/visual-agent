@@ -794,6 +794,8 @@ class RayPPOTrainer:
 
             extra_infos = batch.non_tensor_batch.get("extra_info")
             extra_info = extra_infos[index] if extra_infos is not None else None
+            if isinstance(extra_info, dict) and "index" in extra_info:
+                row["dataset_index"] = int(extra_info["index"])
             if "question" not in row and isinstance(extra_info, dict):
                 question = extra_info.get("question")
                 if isinstance(question, str):

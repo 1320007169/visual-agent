@@ -1,0 +1,44 @@
+{
+  "generation_commit": "49a7a1ae246212b898989c032f5b2b0773c75426",
+  "generation_code_sha256": {
+    "scripts/prepare_reliance_pairs.py": "a5a4fd7e4f6d05ed096c032b87d45090211fcc5a64cfe35877d4b786a4946721",
+    "reinforcement_learning/verl/tools/tool_faults.py": "01454481813a7c71103fe3cb40b28a8e8ae7305be752b05808ed207426c56529"
+  },
+  "seed": 20261005,
+  "rollout_steps": [
+    1,
+    69
+  ],
+  "counterfactual_variants": 2,
+  "groups": 927,
+  "train_rows": 33921,
+  "datasets": {
+    "P": {
+      "directory": "data/vlocr_reliance_pairs_v3_fixed_20261008",
+      "train_sha256": "f68915c84fc835adb1c30888959f9e0ff367d457cd0b1a8f1ca14ec83a7f0b92",
+      "val_sha256": "5a23cb23492426272a58e778afaf561d6c226fc342cd68575ca2e6300c7b29ee",
+      "train_branches": {
+        "ordinary": 31140,
+        "factual": 927,
+        "counterfactual": 1854
+      }
+    },
+    "F": {
+      "directory": "data/vlocr_reliance_factual_v3_fixed_20261008",
+      "train_sha256": "510d3fcb641cd3b8616cbf26e5755e2505933cba51d3fd66efd0929c35451b69",
+      "val_sha256": "5a23cb23492426272a58e778afaf561d6c226fc342cd68575ca2e6300c7b29ee",
+      "train_branches": {
+        "ordinary": 31140,
+        "factual": 2781
+      }
+    },
+    "V": {
+      "directory": "data/vlocr_reliance_unprefixed_v3_fixed_20261008",
+      "train_sha256": "3a2e443eae8a2b1c85352902e04ba7190e0915afc927ee07e31b2a5e72b67127",
+      "val_sha256": "5a23cb23492426272a58e778afaf561d6c226fc342cd68575ca2e6300c7b29ee",
+      "train_branches": {
+        "ordinary": 33921
+      }
+    }
+  }
+}
