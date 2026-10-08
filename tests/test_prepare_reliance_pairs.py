@@ -5,6 +5,7 @@ import random
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -28,6 +29,15 @@ COUNT_CALL = ("object_count", {"query": "apples", "target_image": 0}, 1, "succes
 
 
 class ReliancePairTest(unittest.TestCase):
+    def test_ocr_pair_is_rejected_when_normalized_answer_survives_injection(self):
+        row = {"solution": "x = 5", "data_source": "visual-agent-ocr", "original_source": "hme100k"}
+        call = {"tool": "ocr_read", "arguments": {"target_image": 0}, "observation": {"text": "x=5"}}
+        with patch.object(pairs.tool_faults, "inject_fault", return_value={"text": r"\(\mathrm{x}=5\) or y=3"}) as inject:
+            self.assertIsNone(pairs.build_pair(row, call, random.Random(0), "pair"))
+        self.assertEqual(inject.call_args.kwargs["variant"], "hme")
+        with patch.object(pairs.tool_faults, "inject_fault", return_value={"text": r"\(x=3\)"}):
+            self.assertIsNotNone(pairs.build_pair(row, call, random.Random(0), "pair"))
+
     def test_prefix_candidates_keep_only_faultable_first_calls(self):
         keys = {pairs.question_key("visual-agent-tallyqa", "a.jpg", "How many apples?")}
         records = [
@@ -124,7 +134,7 @@ class ReliancePairTest(unittest.TestCase):
         rows = [{"images": [f"{source}_{i}.jpg"], "source_image": f"{source}_{i}.jpg",
                  "question": f"{source}_{i}", "solution": "5", "data_source": source,
                  "original_source": "hme100k" if source == "visual-agent-ocr" and i == 0 else "other"}
-                for source in sources for i in range(4)]
+                for source in sources for i in range(8)]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             base, rollouts = root / "base", root / "rollouts"
@@ -142,7 +152,7 @@ class ReliancePairTest(unittest.TestCase):
             manifests, outputs = [], []
             for factual_only in [False, True]:
                 output = root / str(factual_only)
-                manifests.append(pairs.prepare(base, [rollouts], output, (1, 1), fraction=0.5,
+                manifests.append(pairs.prepare(base, [rollouts], output, (1, 1), fraction=0.25,
                                                profile_path=profile, same_source=True, factual_only=factual_only))
                 outputs.append(pq.read_table(output / "train.parquet").to_pylist())
                 self.assertEqual((output / "val.parquet").read_bytes(), (base / "val.parquet").read_bytes())
@@ -153,9 +163,12 @@ class ReliancePairTest(unittest.TestCase):
                 self.assertEqual(Counter(pairs.replacement_source(r) for r in output),
                                  Counter(pairs.replacement_source(r) for r in rows))
                 self.assertFalse(any(r["reliance_branch"] for r in output if r["original_source"] == "hme100k"))
+                prefixed = Counter(pairs.replacement_source(r) for r in output if r["reliance_branch"])
+                totals = Counter(pairs.replacement_source(r) for r in rows)
+                self.assertTrue(all(count <= totals[source] // 2 for source, count in prefixed.items()))
                 depth = [{k: v for k, v in r.items() if k not in pairs.RELIANCE_FIELDS}
                          for r in output if r["data_source"] == "visual-agent-depth-raw"]
-                self.assertEqual(sorted(depth, key=lambda r: r["question"]), rows[8:])
+                self.assertEqual(sorted(depth, key=lambda r: r["question"]), rows[16:])
             factual_prefixes = {r["reliance_pair_id"]: r["reliance_prefix"] for r in outputs[0]
                                 if r["reliance_branch"] == "factual"}
             for paired, control in zip(*outputs, strict=True):
@@ -165,7 +178,7 @@ class ReliancePairTest(unittest.TestCase):
                     self.assertEqual(control, expected)
                 else:
                     self.assertEqual(control, paired)
-            self.assertEqual(Counter(r["reliance_branch"] for r in outputs[1]), {"": 6, "factual": 6})
+            self.assertEqual(Counter(r["reliance_branch"] for r in outputs[1]), {"": 18, "factual": 6})
             with self.assertRaisesRegex(ValueError, "Only 3 pairs"):
                 pairs.prepare(base, [rollouts], root / "too_many", (1, 1), fraction=0.9,
                               profile_path=profile, same_source=True)

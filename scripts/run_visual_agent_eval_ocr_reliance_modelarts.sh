@@ -21,7 +21,7 @@ fi
 
 checkpoint_root="$BASE/visual-agent/saves/visual_agent_zwz_rl/qwen3"
 v2_run="$checkpoint_root/qwen3base_multitool_vlocr_reliance_v2lite_n16_2node_20261006T141420415217_5464e0b8"
-read -r -a labels <<< "${EVAL_CHECKPOINTS:-base vanilla53 v2_step30}"
+read -r -a labels <<< "${EVAL_CHECKPOINTS:-base vanilla53 v2_step40 v2_step50}"
 models=()
 steps=()
 for label in "${labels[@]}"; do
@@ -34,6 +34,7 @@ for label in "${labels[@]}"; do
         v2_step30) models+=("${V2_STEP30_MODEL_PATH:-$v2_run/evaluation_snapshots/step30_huggingface}"); steps+=(30) ;;
         v2_step40) models+=("$v2_run/evaluation_snapshots/step40_huggingface"); steps+=(40) ;;
         v2_step45) models+=("$v2_run/evaluation_snapshots/step45_huggingface"); steps+=(45) ;;
+        v2_step50) models+=("$v2_run/evaluation_snapshots/step50_huggingface"); steps+=(50) ;;
         *) echo "error: unknown checkpoint label: $label" >&2; exit 2 ;;
     esac
 done

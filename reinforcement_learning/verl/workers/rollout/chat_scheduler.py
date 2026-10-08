@@ -38,6 +38,7 @@ from tensordict import TensorDict
 
 from verl.protocol import DataProto
 from verl.tools.base_tool import initialize_tools_from_config
+from verl.tools import tool_faults
 from verl.utils import hf_processor, hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.workers.rollout.response_budget import ResponseBudget, retain_trace
@@ -358,10 +359,16 @@ class ToolCompletionCallback(CompletionCallback):
         tool_metrics: Dict[str, Any] = {}
         tool_error: Exception | None = None
         fault = info.get("reliance_fault")
+        aliases = info.setdefault("image_aliases", {})
+        images = info.get("images", [])
+        if fault:
+            tool_trace["canonical_arguments"] = tool_faults.normalize_replay_arguments(tool_name, tool_args, images, aliases)
         try:
             if tool is None:
                 raise KeyError(f"Model requested unknown tool: {tool_name}")
-            if fault and fault["tool"] == tool_name and fault["arguments"] == tool_args:
+            if (fault and fault["tool"] == tool_name
+                    and tool_faults.normalize_replay_arguments(tool_name, fault["arguments"], images, aliases)
+                    == tool_trace["canonical_arguments"]):
                 # A counterfactual prefix's fault persists, as a deterministic tool would repeat it.
                 tool_response = fault["observation"]
                 tool_trace["replayed_fault"] = True
@@ -403,6 +410,9 @@ class ToolCompletionCallback(CompletionCallback):
             tool_trace["raw_result"] = tool_metrics["raw_result"]
         tool_trace["model_observation"] = tool_response
         if returned_images:
+            if fault and not tool_metrics.get("tool_error"):
+                tool_faults.record_image_aliases(tool_name, tool_args, tool_metrics["raw_result"],
+                                                images, returned_images, aliases)
             info.setdefault("images", []).extend(returned_images)
 
         if xml_mode:

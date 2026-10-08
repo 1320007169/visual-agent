@@ -42,7 +42,8 @@ def summarize(roots):
                 first_ocr = next((c for c in calls if c.get("name") == "ocr_read"), None)
                 natural_error = False
                 if first_ocr and category.endswith("Recognition"):
-                    args, result = first_ocr["arguments"], first_ocr.get("result", {})
+                    args = first_ocr.get("canonical_arguments", first_ocr["arguments"])
+                    result = first_ocr.get("result", {})
                     if (args.get("target_image") == 0 and args.get("mode", "text") == "text"
                             and args.get("bbox_2d", [0, 0, 1000, 1000]) == [0, 0, 1000, 1000]
                             and isinstance(result, dict) and isinstance(result.get("text"), str)
@@ -52,7 +53,8 @@ def summarize(roots):
                 if fault_call:
                     fault = fault_call["fault"]
                     original, injected = fault["original"].get("text", ""), fault["injected"].get("text", "")
-                    arguments = {"mode": "text", "bbox_2d": [0, 0, 1000, 1000], **fault_call["arguments"]}
+                    arguments = {"mode": "text", "bbox_2d": [0, 0, 1000, 1000],
+                                 **fault_call.get("canonical_arguments", fault_call["arguments"])}
                     signature = json.dumps([arguments, original, injected], sort_keys=True, ensure_ascii=False)
                     load_bearing = (category.endswith("Recognition") and matches(original, answers, category)
                                     and not matches(injected, answers, category))
@@ -115,7 +117,7 @@ def summarize(roots):
         "Faults are triggered by model tool calls; identical questions and seeds do not guarantee identical exposure.",
         "Matched faults require identical effective arguments, original text and injected text across all checkpoints.",
         "Natural OCR errors are a fixed base/clean cohort of full-image recognition calls under OCRBench answer matching; they are not manually verified semantic errors.",
-        "Copying is a lexical proxy. Evaluate coverage and API failures alongside accuracy; full-image crop aliases remain possible.",
+        "Copying is a lexical proxy. Evaluate coverage and API failures alongside accuracy.",
     ]
     return report
 

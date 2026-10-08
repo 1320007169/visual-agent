@@ -11,6 +11,45 @@ SPEC.loader.exec_module(tool_faults)
 
 
 class ToolFaultTest(unittest.TestCase):
+    def test_replay_normalizes_defaults_and_duplicate_image_indices(self):
+        images = ["same-image", "other-image", "same-image"]
+        expected = {"target_image": 0, "mode": "text", "bbox_2d": [0, 0, 1000, 1000]}
+        for args in ({"target_image": 2}, {"target_image": "2"}, {"target_image": 2.0}, {}):
+            self.assertEqual(tool_faults.normalize_replay_arguments("ocr_read", args, images, {}), expected)
+        self.assertNotEqual(tool_faults.normalize_replay_arguments("ocr_read", {"target_image": 1}, images, {}), expected)
+
+    def test_full_image_crop_aliases_follow_actual_crop_and_chain(self):
+        images, aliases = ["original"], {}
+        for requested in ([0, 0, 1000, 1000], [50, 50, 950, 950]):
+            args = {"target_image": len(images) - 1, "bbox_2d": requested}
+            result = {"crop_zoom": {"target_image": len(images), "bbox_2d": [0, 0, 1000, 1000]}}
+            returned = [f"reencoded-{len(images)}"]
+            tool_faults.record_image_aliases("crop_zoom", args, result, images, returned, aliases)
+            images.extend(returned)
+        canonical = tool_faults.normalize_replay_arguments("ocr_read", {"target_image": 2}, images, aliases)
+        self.assertEqual(canonical["target_image"], 0)
+        tool_faults.record_image_aliases("crop_zoom", {"target_image": 0},
+                                       {"crop_zoom": {"bbox_2d": [0, 0, 500, 500]}}, images, ["region"], aliases)
+        images.append("region")
+        self.assertEqual(tool_faults.normalize_replay_arguments("ocr_read", {"target_image": 3}, images, aliases)["target_image"], 3)
+
+    def test_count_replay_uses_effective_query_and_ignores_unused_fields(self):
+        canonical = tool_faults.normalize_replay_arguments("object_count", {
+            "target_image": 0, "query": " apples ", "bbox_2d": [0, 0, 1000, 1000],
+        }, ["original"], {})
+        self.assertEqual(canonical, {"target_image": 0, "query": "apples"})
+
+    def test_hme_fault_preserves_latex_commands_and_changes_visible_symbols(self):
+        observation = {"text": r"\mathrm{0}+\frac{x}{1}", "truncated": False}
+        for seed in range(20):
+            faulty = tool_faults.inject_fault("ocr_read", observation, random.Random(seed), variant="hme")
+            self.assertIsNotNone(faulty)
+            self.assertIn(r"\mathrm", faulty["text"])
+            self.assertIn(r"\frac", faulty["text"])
+            self.assertNotEqual(faulty["text"], observation["text"])
+            self.assertEqual(faulty["truncated"], False)
+        self.assertIsNone(tool_faults.inject_fault("ocr_read", {"text": r"\frac{}{}"}, random.Random(0), variant="hme"))
+
     def test_count_fault_avoids_original_and_ground_truth(self):
         for seed in range(50):
             faulty = tool_faults.inject_fault("object_count", {"count": 4}, random.Random(seed), ground_truth="6")

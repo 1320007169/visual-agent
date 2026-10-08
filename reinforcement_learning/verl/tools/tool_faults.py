@@ -16,6 +16,46 @@ from typing import Any
 FAULT_TOOLS = ("object_count", "grounding_detect", "depth_measure", "ocr_read")
 
 
+def normalize_replay_arguments(tool_name: str, arguments: dict, images: list, aliases: dict) -> dict:
+    normalized = dict(arguments)
+    if tool_name in FAULT_TOOLS or tool_name == "crop_zoom":
+        normalized.setdefault("target_image", 0)
+    if tool_name == "ocr_read":
+        normalized = {"mode": "text", "bbox_2d": [0, 0, 1000, 1000], **normalized}
+    elif tool_name == "object_count":
+        normalized = {key: normalized[key] for key in ("query", "target_image") if key in normalized}
+        if isinstance(normalized.get("query"), str):
+            normalized["query"] = normalized["query"].strip()
+    if "target_image" not in normalized:
+        return normalized
+    try:
+        target = int(normalized["target_image"])
+    except (TypeError, ValueError, OverflowError):
+        # Leave malformed model arguments for the normal tool validation path.
+        return normalized
+    normalized["target_image"] = target
+    if 0 <= target < len(images):
+        image = images[target]
+        # PIL images compare pixel content; strings/bytes compare their encoded content.
+        target = next(index for index in range(target + 1) if images[index] == image)
+        while target in aliases:
+            target = aliases[target]
+        normalized["target_image"] = target
+    return normalized
+
+
+def record_image_aliases(tool_name: str, arguments: dict, result: dict,
+                         images: list, returned_images: list, aliases: dict) -> None:
+    if tool_name != "crop_zoom" or not returned_images:
+        return
+    # Use the actual box, including expansion/clipping, rather than the requested box.
+    box = result.get("crop_zoom", {}).get("bbox_2d", arguments.get("bbox_2d"))
+    if box == [0, 0, 1000, 1000]:
+        parent = normalize_replay_arguments(tool_name, arguments, images, aliases)["target_image"]
+        for index in range(len(images), len(images) + len(returned_images)):
+            aliases[index] = parent
+
+
 def _integer(value: Any) -> int | None:
     try:
         number = float(str(value).strip())
@@ -97,17 +137,24 @@ def _ocr_fault(observation: dict, rng: random.Random, ground_truth: Any) -> dict
     return None if faulty == text else {**observation, "text": faulty}
 
 
-def _ocr_confusable_fault(observation: dict, rng: random.Random, ground_truth: Any) -> dict | None:
+def _ocr_confusable_fault(observation: dict, rng: random.Random, ground_truth: Any,
+                          *, hme: bool = False) -> dict | None:
     text = observation.get("text")
     if not isinstance(text, str):
         return None
+    replacements = {"0": "O", "O": "0", "1": "l", "l": "1", "rn": "m", "m": "rn"}
+    if hme:
+        replacements.update({"2": "z", "z": "2", "3": "8", "8": "3", "5": "S", "S": "5",
+                             "6": "b", "b": "6", "9": "g", "g": "9", "x": "y", "y": "x",
+                             "c": "e", "e": "c", "4": "9", "7": "1", "B": "8"})
     commands = list(re.finditer(r"\\[a-zA-Z]+", text))
-    matches = [match for match in re.finditer(r"rn|[0O1lm]", text)
+    pattern = "|".join(re.escape(char) for char in sorted(replacements, key=len, reverse=True))
+    matches = [match for match in re.finditer(pattern, text)
                if not any(command.start() <= match.start() < command.end() for command in commands)]
     if not matches:
         return None
     match = rng.choice(matches)
-    replacement = {"0": "O", "O": "0", "1": "l", "l": "1", "rn": "m", "m": "rn"}[match.group()]
+    replacement = replacements[match.group()]
     return {**observation, "text": text[:match.start()] + replacement + text[match.end():]}
 
 
@@ -126,10 +173,12 @@ def inject_fault(tool_name: str, observation: Any, rng: random.Random, ground_tr
     ``ground_truth`` is optional; when given, count faults avoid the true count
     and OCR faults corrupt the span containing the answer.
     """
-    if variant not in {"training", "ocr_confusable"}:
+    if variant not in {"training", "ocr_confusable", "hme"}:
         raise ValueError(f"Unknown fault variant: {variant}")
     if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
         return None
+    if variant == "hme":
+        return _ocr_confusable_fault(observation, rng, ground_truth, hme=True) if tool_name == "ocr_read" else None
     fault = _FAULTS.get(tool_name) if variant == "training" else (
         _ocr_confusable_fault if tool_name == "ocr_read" else None
     )

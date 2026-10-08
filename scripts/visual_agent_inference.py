@@ -390,6 +390,7 @@ class VisualAgent:
         self._fault_rng = random.Random(self.fault_seed)
         self._fault_pending = bool(self.fault_tools)
         self._faulted_call = None
+        self._image_aliases = {}
         self.use_native_tools = use_native_tools
         self.allowed_tool_names = (
             set(allowed_tool_names) if allowed_tool_names is not None else None
@@ -425,6 +426,7 @@ class VisualAgent:
         self._fault_rng = random.Random(f"{self.fault_seed}:{question.strip()}")
         self._fault_pending = bool(self.fault_tools)
         self._faulted_call = None
+        self._image_aliases = {}
 
         for turn in range(1, self.max_turns + 1):
             if trace_sink is not None:
@@ -491,14 +493,14 @@ class VisualAgent:
                 "Set --tool-api-base or VISUAL_TOOL_API_BASE."
             )
 
-        replay_arguments = invocation.arguments
-        if invocation.name == "ocr_read":
-            replay_arguments = {"mode": "text", "bbox_2d": [0, 0, 1000, 1000], **replay_arguments}
+        replay_arguments = _tool_faults().normalize_replay_arguments(
+            invocation.name, invocation.arguments, images, self._image_aliases,
+        )
         if self._faulted_call is not None:
             name, arguments, fault, serialized = self._faulted_call
             if invocation.name == name and replay_arguments == arguments:
                 trace.append({"name": name, "arguments": invocation.arguments, "fault": fault,
-                              "replayed_fault": True, "returned_images": 0})
+                              "canonical_arguments": replay_arguments, "replayed_fault": True, "returned_images": 0})
                 return _observation(serialized, invocation)
 
         try:
@@ -516,6 +518,7 @@ class VisualAgent:
         trace.append({
             "name": invocation.name,
             "arguments": invocation.arguments,
+            "canonical_arguments": replay_arguments,
             "result": tool_result.output,
             "returned_images": len(tool_result.images),
         })
@@ -571,6 +574,8 @@ class VisualAgent:
             self._faulted_call = (invocation.name, dict(replay_arguments), trace[-1]["fault"], serialized)
         message = _observation(serialized, invocation)
         if tool_result.images:
+            _tool_faults().record_image_aliases(invocation.name, invocation.arguments, tool_result.output,
+                                               images, tool_result.images, self._image_aliases)
             images.extend(tool_result.images)
             message["content"] = [
                 {"type": "text", "text": message["content"]},

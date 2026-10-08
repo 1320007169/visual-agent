@@ -374,6 +374,28 @@ class VisualAgentInferenceTest(unittest.TestCase):
             self.assertEqual(json.loads(observed["content"]), {"text": "O"})
             self.assertTrue(trace[-1]["replayed_fault"])
 
+    def test_ocr_replay_follows_full_crop_aliases_but_allows_real_regions(self):
+        executor = FakeToolExecutor()
+        executor.execute = lambda invocation, images: ToolExecutionResult(output={"text": "0"})
+        with patch.dict(os.environ, {"VISUAL_AGENT_FAULT_TOOLS": "ocr_read",
+                                   "VISUAL_AGENT_FAULT_TYPE": "ocr_confusable"}):
+            agent = VisualAgent(FakeModelClient(), tool_executor=executor)
+        images, trace = ["original", "original"], []
+        first = agent._execute_tool(ToolInvocation("ocr_read", {"target_image": 0}, "first"), images, trace)
+        for target, box in ((1, [0, 0, 1000, 1000]), (2, [50, 50, 950, 950])):
+            executor.execute = lambda invocation, images: ToolExecutionResult(
+                output={"crop_zoom": {"target_image": len(images), "bbox_2d": [0, 0, 1000, 1000]}},
+                images=[f"crop-{len(images)}"],
+            )
+            agent._execute_tool(ToolInvocation("crop_zoom", {"target_image": target, "bbox_2d": box}), images, trace)
+        executor.execute = lambda invocation, images: self.fail("Image aliases must replay")
+        for target in (1, 2, 3):
+            replay = agent._execute_tool(ToolInvocation("ocr_read", {"target_image": target}, "again"), images, trace)
+            self.assertEqual(first["content"], replay["content"])
+        executor.execute = lambda invocation, images: ToolExecutionResult(output={"text": "real region"})
+        response = agent._execute_tool(ToolInvocation("ocr_read", {"target_image": 3, "bbox_2d": [0, 0, 500, 500]}), images, trace)
+        self.assertIn("real region", response["content"])
+
     def test_fault_injection_is_off_by_default_and_seeded_by_question(self):
         call = '<tool_call>{"name":"object_count","arguments":{"query":"cars","target_image":0}}</tool_call>'
         faults = []

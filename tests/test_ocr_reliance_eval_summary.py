@@ -54,6 +54,16 @@ class OCRRelianceSummaryTest(unittest.TestCase):
         path.write_text(json.dumps(rows))
         self.assertEqual(summarize([self.root])["matched_faults"]["training"]["n"], 0)
 
+    def test_alias_arguments_keep_faults_paired(self):
+        path = self.paths["v2_step40", "training"]
+        rows = json.loads(path.read_text())
+        trace = json.loads(rows[1]["raw_response"])
+        trace["tool_calls"][0]["arguments"] = {"target_image": 2}
+        trace["tool_calls"][0]["canonical_arguments"] = {"target_image": 0}
+        rows[1]["raw_response"] = json.dumps(trace)
+        path.write_text(json.dumps(rows))
+        self.assertEqual(summarize([self.root])["matched_faults"]["training"]["indices"], [1])
+
     def test_mismatched_questions_are_rejected(self):
         path = self.paths["v2_step40", "training"]
         rows = json.loads(path.read_text())

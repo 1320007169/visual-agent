@@ -28,6 +28,7 @@ package.__path__ = [str(VERL / "tools")]
 with patch.dict(sys.modules, {package.__name__: package}):
     schemas = importlib.import_module(f"{package.__name__}.schemas")
     visual_tool = importlib.import_module(f"{package.__name__}.visual_tool")
+    tool_faults = importlib.import_module(f"{package.__name__}.tool_faults")
 
 
 def trainer_helpers():
@@ -233,7 +234,8 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         path = VERL / "workers/rollout/chat_scheduler.py"
         tree = ast.parse(path.read_text())
         node = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_call_tool")
-        namespace = {"Any": object, "Dict": dict, "json": json, "time": importlib.import_module("time")}
+        namespace = {"Any": object, "Dict": dict, "json": json, "time": importlib.import_module("time"),
+                     "tool_faults": tool_faults}
         exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
         self.result = {"status": "success", "result": {"status": "error", "message": "No valid depth pixels"}}
         info = {"images": ["data:image/png;base64,AA=="], "__trace__": {"model_calls": [], "tool_calls": []}}
@@ -249,7 +251,8 @@ class OnlineVisualToolValidationTest(unittest.IsolatedAsyncioTestCase):
         path = VERL / "workers/rollout/chat_scheduler.py"
         tree = ast.parse(path.read_text())
         node = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_call_tool")
-        namespace = {"Any": object, "Dict": dict, "json": json, "time": importlib.import_module("time")}
+        namespace = {"Any": object, "Dict": dict, "json": json, "time": importlib.import_module("time"),
+                     "tool_faults": tool_faults}
         exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
         boxes = [[0, 0, 100, 100], [100, 100, 200, 200]]
         crop_image = "data:image/jpeg;base64,eA=="

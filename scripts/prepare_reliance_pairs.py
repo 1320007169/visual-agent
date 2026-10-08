@@ -17,6 +17,7 @@ import importlib.util
 import json
 from pathlib import Path
 import random
+import re
 import shutil
 
 FAULTS_FILE = Path(__file__).resolve().parents[1] / "reinforcement_learning/verl/tools/tool_faults.py"
@@ -91,9 +92,19 @@ def prefix_messages(tool: str, arguments: dict, observation: dict) -> str:
     ], ensure_ascii=False)
 
 
+def normalized_ocr_text(text: str) -> str:
+    text = re.sub(r"\\+", lambda match: "\\", str(text))
+    text = re.sub(r"\\(?:left|right|mathrm|mathit|mathbf|text|displaystyle)\b|\\[()[\]]", "", text)
+    return re.sub(r"[\s{}$]", "", text).casefold()
+
+
 def build_pair(row: dict, call: dict, rng: random.Random, pair_id: str) -> tuple[dict, dict] | None:
-    faulty = tool_faults.inject_fault(call["tool"], call["observation"], rng, row.get("solution"))
+    variant = "hme" if row.get("original_source") == "hme100k" else "training"
+    faulty = tool_faults.inject_fault(call["tool"], call["observation"], rng, row.get("solution"), variant=variant)
     if faulty is None:
+        return None
+    if (call["tool"] == "ocr_read"
+            and normalized_ocr_text(row["solution"]) in normalized_ocr_text(faulty["text"])):
         return None
     fault = {"tool": call["tool"], "arguments": call["arguments"], "observation": json.dumps(faulty, ensure_ascii=False)}
     factual = {**row, "reliance_prefix": prefix_messages(call["tool"], call["arguments"], call["observation"]),
@@ -173,7 +184,7 @@ def prepare(base_dir: Path, rollout_dirs: list[Path], output_dir: Path, steps: t
     replacement_groups = Counter(replacement_source(row) for row in rows)
     if same_source:
         pairs = select_pairs(rows_by_key, candidates, replaced_count // 2, profile, rng, stats,
-                             {source: count // 2 for source, count in replacement_groups.items()})
+                             {source: count // 4 for source, count in replacement_groups.items()})
         # Keep paired questions, replacement positions, and shuffle identical in the ablation.
         added = [row for factual, counterfactual in pairs
                  for row in (factual, factual if factual_only else counterfactual)]
@@ -214,9 +225,13 @@ def prepare(base_dir: Path, rollout_dirs: list[Path], output_dir: Path, steps: t
     manifest = {
         "base_data_dir": str(base_dir), "seed": seed, "replaced_fraction": fraction, "factual_only": factual_only,
         "replacement_scope": "same_source" if same_source else "global",
+        "max_replaced_fraction_per_original_source": 0.5 if same_source else None,
+        "ocr_fault_policy": "hme_visible_symbols_answer_excluded",
+        "actual_replaced_fraction": len(added) / len(rows),
         "train_sources_before": dict(source_counts),
         "replacement_groups_before": {"|".join(key): count for key, count in replacement_groups.items()},
         "replacement_groups_after": dict(Counter("|".join(replacement_source(row)) for row in mixed)),
+        "prefixed_groups": dict(Counter("|".join(replacement_source(row)) for row in added)),
         "train_rows": len(mixed), "pairs": len(pairs), "replaced_rows": len(added),
         "replaced_indices_before_shuffle": replaced,
         "prefix_source_rollouts": [str(path) for path in paths],
@@ -248,7 +263,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20261005)
     parser.add_argument("--factual-only", action="store_true", help="Ablation: replace rows with factual prefixes only")
     parser.add_argument("--same-source", action="store_true",
-                        help="Match data_source and original_source; factual-only keeps paired questions and positions")
+                        help="Match sources, prefix at most half of each original_source, and match factual-only questions")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     low, high = (int(value) for value in args.steps.split("-"))
