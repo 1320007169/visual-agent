@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Compare the two counting backends with the same checkpoint and agent protocol.
+# Compare counting backends, then MME prompts, with the same checkpoint.
 if [[ "${CHECKPOINT_EVAL_CONFIG_ONLY:-0}" != 1 && "${SKIP_MODELARTS_BOOTSTRAP:-0}" != 1 ]]; then
     mkdir -p /opt/huawei/explorer-env /home/ma-user/work/algorithm /home/ma-user/work/model
     ensure_symlink() {
@@ -23,6 +23,7 @@ export PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorag
 export VLOCR_STEP=80
 export VLOCR_MODEL_PATH="$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/qwen3base_multitool_vlocr_hme_chartqa_tallyhalf_fsc3000_n16_8node_20261003T202135115738_f9c41af7/global_step_80/actor/huggingface"
 export EVAL_DATASETS=FSC147_TEST VLOCR_NATIVE_TOOLS=1
+export VISUAL_AGENT_SYSTEM_PROMPT_FILE="$REPO_ROOT/prompts/visual_agent_rl_system_multitool_vlocr.txt"
 export GPU_MEMORY_UTILIZATION=0.80 VLMEVAL_API_NPROC=7
 export MODEL_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 TOOL_CUDA_VISIBLE_DEVICES=7
 export VISUAL_AGENT_OCR_RAW_BACKSLASH=0 VISUAL_AGENT_NORMALIZE_ANSWER_BACKSLASH=1
@@ -54,6 +55,7 @@ for config in countgd_plusplus.yaml countgd_plusplus_pseudo_eval.yaml; do
 done
 printf 'Results: %s\nArms: text_only, auto_exemplar\nModel GPUs: %s; tool GPU: %s\n' \
     "$group_root" "$MODEL_CUDA_VISIBLE_DEVICES" "$TOOL_CUDA_VISIBLE_DEVICES"
+printf 'After FSC summary: MME-RealWorld-Lite baseline, evidence (original count backend)\n'
 if [[ "${CHECKPOINT_EVAL_CONFIG_ONLY:-0}" == 1 ]]; then
     exit 0
 fi
@@ -105,3 +107,21 @@ for arm in text_only auto_exemplar; do
 done
 eval_python="${ENV_DIR:-/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM}/bin/python3"
 "$eval_python" "$REPO_ROOT/scripts/summarize_fsc_count_ab.py" "$group_root"
+
+# Reset the final FSC arm's backend before comparing prompts.
+export COUNT_SERVICE_CONFIG="$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml"
+export EVAL_DATASETS=MME-RealWorld-Lite
+printf 'arm\texit_code\tseconds\tresult_dir\n' > "$group_root/mme_status.tsv"
+for variant in baseline evidence; do
+    export MME_PROMPT_VARIANT="$variant"
+    export RUN_ID="${group_id}_mme_${variant}" VLMEVAL_EVAL_ID="${group_id}_mme_${variant}"
+    export WORK_ROOT="$group_root/mme_$variant"
+    export VISUAL_AGENT_FAILURE_TRACE_DIR="$WORK_ROOT/failure_traces"
+    started=$SECONDS
+    status=0
+    bash "$REPO_ROOT/scripts/run_visual_agent_eval_mme_prompt_8gpu.sh" "$@" || status=$?
+    printf '%s\t%s\t%s\t%s\n' "$variant" "$status" "$((SECONDS - started))" "$WORK_ROOT/dino_latest" >> "$group_root/mme_status.tsv"
+    if (( status != 0 )); then
+        exit "$status"
+    fi
+done

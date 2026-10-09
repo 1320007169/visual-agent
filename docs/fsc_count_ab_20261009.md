@@ -1,4 +1,4 @@
-# FSC 计数工具 Agent 对照
+# FSC 计数后端与 MME 提示词 Agent 对照
 
 执行顺序：统一纠正 FSC 评分基线 → 自动示例框 Agent 全量对照 → 验证分块计数 → 根据结果决定 observation 格式及 RL 训练。前两步完成前，不调整计数数据配比或采信奖励。
 
@@ -29,6 +29,29 @@
 
 ## 启动状态
 
-2026-10-09：入口及汇总程序已通过配置预检和评分测试，尚未提交 ModelArts。当前会话未配置可用的 ModelArts 提交客户端及认证。
+2026-10-09（提交前）：入口及汇总程序已通过配置预检和评分测试，尚未提交 ModelArts。当前会话未配置可用的 ModelArts 提交客户端及认证。
 
 此前本地 GPU 1 尝试因其他进程占用显存，在 vLLM 初始化时退出，没有产生新预测。失败记录保存在 `outputs/vlmeval/fsc_agent_count_ab_20261009/`；ModelArts 入口使用全新的结果目录。
+
+## ModelArts 运行结果（2026-10-09）
+
+运行 ID：`fsc_count_ab_step80_20261009T173025567789537_353`。完整产物位于 [本次结果目录](../outputs/vlmeval/fsc_count_ab_8gpu/fsc_count_ab_step80_20261009T173025567789537_353/)；FSC 和 MME 的四组子任务退出码均为 0。以下是同一 step80 权重的全量 Agent 重新推理结果，不与前期[直接调用计数工具的诊断](diagnostic_results_20261009/count_mme_diagnostic_20261009/report.md)混作同一对照。
+
+### FSC147_TEST：计数后端 A/B
+
+两组各覆盖官方测试集 1190 题，均无无效答案或 API 失败。只切换 CountGD++ 的纯文本与自动示例框后端；逐题结果见 `paired_examples.csv`，完整指标见 `comparison.json`。
+
+| 后端 | MAE ↓ | RMSE ↓ | 完全正确率 | 无效答案 | 端到端耗时 |
+|---|---:|---:|---:|---:|---:|
+| text_only | 15.2067 | 129.3733 | 32.35% | 0 | 877 秒 |
+| auto_exemplar | 12.4193 | 98.8672 | 33.03% | 0 | 859 秒 |
+
+自动示例框使 MAE 下降 2.7874（18.33%）、RMSE 下降 23.58%。逐题绝对误差改善 306 题、变差 308 题、持平 576 题，两组误差中位数均为 2。误差净减少 3317，其中改善最大的 5 题贡献 2200（66.33%）；平均收益主要来自少数大误差题，不能解释为逐题普遍改善。
+
+### MME-RealWorld-Lite：提示词 A/B
+
+FSC 汇总后，脚本将计数后端恢复为原配置，在相同权重上分别用原提示词 `baseline` 和证据提示词 `evidence` 全量重跑 1919 题。评分文件的原始 Overall 分别为 54.4554%（1045/1919）和 54.5597%（1047/1919）：evidence 多对 2 题，配对变化为 78 题错变对、76 题对变错。
+
+但原始分数包含误判。baseline 有 11 个 API 失败和 3 个回合耗尽输出；evidence 分别有 12 个和 7 个。两组 API 失败均报输入超过模型 32768 token 上限。MME 评测器从预测文本中提取首个大写 A–E，因此将 `Failed to obtain answer via API.` 和 `Agent exceeded the maximum of 8 turns` 中的首字母 A 当作答案，分别把 baseline 的 1 个、evidence 的 4 个失败输出计为正确。仅将这些明确失败的输出改计为 0 后，baseline 为 **54.4033%（1044/1919）**，evidence 为 **54.3512%（1043/1919）**；这一步只是核算，原评分文件未改写。
+
+这次对照不能证明证据提示词优于原提示词。MME 的原始评分文件位于 `mme_baseline/dino_latest/` 和 `mme_evidence/dino_latest/`，失败详情位于各组的 `failure_traces/`；评分逻辑见 `evaluation/VLMEvalKit/vlmeval/dataset/image_mcq.py` 的 `MMERealWorld.evaluate` 与 `evaluation/VLMEvalKit/vlmeval/dataset/utils/multiple_choice.py` 的 `extract_characters_regex`。

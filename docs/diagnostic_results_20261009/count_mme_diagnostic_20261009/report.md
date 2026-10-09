@@ -2,6 +2,8 @@
 
 范围：新数据 64 卡 step80 的现有 agent 结果；FSC 1190 题重新跑 CountGD++ 纯文本与自动示例框。MME 使用已保存的官方规则分数，不使用 API judge。TallyQA 按用户最新要求暂不启动。
 
+后续同权重的 FSC 计数后端与 MME 提示词全量 Agent 重新推理结果见 [ModelArts A/B 记录](../../fsc_count_ab_20261009.md#modelarts-运行结果2026-10-09)；本报告中的 FSC 表是直接调用工具的对照，两者使用不同的推理流程。
+
 ## 先修正我们本地的 FSC 标签口径
 
 本地 `scripts/prepare_fsc147_eval.py` 把 FSCD JSON 中所有 annotations 都算成目标，其中含 3 个示例框。1190 张图的标签均比 FSC 官方 `points` 数多 3。这是本地评测数据构建问题，并非官方标注错误。
