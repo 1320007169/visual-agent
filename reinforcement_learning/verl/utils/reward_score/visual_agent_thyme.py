@@ -8,6 +8,7 @@ import re
 from collections import Counter
 from functools import lru_cache
 from math import isfinite
+from pathlib import Path
 from threading import Lock
 
 
@@ -259,6 +260,25 @@ def formula_match(prediction: str, ground_truth: str) -> bool:
     return tokens(prediction) == tokens(ground_truth)
 
 
+def normalize_answer_backslashes(answer: str) -> str:
+    commands = list(re.finditer(r"(?<!\\)(\\+)([A-Za-z]+)", answer))
+    known_commands = frozenset(
+        "frac dfrac tfrac sqrt times div cdot neq ne geq leq ge le approx equiv cong sim "
+        "infty pm mp alpha beta gamma delta theta lambda mu pi rho sigma phi omega "
+        "Delta Omega angle circ cos sin tan triangle bot perp left right text mathrm mathbf".split()
+    )
+    # Match evaluation normalization without changing mixed escaping or line breaks.
+    if not commands or any(len(match[1]) != 2 or match[2] not in known_commands for match in commands):
+        return answer
+    return re.sub(r"(?<!\\)\\\\(?=[A-Za-z])", lambda match: "\\", answer)
+
+
+@lru_cache(maxsize=1)
+def _evaluation_judge_template():
+    return (Path(__file__).resolve().parents[5]
+            / "DeepEyesV2/evaluation/VLMEvalKit/vlmeval/dataset/utils/judge_prompt/verify.md").read_text()
+
+
 def chart_match(prediction: str, ground_truth: str) -> bool:
     prediction, ground_truth = prediction.strip(), ground_truth.strip()
     try:
@@ -305,7 +325,7 @@ def _judge_client_and_model(backup=False):
     return client, model
 
 
-def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> bool | None:
+def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int, benchmark=False) -> bool | None:
     endpoint = "backup" if backup else "primary"
     client, model = None, None
     for _ in range(attempts):
@@ -315,8 +335,7 @@ def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> boo
             if client is None:
                 return None
             _record_judge_stat(f"{endpoint}_requests")
-            response = client.chat.completions.create(
-                model=model,
+            request = dict(
                 messages=[
                     {
                         "role": "system",
@@ -332,6 +351,10 @@ def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> boo
                 stop=["\n"],
                 extra_body={"thinking": {"type": "disabled"}},
             )
+            if benchmark:
+                request.update(messages=[{"role": "user", "content": question_prompt}], max_tokens=1024)
+                request.pop("stop")
+            response = client.chat.completions.create(model=model, **request)
             content = (response.choices[0].message.content or "").strip()
             verdict = None
             normalized = content.strip("`\"' \t\r\n").upper()
@@ -345,6 +368,10 @@ def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> boo
                     verdict = payload["verdict"]
             except json.JSONDecodeError:
                 pass
+            if benchmark:
+                verdicts = re.findall(r"\\boxed\s*\{\s*(Yes|No)\s*\}", content, flags=re.I)
+                verdict = (verdicts[-1].lower() == "yes"
+                           if verdicts and response.choices[0].finish_reason != "length" else None)
             if verdict is True:
                 _record_judge_stat(f"{endpoint}_valid")
                 _record_judge_stat(f"{endpoint}_true")
@@ -370,7 +397,7 @@ def _judge_endpoint(question_prompt: str, *, backup: bool, attempts: int) -> boo
     return None
 
 
-def judge_match(question: str, prediction: str, ground_truth: str) -> bool | None:
+def judge_match(question: str, prediction: str, ground_truth: str, *, extra_info=None) -> bool | None:
     _record_judge_stat("judge_samples")
     prompt = f"""Judge whether the candidate answer is semantically equivalent to the reference answer for the question.
 Numeric answers and category labels, including years and choice labels, must match exactly after accounting for equivalent notation and units. Do not apply a relative or absolute error tolerance.
@@ -386,8 +413,39 @@ Reference answer:
 Candidate answer:
 {prediction}
 """
+    source = (extra_info or {}).get("data_source")
+    benchmark = source in {"visual-agent-ocr", "visual-agent-chartqa"}
+    if benchmark:
+        references = list(dict.fromkeys([ground_truth, *extra_info.get("answer_aliases", [])]))
+        references = "\n".join(f"Alternative {index + 1}: {answer.strip()}" for index, answer in enumerate(references))
+        instructions = (
+            "\nTraining verification rules (override conflicting instructions above):\n"
+            "The references are alternatives: matching one complete reference is sufficient. "
+            "Reject contradictory answers or lists of guesses, even if they contain a reference. "
+            "Do not infer unseen image content or solve the task on behalf of the candidate.\n"
+        )
+        if source == "visual-agent-ocr":
+            instructions += (
+                "For transcription, require the complete text or expression. Ignore harmless formatting "
+                "and escaping differences, but preserve words, digits, mathematical symbols and variable case. "
+                "A substring or a mathematically equivalent but differently transcribed expression is insufficient. "
+                "For text-based question answering, require an unambiguous answer with the same meaning.\n"
+            )
+        else:
+            instructions += (
+                "Years, dates, category labels, identifiers, ranks and discrete counts must match exactly. "
+                "Only for a continuous measured quantity, after converting explicitly supported units, accept "
+                "abs(p-r)/abs(r) <= 0.05. For a reference of zero, require zero. "
+                "Do not drop percent signs or rescale by 100 without support from the question. "
+                "If the question does not establish a continuous quantity, require exact equivalence. "
+                "For example, a measured temperature of 96 versus reference 100 has relative error 0.04 "
+                "and MUST be accepted; year 1966 versus 1965 or 96 students versus 100 MUST be rejected.\n"
+            )
+        prompt = (_evaluation_judge_template() + instructions
+                  + "Briefly explain the comparison, then output \\boxed{Yes} or \\boxed{No}.\n"
+                  + f"【用户问题】:{question}\n【参考答案】：{references}\n【模型回答】：{prediction}")
     primary_attempts = max(1, int(os.environ.get("LLM_AS_A_JUDGE_PRIMARY_RETRIES", "1")))
-    result = _judge_endpoint(prompt, backup=False, attempts=primary_attempts)
+    result = _judge_endpoint(prompt, backup=False, attempts=primary_attempts, benchmark=benchmark)
     if result is not None:
         return result
 
@@ -402,7 +460,7 @@ Candidate answer:
                 )
             ),
         )
-        result = _judge_endpoint(prompt, backup=True, attempts=backup_attempts)
+        result = _judge_endpoint(prompt, backup=True, attempts=backup_attempts, benchmark=benchmark)
         if result is not None:
             return result
 
@@ -412,6 +470,10 @@ Candidate answer:
 
 def compute_score(solution_str: str, ground_truth: str, extra_info=None):
     answer = extract_answer(solution_str)
+    source = (extra_info or {}).get("data_source")
+    benchmark = source in {"visual-agent-ocr", "visual-agent-chartqa"}
+    if answer and benchmark:
+        answer = normalize_answer_backslashes(answer)
     format_reward = 1.0 if has_strict_answer_format(solution_str) else 0.0
     invalid_queries, query_penalty = grounding_query_penalty(solution_str)
     if not answer:
@@ -428,7 +490,12 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         return result
 
     is_relation_task = _is_zwz_relation_task(extra_info)
-    if is_relation_task:
+    failed_answer = benchmark and any(marker in answer for marker in (
+        "Failed to obtain answer via API", "Agent exceeded the maximum",
+    ))
+    if failed_answer:
+        correct = False
+    elif is_relation_task:
         # Closed relation labels must not receive a semantic-judge fallback:
         # ambiguous answers such as "on" can otherwise match several labels.
         correct = relation_match(answer, ground_truth)
@@ -461,10 +528,13 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         )
     else:
         correct = rule_match(answer, ground_truth)
-    if not is_relation_task and not correct:
+    if not is_relation_task and not failed_answer and not correct:
         question = str((extra_info or {}).get("question", ""))
-        correct = judge_match(question, answer, ground_truth)
+        correct = (judge_match(question, answer, ground_truth, extra_info=extra_info) if benchmark
+                   else judge_match(question, answer, ground_truth))
         if correct is None:
+            if benchmark:
+                raise RuntimeError(f"{source} reward judge unresolved after configured attempts")
             # Keep unresolved samples in GRPO with the ordinary incorrect-answer reward.
             correct = False
     accuracy_reward = 1.0 if correct else 0.0

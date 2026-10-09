@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 export BASE="${BASE:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx}"
 export REPO_ROOT="${REPO_ROOT:-$BASE/visual-agent}"
+export PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/groundingdino_offline_pipeline}"
+export COUNT_SERVICE_CONFIG="${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus_pseudo_eval.yaml}"
 export NNODES="${NNODES:-2}"
 case "$NNODES" in
     2) batch_size=126; mini_batch_size=42 ;;

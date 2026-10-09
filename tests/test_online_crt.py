@@ -445,15 +445,18 @@ class OnlineCRTTest(unittest.TestCase):
                 ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
             self.assertEqual(config["TRAIN_BATCH_SIZE"], batch_size)
             self.assertEqual(config["ROLLOUT_N"], "16")
+            self.assertEqual(Path(config["COUNT_SERVICE_CONFIG"]).name, "countgd_plusplus_pseudo_eval.yaml")
             self.assertEqual(Path(config["VISUAL_AGENT_ONLINE_FAULTS_CONFIG"]),
                              ROOT / "configs/online_crt_v1.json")
             self.assertEqual(Path(config["TRAIN_FILES"]), ROOT.parent / "visual-agent/data"
                              / "zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004/train.parquet")
         override = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
             "REPO_ROOT": str(ROOT), "BASE": str(ROOT.parent), "NNODES": "2", "MULTITOOL_CONFIG_ONLY": "1",
-            "TRAIN_RUN_TOKEN": "override", "MULTITOOL_DATA_DIR": "/data/custom"}, capture_output=True, text=True)
+            "TRAIN_RUN_TOKEN": "override", "MULTITOOL_DATA_DIR": "/data/custom",
+            "COUNT_SERVICE_CONFIG": "/services/count.yaml"}, capture_output=True, text=True)
         self.assertEqual(override.returncode, 0, override.stderr)
         config = dict(line.split("=", 1) for line in override.stdout.splitlines())
+        self.assertEqual(config["COUNT_SERVICE_CONFIG"], "/services/count.yaml")
         self.assertEqual((config["TRAIN_FILES"], config["VAL_FILES"]),
                          ("/data/custom/train.parquet", "/data/custom/val.parquet"))
         invalid = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],

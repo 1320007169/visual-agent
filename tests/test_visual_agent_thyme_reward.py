@@ -42,7 +42,7 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
                     if expected:
                         judge.assert_not_called()
                     else:
-                        judge.assert_called_once_with("", answer, gold)
+                        judge.assert_called_once_with("", answer, gold, extra_info=extra)
             judge.reset_mock()
             extra["answer_aliases"] = ["navy"]
             self.assertEqual(reward.compute_score("<answer>navy</answer>", "blue", extra)["acc"], 1)
@@ -71,7 +71,7 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
                         if expected:
                             judge.assert_not_called()
                         else:
-                            judge.assert_called_once_with(question, answer, "1965.0")
+                            judge.assert_called_once_with(question, answer, "1965.0", extra_info=extra)
             extra = {"data_source": "visual-agent-chartqa",
                      "question": "Which x-axis label witnessed the smallest value of Sweden?"}
             self.assertEqual(reward.compute_score("<answer>2000</answer>", "1983.0", extra)["acc"], 0)
@@ -94,11 +94,16 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
                 for verdict, expected in ((True, 1), (False, 0), (None, 0)):
                     judge.reset_mock()
                     judge.return_value = verdict
+                    benchmark = source in {"visual-agent-ocr", "visual-agent-chartqa"}
+                    if benchmark and verdict is None:
+                        with self.assertRaisesRegex(RuntimeError, "unresolved"):
+                            reward.compute_score("<answer>A</answer>", "B", extra)
+                        continue
                     result = reward.compute_score("<answer>A</answer>", "B", extra)
                     self.assertEqual(result["acc"], expected)
                     self.assertAlmostEqual(result["score"], 1.0 if expected else 0.1)
                     self.assertEqual(result["reward_valid"], 1.0)
-                    judge.assert_called_once_with(extra["question"], "A", "B")
+                    judge.assert_called_once_with(extra["question"], "A", "B", **({"extra_info": extra} if benchmark else {}))
 
     def test_chart_parse_is_valid_in_both_strict_protocol_switches(self):
         call = '<tool_call>{"name":"chart_parse","arguments":{"target_image":0,"bbox_2d":[0,0,1000,1000]}}</tool_call>'
