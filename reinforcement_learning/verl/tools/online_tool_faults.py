@@ -219,6 +219,9 @@ def replay_fault(tool: str, observation: Any, original: dict, injected: dict, *,
             if not isinstance(evidence, dict) or not isinstance(original_evidence, dict):
                 return None
             boxes, original_boxes = evidence.get("boxes"), original_evidence.get("boxes")
+            if count == 0:
+                # Finding nothing twice on the same image is the same evidence.
+                return {**observation, "count": injected["count"]} if not boxes and not original_boxes else None
             if (not isinstance(boxes, list) or not boxes or not isinstance(original_boxes, list)
                     or len(boxes) != len(original_boxes)):
                 return None

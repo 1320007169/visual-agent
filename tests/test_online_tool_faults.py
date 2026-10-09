@@ -121,6 +121,19 @@ class OnlineToolFaultTest(unittest.TestCase):
                 self.assertIsNone(faults.replay_fault("object_count", original, original, injected,
                                   original_evidence={"boxes": boxes}, evidence=evidence))
 
+    def test_count_replay_treats_two_empty_results_as_the_same_evidence(self):
+        original, injected = {"count": 0}, {"count": 2}
+        empty = {"count": 0, "boxes": []}
+        self.assertEqual(faults.replay_fault("object_count", {"count": 0, "source": "countgd"}, original, injected,
+                         original_evidence=empty, evidence=empty), {"count": 2, "source": "countgd"})
+        # A non-zero real count, or detections despite a zero count, stays real.
+        self.assertIsNone(faults.replay_fault("object_count", {"count": 3}, original, injected,
+                          original_evidence=empty, evidence={"count": 3, "boxes": [[1, 1, 9, 9]] * 3}))
+        self.assertIsNone(faults.replay_fault("object_count", {"count": 0}, original, injected,
+                          original_evidence=empty, evidence={"count": 0, "boxes": [[1, 1, 9, 9]]}))
+        self.assertIsNone(faults.replay_fault("object_count", {"count": 0}, original, injected,
+                          original_evidence=empty, evidence=None))
+
     def test_grounding_levels_and_single_box_skip(self):
         original = {"boxes": [[100, 100, 200, 200], [500, 500, 600, 600]],
                     "labels": ["cup", "plate"], "confidence": [0.8, 0.7]}

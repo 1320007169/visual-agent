@@ -301,6 +301,31 @@ class OnlineCRTTest(unittest.TestCase):
         self.assertNotIn('"count": 7', first)
         self.assertIn('"count": 7', second)
 
+    def test_zero_count_rephrasing_replays_and_nonzero_count_is_real(self):
+        class ZeroCountTool(FakeCountTool):
+            async def execute(self, instance_id, arguments):
+                self.calls.append(arguments)
+                count = {"unicorns": 0, "unicorn": 0, "horses": 2}[arguments["query"]]
+                boxes = [[i * 100, 100, i * 100 + 50, 150] for i in range(count)]
+                return json.dumps({"count": count}), 0.0, {"raw_result": {"count": count, "boxes": boxes}}
+
+        info = {"images": ["photo"], "online_fault": {"tool": "object_count", "level": 0,
+                "seed": 3, "count_truth": "0"}, "__trace__": {"model_calls": [], "tool_calls": []}}
+        callback = SimpleNamespace(tools={"object_count": ZeroCountTool()})
+        call = load_call_tool()
+
+        def count(query):
+            reply = asyncio.run(call(callback, {"name": "object_count", "arguments": {
+                "query": query, "target_image": 0}}, info, xml_mode=True))["content"]
+            return json.loads(reply.split("\n")[1])["count"]
+
+        injected = count("unicorns")
+        self.assertIn(injected, {1, 2})
+        self.assertEqual(count("unicorn"), injected)
+        self.assertEqual(info["__trace__"]["tool_calls"][1]["replayed_fault"], "evidence")
+        self.assertEqual(count("horses"), 2)
+        self.assertNotIn("replayed_fault", info["__trace__"]["tool_calls"][2])
+
     def test_controller_assign_only_valid_specs(self):
         controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
         prompts = FakeBatch(data_source=["visual-agent-fsc147"] * 100 + ["other"],
@@ -329,54 +354,61 @@ class OnlineCRTTest(unittest.TestCase):
         key_ocr, _ = controller._bucket("visual-agent-ocr", {"original_source": "hme100k"})
         self.assertEqual(key_ocr, "visual-agent-ocr|ocr_read|hme")
 
-    def test_controller_levels_need_twenty_majority_injected_groups(self):
+    @staticmethod
+    def fault_batch(controller, n, groups):
+        """groups: (bucket key or "", number of rollouts that saw the fault, acc of all n rollouts)."""
+        rows = {"uid": [], "online_fault": [], "online_fault_injected": [], "online_fault_level": [], "acc": []}
+        for group, (key, faulted, acc) in enumerate(groups):
+            for rollout in range(n):
+                rows["uid"].append(f"g{group}")
+                rows["online_fault"].append(json.dumps({"bucket_key": key}) if key else "")
+                rows["online_fault_injected"].append(rollout < faulted)
+                rows["online_fault_level"].append(controller.buckets[key]["level"] if key and rollout < faulted else -1)
+                rows["acc"].append(acc[rollout])
+        return FakeBatch(**rows)
+
+    def test_controller_levels_wait_for_groups_and_cooldown(self):
         controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
-        key_count, _ = controller._bucket("visual-agent-fsc147", {})
-        key_ocr, _ = controller._bucket("visual-agent-ocr", {"original_source": "hme100k"})
+        key, _ = controller._bucket("visual-agent-fsc147", {})
         n = 4
-
-        def batch(groups):
-            """groups: (bucket, injected rollouts out of n, acc list)."""
-            rows = {"uid": [], "online_fault": [], "online_fault_injected": [], "online_fault_level": [], "acc": []}
-            for group, (key, injected, acc) in enumerate(groups):
-                for rollout in range(n):
-                    rows["uid"].append(f"g{group}")
-                    rows["online_fault"].append(json.dumps({"bucket_key": key}) if key else "")
-                    rows["online_fault_injected"].append(rollout < injected)
-                    rows["online_fault_level"].append(controller.buckets[key]["level"] if key and rollout < injected else -1)
-                    rows["acc"].append(acc[rollout])
-            return FakeBatch(**rows)
-
-        wrong, right, mixed = [0] * n, [1] * n, [0, 1, 0, 1]
-        # 20 fully injected all-wrong groups raise the level; minority-injected groups are ignored.
-        metrics = controller.update(batch([(key_count, n, wrong)] * 20 + [(key_count, 1, right)] * 5
-                                          + [(key_ocr, 3, mixed)] * 10 + [("", 0, right)]), n)
-        self.assertEqual(controller.buckets[key_count]["level"], 1)
-        self.assertEqual(controller.buckets[key_count]["pending"]["groups"], 0)
-        prefix = "online_faults/visual-agent-fsc147/object_count"
-        self.assertEqual(metrics[f"{prefix}/assigned_groups"], 25)
-        self.assertEqual(metrics[f"{prefix}/injected_groups"], 25)
-        self.assertEqual(metrics[f"{prefix}/qualified_groups"], 20)
-        self.assertEqual(metrics[f"{prefix}/coverage_min"], 0.25)
-        self.assertEqual(metrics[f"{prefix}/injected_level_mean"], 0.0)
-        # Ten mixed OCR groups are not enough to change the level.
-        self.assertEqual(controller.buckets[key_ocr]["level"], 0)
-        self.assertEqual(controller.buckets[key_ocr]["pending"]["groups"], 10)
-        self.assertGreater(controller.buckets[key_ocr]["fraction"], controller.buckets[key_count]["fraction"])
-        self.assertGreaterEqual(controller.buckets[key_count]["fraction"], 0.02)
-        # All-correct groups accumulate across steps: 19 do not lower the level, the 20th does.
-        controller.update(batch([(key_count, n, right)] * 19), n)
-        self.assertEqual(controller.buckets[key_count]["level"], 1)
-        controller.update(batch([(key_count, n, right)]), n)
-        self.assertEqual(controller.buckets[key_count]["level"], 0)
+        levels = []
+        for _ in range(10):
+            controller.update(self.fault_batch(controller, n, [(key, n, [0] * n)] * 20), n)
+            levels.append(controller.buckets[key]["level"])
+        # Every step has 20 all-wrong groups, yet level changes are five steps apart.
+        self.assertEqual(levels, [0, 0, 0, 0, 1, 1, 1, 1, 1, 2])
+        self.assertEqual(controller.buckets[key]["last_level_step"], 10)
+        self.assertEqual(controller.buckets[key]["pending"]["groups"], 0)
 
         state = json.loads(json.dumps(controller.state_dict()))
         restored = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
         restored.load_state_dict(state)
         self.assertEqual(restored.state_dict(), state)
         with self.assertRaisesRegex(ValueError, "rollout.n=4"):
-            restored.update(FakeBatch(uid=["short"], online_fault=[json.dumps({"bucket_key": key_count})],
+            restored.update(FakeBatch(uid=["short"], online_fault=[json.dumps({"bucket_key": key})],
                                       online_fault_injected=[True], online_fault_level=[0], acc=[0]), n)
+
+    def test_controller_judges_groups_by_faulted_rollouts_only(self):
+        controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
+        key, _ = controller._bucket("visual-agent-fsc147", {})
+        n = 16
+        # Six faulted rollouts are all wrong although the other ten are right: an all-wrong group.
+        wrong_seen = [0] * 6 + [1] * 10
+        mixed_seen = [0, 1, 0, 1, 0, 1] + [1] * 10
+        # Three faulted rollouts are too few to judge the group.
+        too_few = [0] * 3 + [1] * 13
+        metrics = controller.update(self.fault_batch(controller, n, [
+            (key, 6, wrong_seen), (key, 6, mixed_seen), (key, 3, too_few), ("", 0, [1] * n)]), n)
+        prefix = "online_faults/visual-agent-fsc147/object_count"
+        self.assertEqual(metrics[f"{prefix}/assigned_groups"], 3)
+        self.assertEqual(metrics[f"{prefix}/injected_groups"], 3)
+        self.assertEqual(metrics[f"{prefix}/qualified_groups"], 2)
+        self.assertEqual(metrics[f"{prefix}/all_wrong_rate"], 0.5)
+        self.assertEqual(metrics[f"{prefix}/mixed_rate"], 0.5)
+        self.assertEqual(metrics[f"{prefix}/all_correct_rate"], 0.0)
+        self.assertEqual(metrics[f"{prefix}/coverage_min"], 3 / 16)
+        self.assertEqual(metrics[f"{prefix}/coverage_mean"], 15 / 48)
+        self.assertEqual(controller.buckets[key]["pending"], {"groups": 2, "all_correct": 0, "all_wrong": 1})
 
     def test_controller_resets_evidence_windows_at_level_bounds(self):
         for start_level, old_accuracy, new_accuracy, expected in ((0, 1, 0, 1), (3, 0, 1, 2)):
@@ -384,6 +416,8 @@ class OnlineCRTTest(unittest.TestCase):
                 controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
                 key, _ = controller._bucket("visual-agent-fsc147", {})
                 controller.buckets[key]["level"] = start_level
+                # The last level change is long past, so the cooldown does not block evaluation.
+                controller.buckets[key]["last_level_step"] = -controller.level_cooldown_steps
 
                 def batch(groups, accuracy):
                     size = groups * 4

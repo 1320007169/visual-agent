@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 MAX_LEVEL = {"ocr_read": 2, "object_count": 3, "grounding_detect": 2}
+# A group says how hard a fault is only through rollouts that actually saw it.
+MIN_FAULTED_ROLLOUTS = 4
 
 
 def _count_truth(value) -> int | None:
@@ -37,9 +39,10 @@ class OnlineFaultController:
         self.target_mixed_fraction = float(config["target_mixed_fraction"])
         self.ema_alpha = float(config["ema_alpha"])
         self.min_level_groups = int(config["min_level_groups"])
+        self.level_cooldown_steps = int(config["level_cooldown_steps"])
         if not (0 < self.minimum_fraction <= self.initial_fraction <= 1
                 and 0 < self.target_mixed_fraction <= 1 and 0 <= self.ema_alpha < 1
-                and self.min_level_groups > 0):
+                and self.min_level_groups > 0 and self.level_cooldown_steps > 0):
             raise ValueError("Invalid online fault controller parameters")
         self.step = 0
         self.buckets = {}
@@ -54,7 +57,7 @@ class OnlineFaultController:
         if key not in self.buckets:
             self.buckets[key] = {"tool": tool, "fraction": self.initial_fraction,
                                  "level": 0, "mixed_ema": self.target_mixed_fraction,
-                                 "pending": _empty_pending()}
+                                 "last_level_step": 0, "pending": _empty_pending()}
         return key, variant
 
     def assign(self, batch) -> list[str]:
@@ -110,11 +113,10 @@ class OnlineFaultController:
             values["coverage"].append(coverage)
             values["levels"].extend(int(rows["online_fault_level"][index]) for index in injected)
             values["injected"] += bool(injected)
-            # Only groups where most rollouts saw the fault say how hard the fault is.
-            if coverage <= 0.5:
+            if len(injected) < MIN_FAULTED_ROLLOUTS:
                 continue
             values["qualified"] += 1
-            correct = [float(rows["acc"][index]) > 0 for index in indices]
+            correct = [float(rows["acc"][index]) > 0 for index in injected]
             outcome = "all_correct" if all(correct) else "all_wrong" if not any(correct) else "mixed"
             values[outcome] += 1
 
@@ -132,14 +134,19 @@ class OnlineFaultController:
             pending["groups"] += values["qualified"]
             pending["all_correct"] += values["all_correct"]
             pending["all_wrong"] += values["all_wrong"]
-            if pending["groups"] < self.min_level_groups:
+            # A level is evaluated only with enough groups and after a cooldown since the
+            # last change, so one bucket cannot jump levels on consecutive steps.
+            if (pending["groups"] < self.min_level_groups
+                    or self.step - state["last_level_step"] < self.level_cooldown_steps):
                 continue
             level = state["level"]
             if pending["all_wrong"] > pending["groups"] / 2:
                 level = min(MAX_LEVEL[state["tool"]], level + 1)
             elif pending["all_correct"] > pending["groups"] / 2:
                 level = max(0, level - 1)
-            state["level"] = level
+            if level != state["level"]:
+                state["level"] = level
+                state["last_level_step"] = self.step
             state["pending"] = _empty_pending()
 
         if self.buckets and any(values["qualified"] for values in counts.values()):

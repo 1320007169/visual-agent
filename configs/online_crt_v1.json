@@ -10,5 +10,6 @@
   "minimum_fraction": 0.02,
   "target_mixed_fraction": 0.30,
   "ema_alpha": 0.7,
-  "min_level_groups": 20
+  "min_level_groups": 20,
+  "level_cooldown_steps": 5
 }
