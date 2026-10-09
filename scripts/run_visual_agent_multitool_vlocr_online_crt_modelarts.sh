@@ -17,7 +17,8 @@ export TRAINER_STOP_AFTER_SECONDS="${TRAINER_STOP_AFTER_SECONDS:-0}"
 export RL_SPLIT_OCR=0 RL_CHART_PARSE=1 VTS_VL_OCR=1
 export TOOL_CONFIG_PATH="$REPO_ROOT/reinforcement_learning/examples/sglang_multiturn/config/tool_config/visual_tool_multitool_vlocr_config.yaml"
 export VISUAL_AGENT_RL_SYSTEM_PROMPT_FILE="$REPO_ROOT/prompts/visual_agent_rl_system_multitool_vlocr.txt"
-export MULTITOOL_DATA_DIR="$REPO_ROOT/data/zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004"
+# Data lives in the shared checkout, which a branch checkout under REPO_ROOT may not contain.
+export MULTITOOL_DATA_DIR="${MULTITOOL_DATA_DIR:-$BASE/visual-agent/data/zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004}"
 export TRAIN_FILES="$MULTITOOL_DATA_DIR/train.parquet" VAL_FILES="$MULTITOOL_DATA_DIR/val.parquet"
 export VISUAL_AGENT_ONLINE_FAULTS_CONFIG="$REPO_ROOT/configs/online_crt_v1.json"
 export MODEL_PATH="$BASE/DeepEyesV2/models/Qwen3-VL-8B-Instruct"

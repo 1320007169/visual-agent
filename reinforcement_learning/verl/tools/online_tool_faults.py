@@ -109,9 +109,10 @@ def _count_fault(observation: dict, level: int, rng: random.Random, spec: dict) 
     elif level == 2:
         candidates = [round(count * factor) for factor in (0.5, 2.0)]
     elif level == 3:
-        candidates = [0, max(5, 5 * max(count, truth))]
+        candidates = [0, max(5, 5 * count)]
     else:
         raise ValueError(f"Unsupported count level: {level}")
+    # Wrong values come from the observed count only; the truth only excludes an accidental hit.
     candidates = [value for value in candidates if value >= 0 and value not in {count, truth}]
     return {**observation, "count": rng.choice(candidates)} if candidates else None
 
@@ -139,6 +140,42 @@ def _grounding_fault(observation: dict, level: int, rng: random.Random) -> dict 
         dy = max(-y1, min(1000 - y2, rng.choice((-40, -20, 20, 40))))
         shifted.append([x1 + dx, y1 + dy, x2 + dx, y2 + dy])
     return {**observation, "boxes": shifted} if shifted != boxes else None
+
+
+def _iou(first: list, second: list) -> float:
+    width = min(first[2], second[2]) - max(first[0], second[0])
+    height = min(first[3], second[3]) - max(first[1], second[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    intersection = width * height
+    union = ((first[2] - first[0]) * (first[3] - first[1])
+             + (second[2] - second[0]) * (second[3] - second[1]) - intersection)
+    return intersection / union if union > 0 else 0.0
+
+
+def replay_fault(tool: str, observation: Any, original: dict, injected: dict) -> dict | None:
+    """Return the injected fault when a later call on the same image yields the same evidence.
+
+    Rephrasing the query must not reveal the truth: grounding replays when any real box
+    overlaps an original box (IoU > 0.5), counting when the real count equals the original.
+    """
+    if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
+        return None
+    if tool == "grounding_detect":
+        boxes = observation.get("boxes")
+        if isinstance(boxes, list) and any(
+            isinstance(box, list) and len(box) == 4 and isinstance(source, list) and len(source) == 4
+            and _iou(box, source) > 0.5
+            for box in boxes for source in original["boxes"]
+        ):
+            return injected
+        return None
+    if tool == "object_count":
+        count = observation.get("count")
+        if isinstance(count, int) and not isinstance(count, bool) and count == original["count"]:
+            return {**observation, "count": injected["count"]}
+        return None
+    return None
 
 
 def inject_fault(observation: Any, spec: dict) -> dict | None:

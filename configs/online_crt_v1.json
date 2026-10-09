@@ -1,7 +1,6 @@
 {
   "eligible": [
     {"data_source": "visual-agent-ocr", "tool": "ocr_read"},
-    {"data_source": "visual-agent-chartqa", "tool": "ocr_read"},
     {"data_source": "visual-agent-tallyqa", "tool": "object_count"},
     {"data_source": "visual-agent-fsc147", "tool": "object_count"},
     {"data_source": "visual-agent-zwz-relation", "tool": "grounding_detect"},
@@ -11,5 +10,5 @@
   "minimum_fraction": 0.02,
   "target_mixed_fraction": 0.30,
   "ema_alpha": 0.7,
-  "level_cooldown_steps": 5
+  "min_level_groups": 20
 }

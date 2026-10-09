@@ -1631,7 +1631,7 @@ class RayPPOTrainer:
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
                         if controller is not None:
-                            metrics.update(controller.update(batch))
+                            metrics.update(controller.update(batch, int(self.config.actor_rollout_ref.rollout.n)))
 
                         if dual_stream_enabled:
                             dual_stream_metrics = _compute_dual_stream_reward_metrics(batch)

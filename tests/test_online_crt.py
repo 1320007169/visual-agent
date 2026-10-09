@@ -177,7 +177,84 @@ class OnlineCRTTest(unittest.TestCase):
         self.assertIn('"text": "120"', invoke({"target_image": 0, "bbox_2d": [0, 0, 500, 500]}))
         self.assertEqual(len(tool.calls), 2)
 
-    def test_controller_assign_update_and_restore(self):
+    def test_rephrased_count_replays_and_different_object_is_real(self):
+        class QueryCountTool(FakeCountTool):
+            async def execute(self, instance_id, arguments):
+                self.calls.append(arguments)
+                return json.dumps({"count": {"apples": 7, "red apples": 7, "pears": 3}[arguments["query"]]}), 0.0, {}
+
+        tool = QueryCountTool()
+        info = {"images": ["photo", "crop"], "online_fault": {"tool": "object_count", "level": 0,
+                "seed": 3, "count_truth": "7"}, "__trace__": {"model_calls": [], "tool_calls": []}}
+        call = load_call_tool()
+        callback = SimpleNamespace(tools={"object_count": tool})
+
+        def invoke(arguments):
+            return asyncio.run(call(callback, {"name": "object_count", "arguments": arguments},
+                                    info, xml_mode=True))["content"]
+
+        faulty = invoke({"query": "apples", "target_image": 0})
+        self.assertNotIn('"count": 7', faulty)
+        # A new query word is executed, but finding the same count keeps the fault.
+        self.assertEqual(invoke({"query": "red apples", "target_image": 0}), faulty)
+        self.assertEqual(info["__trace__"]["tool_calls"][1]["replayed_fault"], "evidence")
+        self.assertEqual(len(tool.calls), 2)
+        self.assertIn('"count": 3', invoke({"query": "pears", "target_image": 0}))
+        self.assertIn('"count": 7', invoke({"query": "red apples", "target_image": 1}))
+
+    def test_rephrased_grounding_replays_and_other_region_or_object_is_real(self):
+        boxes = {"cup": [[100, 100, 200, 200]], "mug": [[105, 105, 205, 205]],
+                 "plate": [[500, 500, 600, 600]]}
+
+        class GroundingTool(FakeCountTool):
+            async def execute(self, instance_id, arguments):
+                self.calls.append(arguments)
+                query = arguments["query"]
+                return json.dumps({"boxes": boxes[query], "confidence": [0.9], "labels": [query]}), 0.0, {}
+
+        tool = GroundingTool()
+        info = {"images": ["photo", "crop"], "online_fault": {"tool": "grounding_detect", "level": 0, "seed": 2},
+                "__trace__": {"model_calls": [], "tool_calls": []}}
+        call = load_call_tool()
+        callback = SimpleNamespace(tools={"grounding_detect": tool})
+
+        def invoke(arguments):
+            return json.loads(asyncio.run(call(callback, {"name": "grounding_detect", "arguments": arguments},
+                                               info, xml_mode=True))["content"].split("\n")[1])
+
+        faulty = invoke({"query": "cup", "target_image": 0})
+        self.assertNotEqual(faulty["boxes"], boxes["cup"])
+        self.assertEqual(invoke({"query": "mug", "target_image": 0}), faulty)
+        self.assertEqual(invoke({"query": "plate", "target_image": 0})["boxes"], boxes["plate"])
+        self.assertEqual(invoke({"query": "mug", "target_image": 1})["boxes"], boxes["mug"])
+        self.assertEqual(len(tool.calls), 4)
+
+    def test_unfaultable_call_leaves_next_target_call_eligible(self):
+        class RegionOcrTool(FakeCountTool):
+            async def execute(self, instance_id, arguments):
+                self.calls.append(arguments)
+                text = "Total 120" if arguments.get("bbox_2d", [0, 0, 1000, 1000]) == [0, 0, 1000, 1000] else "Thank you"
+                return json.dumps({"text": text, "truncated": False}), 0.0, {}
+
+        tool = RegionOcrTool()
+        info = {"images": ["receipt"], "online_fault": {"tool": "ocr_read", "level": 0,
+                "seed": 2, "answer": "120", "aliases": []}, "__trace__": {"model_calls": [], "tool_calls": []}}
+        call = load_call_tool()
+        callback = SimpleNamespace(tools={"ocr_read": tool})
+
+        def invoke(arguments):
+            return asyncio.run(call(callback, {"name": "ocr_read", "arguments": arguments},
+                                    info, xml_mode=True))["content"]
+
+        self.assertIn("Thank you", invoke({"target_image": 0, "bbox_2d": [0, 0, 500, 200]}))
+        self.assertNotIn("online_fault_attempted", info)
+        self.assertNotIn("reliance_fault", info)
+        faulty = invoke({"target_image": 0})
+        self.assertNotIn("120", faulty)
+        self.assertTrue(info["online_fault_attempted"])
+        self.assertIn("injected_fault", info["__trace__"]["tool_calls"][1])
+
+    def test_controller_assign_only_valid_specs(self):
         controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
         prompts = FakeBatch(data_source=["visual-agent-fsc147"] * 100 + ["other"],
                             extra_info=[{"index": index} for index in range(101)],
@@ -188,39 +265,71 @@ class OnlineCRTTest(unittest.TestCase):
         self.assertEqual(specs[-1], "")
         self.assertTrue(all(spec["count_truth"] == "12" and spec["bucket_key"] ==
                             "visual-agent-fsc147|object_count" for spec in selected))
+        # ChartQA is no longer eligible.
+        chart = FakeBatch(data_source=["visual-agent-chartqa"] * 50, extra_info=[{"index": i} for i in range(50)],
+                          reward_model=[{"ground_truth": "2014"}] * 50)
+        self.assertEqual(set(controller.assign(chart)), {""})
+        # Count specs need a ground truth that is a non-negative integer.
+        controller.buckets["visual-agent-fsc147|object_count"]["fraction"] = 1.0
+        truths = ["3.0", "2.5", "-1", "many", "0"]
+        counts = FakeBatch(data_source=["visual-agent-fsc147"] * 5, extra_info=[{"index": i} for i in range(5)],
+                           reward_model=[{"ground_truth": truth} for truth in truths])
+        specs = controller.assign(counts)
+        self.assertEqual([json.loads(spec)["count_truth"] if spec else "" for spec in specs], ["3", "", "", "", "0"])
         controller.eligible["visual-agent-fsc147"].append("grounding_detect")
         varied = {json.loads(spec)["tool"] for spec in controller.assign(prompts) if spec}
         self.assertEqual(varied, {"object_count", "grounding_detect"})
-        controller.eligible["visual-agent-fsc147"] = ["object_count"]
-        key_count = "visual-agent-fsc147|object_count"
         key_ocr, _ = controller._bucket("visual-agent-ocr", {"original_source": "hme100k"})
         self.assertEqual(key_ocr, "visual-agent-ocr|ocr_read|hme")
 
-        count_spec = json.dumps({"bucket_key": key_count})
-        ocr_spec = json.dumps({"bucket_key": key_ocr})
-        specs = [count_spec] * 16 + [ocr_spec] * 16 + [ocr_spec] * 16
-        traces = [{"tool_calls": [{"injected_fault": {"level": 0}}]} for _ in range(32)]
-        traces.extend({"tool_calls": []} for _ in range(16))
-        batch = FakeBatch(uid=["count"] * 16 + ["ocr"] * 16 + ["not-injected"] * 16,
-                          online_fault=specs, rollout_trace=traces,
-                          acc=[0] * 16 + [0, 1] * 8 + [1] * 16)
-        for _ in range(5):
-            metrics = controller.update(batch)
+    def test_controller_levels_need_twenty_majority_injected_groups(self):
+        controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
+        key_count, _ = controller._bucket("visual-agent-fsc147", {})
+        key_ocr, _ = controller._bucket("visual-agent-ocr", {"original_source": "hme100k"})
+        n = 4
+
+        def batch(groups):
+            """groups: (bucket, injected rollouts out of n, acc list)."""
+            rows = {"uid": [], "online_fault": [], "online_fault_injected": [], "online_fault_level": [], "acc": []}
+            for group, (key, injected, acc) in enumerate(groups):
+                for rollout in range(n):
+                    rows["uid"].append(f"g{group}")
+                    rows["online_fault"].append(json.dumps({"bucket_key": key}) if key else "")
+                    rows["online_fault_injected"].append(rollout < injected)
+                    rows["online_fault_level"].append(controller.buckets[key]["level"] if key and rollout < injected else -1)
+                    rows["acc"].append(acc[rollout])
+            return FakeBatch(**rows)
+
+        wrong, right, mixed = [0] * n, [1] * n, [0, 1, 0, 1]
+        # 20 fully injected all-wrong groups raise the level; minority-injected groups are ignored.
+        metrics = controller.update(batch([(key_count, n, wrong)] * 20 + [(key_count, 1, right)] * 5
+                                          + [(key_ocr, 3, mixed)] * 10 + [("", 0, right)]), n)
         self.assertEqual(controller.buckets[key_count]["level"], 1)
+        self.assertEqual(controller.buckets[key_count]["pending"]["groups"], 0)
+        prefix = "online_faults/visual-agent-fsc147/object_count"
+        self.assertEqual(metrics[f"{prefix}/assigned_groups"], 25)
+        self.assertEqual(metrics[f"{prefix}/injected_groups"], 25)
+        self.assertEqual(metrics[f"{prefix}/qualified_groups"], 20)
+        self.assertEqual(metrics[f"{prefix}/coverage_min"], 0.25)
+        self.assertEqual(metrics[f"{prefix}/injected_level_mean"], 0.0)
+        # Ten mixed OCR groups are not enough to change the level.
         self.assertEqual(controller.buckets[key_ocr]["level"], 0)
-        self.assertGreater(controller.buckets[key_ocr]["fraction"],
-                           controller.buckets[key_count]["fraction"])
+        self.assertEqual(controller.buckets[key_ocr]["pending"]["groups"], 10)
+        self.assertGreater(controller.buckets[key_ocr]["fraction"], controller.buckets[key_count]["fraction"])
         self.assertGreaterEqual(controller.buckets[key_count]["fraction"], 0.02)
-        self.assertEqual(metrics["online_faults/visual-agent-ocr/ocr_read/hme/injected_groups"], 1)
-        self.assertEqual(metrics["online_faults/visual-agent-ocr/ocr_read/hme/assigned_groups"], 2)
+        # All-correct groups accumulate across steps: 19 do not lower the level, the 20th does.
+        controller.update(batch([(key_count, n, right)] * 19), n)
+        self.assertEqual(controller.buckets[key_count]["level"], 1)
+        controller.update(batch([(key_count, n, right)]), n)
+        self.assertEqual(controller.buckets[key_count]["level"], 0)
+
         state = json.loads(json.dumps(controller.state_dict()))
         restored = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
         restored.load_state_dict(state)
         self.assertEqual(restored.state_dict(), state)
-        self.assertEqual(restored.assign(prompts), controller.assign(prompts))
-        with self.assertRaisesRegex(ValueError, "16 rollouts"):
-            restored.update(FakeBatch(uid=["short"], online_fault=[count_spec],
-                                      rollout_trace=traces[:1], acc=[0]))
+        with self.assertRaisesRegex(ValueError, "rollout.n=4"):
+            restored.update(FakeBatch(uid=["short"], online_fault=[json.dumps({"bucket_key": key_count})],
+                                      online_fault_injected=[True], online_fault_level=[0], acc=[0]), n)
 
     def test_launcher_config_for_two_and_eight_nodes(self):
         for nodes, batch_size in (("2", "126"), ("8", "336")):
@@ -237,8 +346,15 @@ class OnlineCRTTest(unittest.TestCase):
             self.assertEqual(config["ROLLOUT_N"], "16")
             self.assertEqual(config["VISUAL_AGENT_ONLINE_FAULTS_CONFIG"],
                              str(ROOT / "configs/online_crt_v1.json"))
-            self.assertIn("zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004",
-                          config["TRAIN_FILES"])
+            self.assertEqual(config["TRAIN_FILES"], str(ROOT.parent / "visual-agent/data"
+                             / "zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004/train.parquet"))
+        override = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
+            "REPO_ROOT": str(ROOT), "BASE": str(ROOT.parent), "NNODES": "2", "MULTITOOL_CONFIG_ONLY": "1",
+            "TRAIN_RUN_TOKEN": "override", "MULTITOOL_DATA_DIR": "/data/custom"}, capture_output=True, text=True)
+        self.assertEqual(override.returncode, 0, override.stderr)
+        config = dict(line.split("=", 1) for line in override.stdout.splitlines())
+        self.assertEqual((config["TRAIN_FILES"], config["VAL_FILES"]),
+                         ("/data/custom/train.parquet", "/data/custom/val.parquet"))
         invalid = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
             "REPO_ROOT": str(ROOT), "NNODES": "3", "MULTITOOL_CONFIG_ONLY": "1"},
             capture_output=True, text=True)

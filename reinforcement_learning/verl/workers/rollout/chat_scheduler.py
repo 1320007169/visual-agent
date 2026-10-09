@@ -410,22 +410,41 @@ class ToolCompletionCallback(CompletionCallback):
         tool_trace["returned_image_count"] = len(returned_images)
         if "raw_result" in tool_metrics:
             tool_trace["raw_result"] = tool_metrics["raw_result"]
+        online_state = info.get("online_fault_state")
+        if (online_state and tool_name == online_state["tool"] and not tool_trace.get("replayed_fault")
+                and not tool_metrics.get("tool_error")
+                and tool_trace["canonical_arguments"].get("target_image") == online_state["target_image"]):
+            # A rephrased call on the same image that finds the same evidence keeps the fault.
+            try:
+                observed = json.loads(tool_response)
+            except json.JSONDecodeError:
+                observed = None
+            replayed = online_tool_faults.replay_fault(
+                tool_name, observed, online_state["original"], online_state["injected"]
+            )
+            if replayed is not None:
+                tool_response = json.dumps(replayed, ensure_ascii=False)
+                tool_trace["replayed_fault"] = "evidence"
         if (online_spec and not fault and not info.get("online_fault_attempted")
                 and tool_name == online_spec["tool"] and not tool_metrics.get("tool_error")):
             try:
                 original = json.loads(tool_response)
             except json.JSONDecodeError:
                 original = None
-            if isinstance(original, dict) and original.get("status") not in {"error", "failed"}:
+            # A call that cannot be faulted (answer outside the region, a single box, ...)
+            # leaves the next target-tool call eligible.
+            injected = online_tool_faults.inject_fault(original, online_spec)
+            if injected is not None:
                 info["online_fault_attempted"] = True
-                injected = online_tool_faults.inject_fault(original, online_spec)
-                if injected is not None:
-                    tool_response = json.dumps(injected, ensure_ascii=False)
-                    info["reliance_fault"] = {"tool": tool_name,
-                                              "arguments": tool_trace["canonical_arguments"],
-                                              "observation": tool_response}
-                    tool_trace["injected_fault"] = {"level": online_spec["level"],
-                                                    "original": original, "injected": injected}
+                tool_response = json.dumps(injected, ensure_ascii=False)
+                info["reliance_fault"] = {"tool": tool_name,
+                                          "arguments": tool_trace["canonical_arguments"],
+                                          "observation": tool_response}
+                info["online_fault_state"] = {"tool": tool_name,
+                                              "target_image": tool_trace["canonical_arguments"].get("target_image"),
+                                              "original": original, "injected": injected}
+                tool_trace["injected_fault"] = {"level": online_spec["level"],
+                                                "original": original, "injected": injected}
         tool_trace["model_observation"] = tool_response
         if returned_images:
             if (fault or online_spec) and not tool_metrics.get("tool_error"):
@@ -933,6 +952,7 @@ class ChatCompletionScheduler:
         trajectory_traces = await asyncio.gather(*tasks)
         response_budgets = [trace.pop("_response_budget") for trace in trajectory_traces]
         sampled_turns = [trace.pop("_sampled_turns") for trace in trajectory_traces]
+        online_outcomes = [trace.pop("_online_fault") for trace in trajectory_traces]
         output_batch = self.completion_callback.postprocess(
             batch,
             batch_conversations,
@@ -946,6 +966,14 @@ class ChatCompletionScheduler:
             retain_trace(trace, int(retained_turns), budget.truncated, budget.reason)
         if self.trace_rollouts:
             output_batch.non_tensor_batch["rollout_trace"] = np.array(trajectory_traces, dtype=object)
+        if online_faults is not None:
+            # The fault controller reads these directly; rollout traces may be disabled.
+            output_batch.non_tensor_batch["online_fault_injected"] = np.array(
+                [injected for injected, _ in online_outcomes], dtype=bool
+            )
+            output_batch.non_tensor_batch["online_fault_level"] = np.array(
+                [level for _, level in online_outcomes], dtype=np.int64
+            )
         output_batch.meta_info["timing"] = {"generate_sequences": time.time() - t_start}
         print("[ChatCompletionScheduler] generate_sequences done")
         return output_batch
@@ -1024,4 +1052,6 @@ class ChatCompletionScheduler:
             )
             trace["_response_budget"] = budget
             trace["_sampled_turns"] = info["sampled_turns"]
+            injected = bool(info.get("online_fault_attempted"))
+            trace["_online_fault"] = (injected, info["online_fault"]["level"] if injected else -1)
             return trace
