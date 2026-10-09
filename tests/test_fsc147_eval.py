@@ -48,18 +48,22 @@ class FSC147EvalTests(unittest.TestCase):
 
     def annotation(self, root):
         path = root / "annotations.json"
+        (root / "points.json").write_text(json.dumps({
+            "one.jpg": {"points": [[10, 10], [20, 20]]},
+            "two.jpg": {"points": [[10, 10]]},
+        }))
         path.write_text(json.dumps({
             "images": [{"id": 1, "file_name": "one.jpg"}, {"id": 2, "file_name": "two.jpg"}],
             "categories": [{"id": 0, "name": "apple"}],
             "annotations": [{"id": i, "image_id": image, "category_id": 0}
-                            for i, image in enumerate([1, 1, 2])],
+                            for i, image in enumerate([1, 1, 2, 1, 1, 1, 2, 2, 2])],
         }))
         return path
 
     def test_rows_count_each_dot_and_do_not_expose_answer_in_prompt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            rows = prepare.build_rows(self.annotation(root), root / "images")
+            rows = prepare.build_rows(self.annotation(root), root / "images", root / "points.json")
             self.assertEqual([row["answer"] for row in rows], [2, 1])
             self.assertIn("apple", rows[0]["question"])
             self.assertNotIn("2", rows[0]["question"])
@@ -69,7 +73,8 @@ class FSC147EvalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with self.assertRaisesRegex(FileNotFoundError, "Missing 2 FSC147 test images"):
-                prepare.prepare(self.annotation(root), root / "images", root / "FSC147_TEST.tsv", False)
+                prepare.prepare(self.annotation(root), root / "images", root / "FSC147_TEST.tsv",
+                                root / "points.json", False)
             self.assertFalse((root / "FSC147_TEST.tsv").exists())
 
     def test_archive_extracts_only_requested_images_to_the_cache(self):

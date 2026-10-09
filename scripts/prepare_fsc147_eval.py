@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare the text-specified FSC147 test split from cached FSCD dot labels."""
+"""Prepare FSC147 test questions with official point-count answers."""
 
 import argparse
-from collections import Counter, defaultdict
+from collections import defaultdict
 import csv
 import hashlib
 import json
@@ -17,13 +17,13 @@ IMAGE_URL = "https://huggingface.co/Hzzone/PseCo/resolve/main/data/fsc147/images
 IMAGE_SHA256 = "19beaf3cf1b934fb9627fce34467030556519bee47afa8bb8b49189e0f362cc3"
 
 
-def build_rows(annotation_file, image_root):
+def build_rows(annotation_file, image_root, point_annotation_file):
     data = json.loads(Path(annotation_file).read_text())
+    points = json.loads(Path(point_annotation_file).read_text())
     categories = {row["id"]: row["name"] for row in data["categories"]}
     images = {row["id"]: row for row in data["images"]}
     if not images or len(images) != len(data["images"]):
         raise ValueError("FSC147 image IDs must be nonempty and unique")
-    counts = Counter()
     image_categories = defaultdict(set)
     annotation_ids = set()
     for annotation in data["annotations"]:
@@ -31,7 +31,6 @@ def build_rows(annotation_file, image_root):
         if image_id not in images or annotation["id"] in annotation_ids:
             raise ValueError("Unknown image or duplicate FSC147 annotation ID")
         annotation_ids.add(annotation["id"])
-        counts[image_id] += 1
         image_categories[image_id].add(annotation["category_id"])
     rows = []
     filenames = set()
@@ -46,7 +45,7 @@ def build_rows(annotation_file, image_root):
         rows.append({
             "index": image_id, "image_path": str((Path(image_root) / filename).resolve()),
             "question": f"Count every instance of {category} in the image. Respond with only the nonnegative integer count.",
-            "answer": counts[image_id], "category": category, "split": "test",
+            "answer": len(points[filename]["points"]), "category": category, "split": "test",
         })
     return rows
 
@@ -80,8 +79,8 @@ def extract_images(archive, image_root, filenames):
                     temporary.unlink(missing_ok=True)
 
 
-def prepare(annotation_file, image_root, output, download_images=True, image_url=IMAGE_URL):
-    rows = build_rows(annotation_file, image_root)
+def prepare(annotation_file, image_root, output, point_annotation_file, download_images=True, image_url=IMAGE_URL):
+    rows = build_rows(annotation_file, image_root, point_annotation_file)
     filenames = {Path(row["image_path"]).name for row in rows}
     missing = [row["image_path"] for row in rows if not Path(row["image_path"]).is_file()
                or not Path(row["image_path"]).stat().st_size]
@@ -127,12 +126,14 @@ def prepare(annotation_file, image_root, output, download_images=True, image_url
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--annotation-file", type=Path, required=True)
+    parser.add_argument("--point-annotation-file", type=Path, required=True)
     parser.add_argument("--image-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--download-images", choices=("0", "1"), default="1")
     parser.add_argument("--image-url", default=IMAGE_URL)
     args = parser.parse_args()
-    prepare(args.annotation_file, args.image_root, args.output, args.download_images == "1", args.image_url)
+    prepare(args.annotation_file, args.image_root, args.output, args.point_annotation_file,
+            args.download_images == "1", args.image_url)
 
 
 if __name__ == "__main__":

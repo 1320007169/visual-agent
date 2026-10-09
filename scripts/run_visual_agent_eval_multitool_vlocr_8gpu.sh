@@ -118,6 +118,7 @@ fi
 if [[ " $EVAL_DATASETS " == *" FSC147_TEST "* ]]; then
     "$ENV_DIR/bin/python" "$REPO_ROOT/scripts/prepare_fsc147_eval.py" \
         --annotation-file "$FSC147_ANNOTATION_FILE" --image-root "$FSC147_IMAGE_ROOT" \
+        --point-annotation-file "${FSC147_POINT_ANNOTATION_FILE:-$BASE/datasets/fsc147/annotation_FSC147_384.json}" \
         --output "$LMUData/FSC147_TEST.tsv" --download-images "${FSC147_DOWNLOAD_IMAGES:-0}"
 fi
 service_pids=()
@@ -148,7 +149,7 @@ setsid env CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" "$VTS_DEPTH_ENV/bin
     >"$WORK_ROOT/services/depth.log" 2>&1 &
 service_pids+=("$!")
 setsid env CUDA_VISIBLE_DEVICES="$TOOL_CUDA_VISIBLE_DEVICES" "$VTS_COUNT_ENV/bin/python3" \
-    -m vts.tool_server --config "$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml" \
+    -m vts.tool_server --config "${COUNT_SERVICE_CONFIG:-$PIPELINE_ROOT/configs/services/countgd_plusplus.yaml}" \
     >"$WORK_ROOT/services/count.log" 2>&1 &
 service_pids+=("$!")
 # Keep the chart environment libraries and inherited platform driver paths.

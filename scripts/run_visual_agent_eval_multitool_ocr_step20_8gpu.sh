@@ -102,6 +102,7 @@ mkdir -p "$WORK_ROOT/services" "$VTS_TOOL_BRIDGE_ROOT"
 if [[ " $EVAL_DATASETS " == *" FSC147_TEST "* ]]; then
     "$ENV_DIR/bin/python" "$REPO_ROOT/scripts/prepare_fsc147_eval.py" \
         --annotation-file "$FSC147_ANNOTATION_FILE" --image-root "$FSC147_IMAGE_ROOT" \
+        --point-annotation-file "${FSC147_POINT_ANNOTATION_FILE:-$BASE/datasets/fsc147/annotation_FSC147_384.json}" \
         --output "$LMUData/FSC147_TEST.tsv" --download-images "${FSC147_DOWNLOAD_IMAGES:-0}"
 fi
 service_pids=()
