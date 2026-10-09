@@ -435,6 +435,10 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
     elif _is_vision_opd_task(extra_info) or (extra_info or {}).get("data_source") == "visual-agent-hrbench4k":
         # Accept the option label with its displayed text before semantic verification.
         correct = multiple_choice_match(answer, ground_truth)
+    elif (extra_info or {}).get("data_source") in {"visual-agent-drivingvqa", "visual-agent-graid-bdd"}:
+        correct = (multiple_choice_match(answer, ground_truth)
+                   if extra_info["ability"] == "multiple_choice"
+                   else normalize_answer(answer) == normalize_answer(ground_truth))
     elif (extra_info or {}).get("data_source") == "visual-agent-depth-raw":
         correct = (
             multiple_choice_match(answer, ground_truth)

@@ -11,6 +11,7 @@ class ZwzDeepEyesV2Dataset(ZwzOriginalRelationDataset):
             "visual-agent-zwz-relation", "visual-agent-deepeyesv2", "visual-agent-hrbench4k",
             "visual-agent-depth-raw", "visual-agent-tallyqa", "visual-agent-fsc147",
             "visual-agent-ocr", "visual-agent-chartqa",
+            "visual-agent-drivingvqa", "visual-agent-graid-bdd",
         }:
             raise ValueError(f"Unexpected mixed dataset source: {source_name!r}")
         row = super().__getitem__(item)
@@ -31,4 +32,7 @@ class ZwzDeepEyesV2Dataset(ZwzOriginalRelationDataset):
                 row["extra_info"]["original_source"] = source.get("original_source")
             if source_name in {"visual-agent-ocr", "visual-agent-chartqa"}:
                 row["extra_info"]["answer_aliases"] = source["answer_aliases"]
+            if source_name in {"visual-agent-drivingvqa", "visual-agent-graid-bdd"}:
+                row["extra_info"].update(uid=source["uid"], original_source=source["original_source"],
+                                         ability=source["ability"])
         return row
