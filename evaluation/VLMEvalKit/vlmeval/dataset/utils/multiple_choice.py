@@ -439,6 +439,9 @@ def prefetch_circular_group(sub_data, verbose=False):
 
 
 def eval_vanilla(model, item, dataset_name=None):
+    prediction = str(item['prediction']).strip()
+    if prediction.startswith(('Failed to obtain answer via API', 'Agent exceeded the maximum of', '<tool_call>')):
+        return dict(hit=0, log=f'Invalid prediction: {prediction}')
     res = extract_answer_from_item(model, item, dataset_name=dataset_name)
     opt, match_log = res['opt'], res['log']
     if opt == item['GT']:
@@ -609,6 +612,8 @@ def extract_characters_regex(s, choices=['(A)', '(B)', '(C)', '(D)', '(E)']):
     if type(s) is dict:
         s = ''
     s = s.strip()
+    if s.startswith(('Failed to obtain answer via API', 'Agent exceeded the maximum of', '<tool_call>')):
+        return ''
     match = re.search(r'.*\\boxed\{([^}]*)\}', s)
     if match and match.group(1) in choices:
         return match.group(1)

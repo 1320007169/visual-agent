@@ -112,7 +112,9 @@ def can_infer_text(answer, choices):
 
 
 def can_infer(answer, choices):
-    answer = str(answer)
+    answer = str(answer).strip()
+    if answer.startswith(('Failed to obtain answer via API', 'Agent exceeded the maximum of', '<tool_call>')):
+        return False
     copt = can_infer_option(answer, choices)
     return copt if copt else can_infer_text(answer, choices)
 
