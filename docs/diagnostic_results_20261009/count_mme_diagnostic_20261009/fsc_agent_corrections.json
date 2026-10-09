@@ -1,0 +1,11 @@
+{
+  "subset": "Complete trace, one count call, target_image=0, count available",
+  "samples": 1181,
+  "agent_mae": 14.861981371718882,
+  "last_tool_mae": 15.979678238780695,
+  "changed": 45,
+  "better": 38,
+  "worse": 7,
+  "equal_error": 0,
+  "absolute_error_change": -1320
+}

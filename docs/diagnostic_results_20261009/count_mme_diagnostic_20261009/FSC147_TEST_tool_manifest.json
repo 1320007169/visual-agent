@@ -1,0 +1,12 @@
+{
+  "inputs": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/count_mme_diagnostic_20261009/fsc_inputs.jsonl",
+  "inputs_sha256": "c06601c35df4ac92f19738332b61d936014aea2f8b67bf92de1b2c49c95e3dd8",
+  "dataset": "FSC147_TEST",
+  "threshold": 0.23,
+  "automatic_exemplars": 3,
+  "ground_truth_boxes_used": false,
+  "device": "CUDA_VISIBLE_DEVICES=1; cuda:0",
+  "backend_source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/groundingdino_offline_pipeline/src/vts/tools/counting.py",
+  "backend_source_sha256": "812f9eaa9f990d416bde525385013b400f3ca47ccfe83ad93bed55ef8b138b40",
+  "policy": "Both production backends receive identical image and query; automatic boxes come only from model predictions"
+}

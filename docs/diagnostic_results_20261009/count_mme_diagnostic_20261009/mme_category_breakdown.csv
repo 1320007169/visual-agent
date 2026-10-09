@@ -1,0 +1,61 @@
+dataset,category,grounding_group,samples,E_samples,E_errors,E_selection_rate,E_error_rate
+MME-RealWorld-Lite,Perception/Autonomous_Driving,grounding_any_empty,81,31,28,0.38271604938271603,0.9032258064516129
+MME-RealWorld-Lite,Perception/Autonomous_Driving,grounding_nonempty_only,265,47,42,0.17735849056603772,0.8936170212765957
+MME-RealWorld-Lite,Perception/Autonomous_Driving,no_grounding,4,2,2,0.5,1.0
+MME-RealWorld-Lite,Perception/Diagram and Table,grounding_any_empty,10,0,0,0.0,
+MME-RealWorld-Lite,Perception/Diagram and Table,grounding_nonempty_only,48,0,0,0.0,
+MME-RealWorld-Lite,Perception/Diagram and Table,no_grounding,42,0,0,0.0,
+MME-RealWorld-Lite,Perception/Monitoring,grounding_any_empty,116,55,48,0.47413793103448276,0.8727272727272727
+MME-RealWorld-Lite,Perception/Monitoring,grounding_nonempty_only,163,26,21,0.15950920245398773,0.8076923076923077
+MME-RealWorld-Lite,Perception/Monitoring,no_grounding,40,13,4,0.325,0.3076923076923077
+MME-RealWorld-Lite,Perception/OCR with Complex Context,grounding_any_empty,13,0,0,0.0,
+MME-RealWorld-Lite,Perception/OCR with Complex Context,grounding_nonempty_only,91,3,3,0.03296703296703297,1.0
+MME-RealWorld-Lite,Perception/OCR with Complex Context,incomplete_tool_trace,1,0,0,0.0,
+MME-RealWorld-Lite,Perception/OCR with Complex Context,no_grounding,145,1,1,0.006896551724137931,1.0
+MME-RealWorld-Lite,Perception/Remote Sensing,grounding_any_empty,35,4,3,0.11428571428571428,0.75
+MME-RealWorld-Lite,Perception/Remote Sensing,grounding_nonempty_only,57,7,7,0.12280701754385964,1.0
+MME-RealWorld-Lite,Perception/Remote Sensing,incomplete_tool_trace,10,0,0,0.0,
+MME-RealWorld-Lite,Perception/Remote Sensing,no_grounding,48,2,2,0.041666666666666664,1.0
+MME-RealWorld-Lite,Reasoning/Autonomous_Driving,grounding_any_empty,71,33,25,0.4647887323943662,0.7575757575757576
+MME-RealWorld-Lite,Reasoning/Autonomous_Driving,grounding_nonempty_only,247,12,11,0.048582995951417005,0.9166666666666666
+MME-RealWorld-Lite,Reasoning/Autonomous_Driving,no_grounding,82,23,20,0.2804878048780488,0.8695652173913043
+MME-RealWorld-Lite,Reasoning/Diagram and Table,grounding_any_empty,4,0,0,0.0,
+MME-RealWorld-Lite,Reasoning/Diagram and Table,grounding_nonempty_only,41,1,1,0.024390243902439025,1.0
+MME-RealWorld-Lite,Reasoning/Diagram and Table,no_grounding,55,2,2,0.03636363636363636,1.0
+MME-RealWorld-Lite,Reasoning/Monitoring,grounding_any_empty,57,35,35,0.6140350877192983,1.0
+MME-RealWorld-Lite,Reasoning/Monitoring,grounding_nonempty_only,70,7,7,0.1,1.0
+MME-RealWorld-Lite,Reasoning/Monitoring,no_grounding,23,0,0,0.0,
+MME-RealWorld-Lite,Reasoning/OCR with Complex Context,grounding_any_empty,21,1,1,0.047619047619047616,1.0
+MME-RealWorld-Lite,Reasoning/OCR with Complex Context,grounding_nonempty_only,49,1,1,0.02040816326530612,1.0
+MME-RealWorld-Lite,Reasoning/OCR with Complex Context,no_grounding,30,1,1,0.03333333333333333,1.0
+MME-RealWorld-CN,Perception/Autonomous_Driving,grounding_any_empty,176,60,48,0.3409090909090909,0.8
+MME-RealWorld-CN,Perception/Autonomous_Driving,grounding_nonempty_only,523,43,37,0.08221797323135756,0.8604651162790697
+MME-RealWorld-CN,Perception/Autonomous_Driving,no_grounding,1,0,0,0.0,
+MME-RealWorld-CN,Perception/Diagram and Table,grounding_any_empty,116,7,7,0.0603448275862069,1.0
+MME-RealWorld-CN,Perception/Diagram and Table,grounding_nonempty_only,138,6,6,0.043478260869565216,1.0
+MME-RealWorld-CN,Perception/Diagram and Table,grounding_unknown_or_error,1,0,0,0.0,
+MME-RealWorld-CN,Perception/Diagram and Table,incomplete_tool_trace,1,0,0,0.0,
+MME-RealWorld-CN,Perception/Diagram and Table,no_grounding,346,9,9,0.02601156069364162,1.0
+MME-RealWorld-CN,Perception/Monitoring,grounding_any_empty,194,121,80,0.6237113402061856,0.6611570247933884
+MME-RealWorld-CN,Perception/Monitoring,grounding_nonempty_only,286,55,37,0.19230769230769232,0.6727272727272727
+MME-RealWorld-CN,Perception/Monitoring,no_grounding,20,10,0,0.5,0.0
+MME-RealWorld-CN,Perception/OCR with Complex Context,grounding_any_empty,172,2,2,0.011627906976744186,1.0
+MME-RealWorld-CN,Perception/OCR with Complex Context,grounding_nonempty_only,413,16,14,0.0387409200968523,0.875
+MME-RealWorld-CN,Perception/OCR with Complex Context,no_grounding,1323,30,30,0.022675736961451247,1.0
+MME-RealWorld-CN,Perception/Remote Sensing,grounding_any_empty,79,5,5,0.06329113924050633,1.0
+MME-RealWorld-CN,Perception/Remote Sensing,grounding_nonempty_only,95,2,2,0.021052631578947368,1.0
+MME-RealWorld-CN,Perception/Remote Sensing,incomplete_tool_trace,19,0,0,0.0,
+MME-RealWorld-CN,Perception/Remote Sensing,no_grounding,107,8,8,0.07476635514018691,1.0
+MME-RealWorld-CN,Reasoning/Autonomous_Driving,grounding_any_empty,130,59,43,0.45384615384615384,0.7288135593220338
+MME-RealWorld-CN,Reasoning/Autonomous_Driving,grounding_nonempty_only,665,88,73,0.13233082706766916,0.8295454545454546
+MME-RealWorld-CN,Reasoning/Autonomous_Driving,no_grounding,5,1,1,0.2,1.0
+MME-RealWorld-CN,Reasoning/Diagram and Table,grounding_any_empty,117,11,11,0.09401709401709402,1.0
+MME-RealWorld-CN,Reasoning/Diagram and Table,grounding_nonempty_only,127,11,11,0.08661417322834646,1.0
+MME-RealWorld-CN,Reasoning/Diagram and Table,incomplete_tool_trace,2,0,0,0.0,
+MME-RealWorld-CN,Reasoning/Diagram and Table,no_grounding,356,32,30,0.0898876404494382,0.9375
+MME-RealWorld-CN,Reasoning/Monitoring,grounding_any_empty,119,55,55,0.46218487394957986,1.0
+MME-RealWorld-CN,Reasoning/Monitoring,grounding_nonempty_only,135,25,25,0.18518518518518517,1.0
+MME-RealWorld-CN,Reasoning/Monitoring,no_grounding,44,3,3,0.06818181818181818,1.0
+MME-RealWorld-CN,Reasoning/OCR with Complex Context,grounding_any_empty,39,6,6,0.15384615384615385,1.0
+MME-RealWorld-CN,Reasoning/OCR with Complex Context,grounding_nonempty_only,119,22,22,0.18487394957983194,1.0
+MME-RealWorld-CN,Reasoning/OCR with Complex Context,no_grounding,49,12,12,0.24489795918367346,1.0

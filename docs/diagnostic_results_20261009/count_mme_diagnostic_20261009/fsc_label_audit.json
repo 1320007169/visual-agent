@@ -1,0 +1,6 @@
+{
+  "images_verified": 1190,
+  "all_extra_counts": 3,
+  "all_last_three_annotations_match_first_three_official_exemplar_boxes": true,
+  "annotation_source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-tools/src/CountGDPlusPlus/data/fscd147/countgd_test_fscd147.json"
+}

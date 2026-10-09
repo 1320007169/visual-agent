@@ -1,0 +1,8 @@
+{
+  "prediction_root": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/vlocr_64gpu_step80_8gpu/vlocr_64gpu_step80_20261008T223306340576951_331/64gpu_step80/dino_latest/VisualAgent-vllm/T20261008_G",
+  "official_fsc_annotation": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/datasets/fsc147/annotation_FSC147_384.json",
+  "fsc_annotation_sha256": "6a1d0f43d12274219a5307cb35b24c85fb275a34b3d5acf5b67f2066f9e0bfe1",
+  "fsc_prediction_sha256": "d8fdc8ae94829544a65dcca28f0a546014bab31c1e961df68f87a058789506f7",
+  "choice_parser": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/evaluation/VLMEvalKit/vlmeval/dataset/utils/multiple_choice.py",
+  "scope": "New-data 64-GPU step80; FSC uses official point count, MME uses saved official score and parser"
+}

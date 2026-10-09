@@ -1,0 +1,2 @@
+MAE,RMSE,MAE_valid,RMSE_valid,exact_accuracy,valid_rate,total_samples,valid_samples,invalid_count,api_failed_count
+15.07563025210084,128.9959089964295,15.07563025210084,128.9959089964295,31.932773109243698,100.0,1190,1190,0,0

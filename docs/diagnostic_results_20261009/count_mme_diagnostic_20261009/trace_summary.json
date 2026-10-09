@@ -1,0 +1,155 @@
+{
+  "FSC147": {
+    "total": 1190,
+    "mae_official_points": 15.1890756302521,
+    "mae_stored_labels": 15.772268907563026,
+    "rmse_official_points": 129.37234712905487,
+    "label_difference": {
+      "stored_minus_official": 3,
+      "affected_images": 1190
+    },
+    "absolute_error_quantiles": {
+      "0": 0.0,
+      "0.5": 2.0,
+      "0.9": 20.0,
+      "0.95": 51.549999999999955,
+      "0.99": 148.3299999999997,
+      "1": 3468.0
+    },
+    "under_count": 208,
+    "over_count": 597,
+    "exact": 385,
+    "top_5pct": {
+      "samples": 60,
+      "absolute_error_sum": 12825,
+      "absolute_error_share": 0.7095435684647303,
+      "mae_contribution": 10.777310924369749,
+      "remaining_mae": 4.646017699115045,
+      "equals_last_tool_samples": 48,
+      "equals_last_tool_error_share_of_top": 0.8545029239766082,
+      "equals_last_tool_error_share_of_total": 0.6063070539419088
+    },
+    "overall_count_call_distribution": {
+      "1": 1185,
+      "2": 4,
+      "3": 1
+    },
+    "overall_equals_last_tool": 1137,
+    "complete_tool_call_lists": 1186,
+    "truncated_raw_response_cells": 5,
+    "gt_over_900": [
+      561,
+      979
+    ],
+    "top_two_error_share": 0.33344398340248965,
+    "interpretation": "Equal final/tool numbers are evidence of adoption, not proof of copying or causal attribution."
+  },
+  "MME": {
+    "MME-RealWorld-Lite": {
+      "groups": {
+        "Overall": {
+          "all_samples": 1919,
+          "all_error_rate": 0.45648775403856173,
+          "E_samples": 307,
+          "E_selection_rate": 0.15997915581031788,
+          "E_errors": 265,
+          "E_error_rate": 0.8631921824104235
+        },
+        "grounding_any_empty": {
+          "all_samples": 408,
+          "all_error_rate": 0.6127450980392157,
+          "E_samples": 159,
+          "E_selection_rate": 0.3897058823529412,
+          "E_errors": 140,
+          "E_error_rate": 0.8805031446540881
+        },
+        "grounding_nonempty_only": {
+          "all_samples": 1031,
+          "all_error_rate": 0.46459747817652763,
+          "E_samples": 104,
+          "E_selection_rate": 0.1008729388942774,
+          "E_errors": 93,
+          "E_error_rate": 0.8942307692307693
+        },
+        "incomplete_tool_trace": {
+          "all_samples": 11,
+          "all_error_rate": 0.9090909090909091,
+          "E_samples": 0,
+          "E_selection_rate": 0.0,
+          "E_errors": 0,
+          "E_error_rate": null
+        },
+        "no_grounding": {
+          "all_samples": 469,
+          "all_error_rate": 0.2921108742004264,
+          "E_samples": 44,
+          "E_selection_rate": 0.09381663113006397,
+          "E_errors": 32,
+          "E_error_rate": 0.7272727272727273
+        }
+      },
+      "E_last_grounding_status": {
+        "empty": 146,
+        "nonempty": 117,
+        "no_grounding": 44
+      }
+    },
+    "MME-RealWorld-CN": {
+      "groups": {
+        "Overall": {
+          "all_samples": 5917,
+          "all_error_rate": 0.32922088896400203,
+          "E_samples": 699,
+          "E_selection_rate": 0.11813418962311982,
+          "E_errors": 577,
+          "E_error_rate": 0.8254649499284692
+        },
+        "grounding_any_empty": {
+          "all_samples": 1142,
+          "all_error_rate": 0.425569176882662,
+          "E_samples": 326,
+          "E_selection_rate": 0.28546409807355516,
+          "E_errors": 257,
+          "E_error_rate": 0.7883435582822086
+        },
+        "grounding_nonempty_only": {
+          "all_samples": 2501,
+          "all_error_rate": 0.44062375049980007,
+          "E_samples": 268,
+          "E_selection_rate": 0.10715713714514194,
+          "E_errors": 227,
+          "E_error_rate": 0.8470149253731343
+        },
+        "grounding_unknown_or_error": {
+          "all_samples": 1,
+          "all_error_rate": 0.0,
+          "E_samples": 0,
+          "E_selection_rate": 0.0,
+          "E_errors": 0,
+          "E_error_rate": null
+        },
+        "incomplete_tool_trace": {
+          "all_samples": 22,
+          "all_error_rate": 0.8636363636363636,
+          "E_samples": 0,
+          "E_selection_rate": 0.0,
+          "E_errors": 0,
+          "E_error_rate": null
+        },
+        "no_grounding": {
+          "all_samples": 2251,
+          "all_error_rate": 0.1514882274544647,
+          "E_samples": 105,
+          "E_selection_rate": 0.046645935139937804,
+          "E_errors": 93,
+          "E_error_rate": 0.8857142857142857
+        }
+      },
+      "E_last_grounding_status": {
+        "empty": 306,
+        "nonempty": 288,
+        "no_grounding": 105
+      }
+    }
+  }
+}

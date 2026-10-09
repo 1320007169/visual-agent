@@ -1,0 +1,277 @@
+{
+  "annotation": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/datasets/fsc147/annotation_FSC147_384.json",
+  "annotation_sha256": "6a1d0f43d12274219a5307cb35b24c85fb275a34b3d5acf5b67f2066f9e0bfe1",
+  "policy": "Saved predictions unchanged; full-split invalid handling and answer extraction unchanged; only reference point counts corrected. Rescore time is CPU scoring time, not inference time.",
+  "runs": [
+    {
+      "run": "corrected_1e202d5e2924",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_ocr_step20_8gpu/multitool_ocr_64gpu_step20_24gpu_step40_20260929T160224278813666_314/24gpu_step40/dino_latest/VisualAgent-vllm/T20260929_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "1e202d5e2924d1f82e5cc006df6fedab5d1c4ed8a7fd7b4c2b682942c8609fe0",
+      "historical": {
+        "MAE": 15.46218487394958,
+        "RMSE": 129.35215433819715,
+        "MAE_valid": 15.46218487394958,
+        "RMSE_valid": 129.35215433819715,
+        "exact_accuracy": 4.117647058823529,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": 14.863865546218488,
+        "RMSE": 129.23374042356565,
+        "MAE_valid": 14.863865546218488,
+        "RMSE_valid": 129.23374042356565,
+        "exact_accuracy": 32.35294117647059,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.5742966309189796
+    },
+    {
+      "run": "corrected_baca8b122595",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_ocr_step20_8gpu/multitool_ocr_64gpu_step20_24gpu_step40_20260929T160224278813666_314/64gpu_step20/dino_latest/VisualAgent-vllm/T20260929_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "baca8b12259552a7f8f753ba71832321f3f11d10bf941be5dd5dc123ac3417b4",
+      "historical": {
+        "MAE": 15.818487394957984,
+        "RMSE": 129.599655046745,
+        "MAE_valid": 15.818487394957984,
+        "RMSE_valid": 129.599655046745,
+        "exact_accuracy": 4.369747899159663,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": 15.252100840336135,
+        "RMSE": 129.4798319845848,
+        "MAE_valid": 15.252100840336135,
+        "RMSE_valid": 129.4798319845848,
+        "exact_accuracy": 31.764705882352942,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.28772754967212677
+    },
+    {
+      "run": "corrected_8e644cb656cc",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_16gpu_latest_8gpu/multitool_vlocr_16gpu_step150_20261004T170810303152388_335/dino_latest/VisualAgent-vllm/T20261004_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "8e644cb656cc6c850bde716948d946107070c90d51e874c96c70e5bd39c440db",
+      "historical": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 17.148820326678766,
+        "RMSE_valid": 134.7167021443912,
+        "exact_accuracy": 3.6134453781512605,
+        "valid_rate": 92.60504201680672,
+        "total_samples": 1190,
+        "valid_samples": 1102,
+        "invalid_count": 88,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 16.566243194192378,
+        "RMSE_valid": 134.57843029994208,
+        "exact_accuracy": 24.45378151260504,
+        "valid_rate": 92.60504201680672,
+        "total_samples": 1190,
+        "valid_samples": 1102,
+        "invalid_count": 88,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.28240248560905457
+    },
+    {
+      "run": "corrected_5a167c149f87",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/16gpu_step110/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_16gpu_step110/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "5a167c149f87c5bc88f5089ba85c784165f06aca80f898d926ab866b1117a77f",
+      "historical": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 16.52649285113541,
+        "RMSE_valid": 116.42112011030298,
+        "exact_accuracy": 4.117647058823529,
+        "valid_rate": 99.91596638655462,
+        "total_samples": 1190,
+        "valid_samples": 1189,
+        "invalid_count": 1,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 15.80067283431455,
+        "RMSE_valid": 116.23796319390864,
+        "exact_accuracy": 24.03361344537815,
+        "valid_rate": 99.91596638655462,
+        "total_samples": 1190,
+        "valid_samples": 1189,
+        "invalid_count": 1,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.27465102821588516
+    },
+    {
+      "run": "corrected_b2be0bf37d68",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343_64gpu_step80/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "b2be0bf37d68fde2353d8af0789d1170f5faeaf23e1fb5a924dcc497c1a879ed",
+      "historical": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 17.042087542087543,
+        "RMSE_valid": 120.12194981885213,
+        "exact_accuracy": 4.033613445378151,
+        "valid_rate": 99.83193277310924,
+        "total_samples": 1190,
+        "valid_samples": 1188,
+        "invalid_count": 2,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 16.328282828282827,
+        "RMSE_valid": 119.95205271063496,
+        "exact_accuracy": 28.235294117647058,
+        "valid_rate": 99.83193277310924,
+        "total_samples": 1190,
+        "valid_samples": 1188,
+        "invalid_count": 2,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.26689019799232483
+    },
+    {
+      "run": "corrected_fd5c2e918965",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/16gpu_step210/dino_latest/VisualAgent-vllm/T20261006_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "fd5c2e9189656cc9f7f6d20cf42498252ae3bc0d604e84fe1cfe483c24a92fdb",
+      "historical": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 31.358288770053477,
+        "RMSE_valid": 132.68898673750593,
+        "exact_accuracy": 1.1764705882352942,
+        "valid_rate": 94.28571428571429,
+        "total_samples": 1190,
+        "valid_samples": 1122,
+        "invalid_count": 68,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 29.28698752228164,
+        "RMSE_valid": 132.17594146020397,
+        "exact_accuracy": 11.512605042016807,
+        "valid_rate": 94.28571428571429,
+        "total_samples": 1190,
+        "valid_samples": 1122,
+        "invalid_count": 68,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.23989926278591156
+    },
+    {
+      "run": "corrected_be0566ec1719",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/64gpu_step53/dino_latest/VisualAgent-vllm/T20261006_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "be0566ec17198ca5eb8d1cd525953bf866685697912449ee33f4700cdba83f4a",
+      "historical": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 15.7771236333053,
+        "RMSE_valid": 129.2837387823418,
+        "exact_accuracy": 4.53781512605042,
+        "valid_rate": 99.91596638655462,
+        "total_samples": 1190,
+        "valid_samples": 1189,
+        "invalid_count": 1,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": NaN,
+        "RMSE": NaN,
+        "MAE_valid": 15.239697224558453,
+        "RMSE_valid": 129.1670279528666,
+        "exact_accuracy": 31.932773109243698,
+        "valid_rate": 99.91596638655462,
+        "total_samples": 1190,
+        "valid_samples": 1189,
+        "invalid_count": 1,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.2657274827361107
+    },
+    {
+      "run": "corrected_f6fd71534ecb",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/vlocr_64gpu_step69_8gpu/vlocr_64gpu_step69_20261008T105649822634376_345/64gpu_step69/dino_latest/VisualAgent-vllm/T20261008_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "f6fd71534ecbe9207e2ccbcda2cef2be5521220ce6dfce6cb1ca35648bbfa40d",
+      "historical": {
+        "MAE": 15.648739495798319,
+        "RMSE": 129.11211986408682,
+        "MAE_valid": 15.648739495798319,
+        "RMSE_valid": 129.11211986408682,
+        "exact_accuracy": 4.369747899159663,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": 15.07563025210084,
+        "RMSE": 128.9959089964295,
+        "MAE_valid": 15.07563025210084,
+        "RMSE_valid": 128.9959089964295,
+        "exact_accuracy": 31.932773109243698,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.2596190422773361
+    },
+    {
+      "run": "corrected_5f3ef7e4cb2b",
+      "source": "/home/ma-user/work/model/xiaoyi_tmpstorage/haohang/min/gx/visual-agent/outputs/vlmeval/vlocr_64gpu_step80_8gpu/vlocr_64gpu_step80_20261008T223306340576951_331/64gpu_step80/dino_latest/VisualAgent-vllm/T20261008_G/VisualAgent-vllm_FSC147_TEST.xlsx",
+      "source_sha256": "5f3ef7e4cb2b4fe6f8d5cae4351627bba68138bbe5aa1d40dbd15474df04630a",
+      "historical": {
+        "MAE": 15.772268907563026,
+        "RMSE": 129.49151038004075,
+        "MAE_valid": 15.772268907563026,
+        "RMSE_valid": 129.49151038004075,
+        "exact_accuracy": 4.369747899159663,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "corrected": {
+        "MAE": 15.1890756302521,
+        "RMSE": 129.37234712905487,
+        "MAE_valid": 15.1890756302521,
+        "RMSE_valid": 129.37234712905487,
+        "exact_accuracy": 32.35294117647059,
+        "valid_rate": 100.0,
+        "total_samples": 1190,
+        "valid_samples": 1190,
+        "invalid_count": 0,
+        "api_failed_count": 0
+      },
+      "rescore_seconds": 0.40050502866506577
+    }
+  ]
+}

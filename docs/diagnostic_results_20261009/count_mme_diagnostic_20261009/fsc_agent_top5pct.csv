@@ -1,0 +1,61 @@
+index,filename,category,official_gt,stored_gt,prediction,absolute_error,signed_error,stored_absolute_error,count_calls,tool_counts,trace_complete,tool_calls_complete,last_tool_count,equals_last_tool,equals_any_tool,last_tool_absolute_error,last_query,last_target_image
+561,1123.jpg,marker,3701,3704,233,3468,-3468,3471,1,[233],True,True,233.0,True,True,3468.0,marker,0
+979,7611.jpg,yellow lego stud,2560,2563,1,2559,-2559,2562,1,[1],True,True,1.0,True,True,2559.0,yellow lego stud,0
+1046,6860.jpg,lego,512,515,1,511,-511,514,1,[0],True,True,0.0,False,False,512.0,lego,0
+1171,6644.jpg,marker,500,503,47,453,-453,456,1,[47],True,True,47.0,True,True,453.0,marker,0
+1090,7195.jpg,lego,384,387,3,381,-381,384,1,[275],True,True,275.0,False,False,109.0,lego,0
+365,2180.jpg,apple,223,226,1,222,-222,225,1,[1],True,True,1.0,True,True,222.0,apple,0
+51,2004.jpg,sunglasses,226,229,410,184,184,181,1,[410],True,True,410.0,True,True,184.0,sunglasses,0
+474,2038.jpg,sunglasses,198,201,380,182,182,179,1,[380],True,True,380.0,True,True,182.0,sunglasses,0
+935,1456.jpg,keyboard key,184,187,2,182,-182,185,1,[2],True,True,2.0,True,True,182.0,keyboard key,0
+525,2009.jpg,sunglasses,198,201,375,177,177,174,1,[375],True,True,375.0,True,True,177.0,sunglasses,0
+789,6959.jpg,marker,212,215,54,158,-158,161,1,[54],True,True,54.0,True,True,158.0,marker,0
+469,7473.jpg,nail polish,508,511,357,151,-151,154,1,[357],True,True,357.0,True,True,151.0,nail polish,0
+984,6842.jpg,lego,36,39,184,148,148,145,1,[184],True,True,184.0,True,True,148.0,lego,0
+21,1497.jpg,keyboard key,207,210,62,145,-145,148,2,"[62, None]",True,True,,False,True,,keyboard key,1
+823,7042.jpg,sheep,198,201,53,145,-145,148,1,[53],True,True,53.0,True,True,145.0,sheep,0
+532,7015.jpg,sunglasses,141,144,279,138,138,135,1,[279],True,True,279.0,True,True,138.0,sunglasses,0
+75,6732.jpg,egg,39,42,172,133,133,130,1,[172],True,True,172.0,True,True,133.0,egg,0
+829,7378.jpg,lego,256,259,128,128,-128,131,1,[128],True,True,128.0,True,True,128.0,lego,0
+86,2005.jpg,sunglasses,140,143,267,127,127,124,1,[267],True,True,267.0,True,True,127.0,sunglasses,0
+531,2159.jpg,apple,621,624,747,126,126,123,1,[747],False,False,747.0,False,True,126.0,apple,0
+1119,4062.jpg,marble,275,278,150,125,-125,128,1,[0],True,True,0.0,False,False,275.0,marble,0
+568,2219.jpg,apple,356,359,472,116,116,113,1,[472],False,True,472.0,True,True,116.0,apple,0
+189,1462.jpg,keyboard key,409,412,299,110,-110,113,1,[299],True,True,299.0,True,True,110.0,keyboard key,0
+13,1458.jpg,keyboard key,162,165,58,104,-104,107,1,[58],True,True,58.0,True,True,104.0,keyboard key,0
+350,6993.jpg,sunglasses,90,93,188,98,98,95,1,[188],True,True,188.0,True,True,98.0,sunglasses,0
+946,7075.jpg,sheep,195,198,100,95,-95,98,1,[0],True,True,0.0,False,False,195.0,sheep,0
+165,5367.jpg,marble,150,153,56,94,-94,97,1,[56],True,True,56.0,True,True,94.0,marble,0
+333,7174.jpg,lego,96,99,2,94,-94,97,2,"[0, 100]",True,True,100.0,False,False,4.0,lego base,0
+649,1461.jpg,keyboard key,99,102,5,94,-94,97,1,[5],True,True,5.0,True,True,94.0,keyboard key,0
+191,2013.jpg,sunglasses,49,52,142,93,93,90,1,[142],True,True,142.0,True,True,93.0,sunglasses,0
+247,2041.jpg,sunglasses,88,91,177,89,89,86,1,[177],True,True,177.0,True,True,89.0,sunglasses,0
+540,6050.jpg,keyboard key,104,107,15,89,-89,92,1,[15],True,True,15.0,True,True,89.0,keyboard key,0
+934,6739.jpg,keyboard key,108,111,19,89,-89,92,1,[19],True,True,19.0,True,True,89.0,keyboard key,0
+22,6054.jpg,keyboard key,112,115,24,88,-88,91,1,[24],True,True,24.0,True,True,88.0,keyboard key,0
+204,687.jpg,apple,548,551,636,88,88,85,1,[636],False,False,636.0,False,True,88.0,apple,0
+392,7426.jpg,sunglasses,253,256,341,88,88,85,1,[341],True,True,341.0,True,True,88.0,sunglasses,0
+312,2039.jpg,sunglasses,81,84,0,81,-81,84,1,[88],True,True,88.0,False,False,7.0,sunglasses,0
+1170,2042.jpg,sunglasses,81,84,0,81,-81,84,1,[97],True,True,97.0,False,False,16.0,sunglasses,0
+763,6647.jpg,marker,199,202,120,79,-79,82,1,[0],True,True,0.0,False,False,199.0,marker,0
+557,7455.jpg,sunglasses,73,76,151,78,78,75,1,[151],True,True,151.0,True,True,78.0,sunglasses,0
+658,5368.jpg,marble,153,156,77,76,-76,79,1,[77],True,True,77.0,True,True,76.0,marble,0
+57,6829.jpg,apple,107,110,182,75,75,72,1,[182],True,True,182.0,True,True,75.0,apple,0
+1185,2054.jpg,sunglasses,63,66,137,74,74,71,1,[137],True,True,137.0,True,True,74.0,sunglasses,0
+406,2029.jpg,sunglasses,79,82,149,70,70,67,1,[149],True,True,149.0,True,True,70.0,sunglasses,0
+758,2011.jpg,sunglasses,79,82,148,69,69,66,1,[148],True,True,148.0,True,True,69.0,sunglasses,0
+978,2018.jpg,sunglasses,68,71,135,67,67,64,1,[135],True,True,135.0,True,True,67.0,sunglasses,0
+680,2037.jpg,sunglasses,134,137,200,66,66,63,1,[200],True,True,200.0,True,True,66.0,sunglasses,0
+202,2259.jpg,apple,174,177,239,65,65,62,1,[239],True,True,239.0,True,True,65.0,apple,0
+162,2049.jpg,sunglasses,79,82,142,63,63,60,1,[142],True,True,142.0,True,True,63.0,sunglasses,0
+930,6547.jpg,sunglasses,72,75,133,61,61,58,1,[133],True,True,133.0,True,True,61.0,sunglasses,0
+416,6261.jpg,apple,324,327,384,60,60,57,1,[384],True,True,384.0,True,True,60.0,apple,0
+612,6281.jpg,apple,675,678,735,60,60,57,1,[735],False,False,735.0,False,True,60.0,apple,0
+224,3332.jpg,green pea,66,69,9,57,-57,60,1,[9],True,True,9.0,True,True,57.0,green pea,0
+268,6785.jpg,sunglasses,45,48,100,55,55,52,1,[100],True,True,100.0,True,True,55.0,sunglasses,0
+839,7206.jpg,keyboard key,83,86,28,55,-55,58,1,[28],True,True,28.0,True,True,55.0,keyboard key,0
+299,2007.jpg,sunglasses,108,111,161,53,53,50,1,[161],True,True,161.0,True,True,53.0,sunglasses,0
+26,7475.jpg,sheep,122,125,70,52,-52,55,1,[70],True,True,70.0,True,True,52.0,sheep,0
+84,7596.jpg,apple,298,301,350,52,52,49,1,[350],True,True,350.0,True,True,52.0,apple,0
+158,7511.jpg,sunglasses,36,39,88,52,52,49,1,[88],True,True,88.0,True,True,52.0,sunglasses,0
+902,3329.jpg,green pea,178,181,230,52,52,49,1,[230],True,True,230.0,True,True,52.0,green pea,0
