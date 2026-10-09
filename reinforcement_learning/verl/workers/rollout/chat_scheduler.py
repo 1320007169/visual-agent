@@ -425,6 +425,16 @@ class ToolCompletionCallback(CompletionCallback):
             if replayed is not None:
                 tool_response = json.dumps(replayed, ensure_ascii=False)
                 tool_trace["replayed_fault"] = "evidence"
+            if (tool_name == "grounding_detect" and isinstance(observed, dict)
+                    and observed.get("status") not in {"error", "failed"}):
+                # Audit trail: replays should be rephrasings of one object, and IoUs just
+                # below the threshold should be different objects.
+                tool_trace["evidence_check"] = {
+                    "source_query": online_state["query"], "query": tool_args.get("query"),
+                    "iou": round(online_tool_faults.max_iou(observed.get("boxes"),
+                                                            online_state["original"]["boxes"]), 4),
+                    "replayed": replayed is not None,
+                }
         if (online_spec and not fault and not info.get("online_fault_attempted")
                 and tool_name == online_spec["tool"] and not tool_metrics.get("tool_error")):
             try:
@@ -442,6 +452,7 @@ class ToolCompletionCallback(CompletionCallback):
                                           "observation": tool_response}
                 info["online_fault_state"] = {"tool": tool_name,
                                               "target_image": tool_trace["canonical_arguments"].get("target_image"),
+                                              "query": tool_args.get("query"),
                                               "original": original, "injected": injected}
                 tool_trace["injected_fault"] = {"level": online_spec["level"],
                                                 "original": original, "injected": injected}

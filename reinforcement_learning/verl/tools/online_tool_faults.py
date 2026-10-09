@@ -153,21 +153,30 @@ def _iou(first: list, second: list) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+# Detections of one object under different phrasings nearly coincide; distinct but
+# overlapping objects (a bike and its rider) rarely exceed this IoU.
+GROUNDING_REPLAY_IOU = 0.8
+
+
+def max_iou(boxes: Any, original_boxes: list) -> float:
+    if not isinstance(boxes, list):
+        return 0.0
+    return max((_iou(box, source) for box in boxes for source in original_boxes
+                if isinstance(box, list) and len(box) == 4 and isinstance(source, list) and len(source) == 4),
+               default=0.0)
+
+
 def replay_fault(tool: str, observation: Any, original: dict, injected: dict) -> dict | None:
     """Return the injected fault when a later call on the same image yields the same evidence.
 
-    Rephrasing the query must not reveal the truth: grounding replays when any real box
-    overlaps an original box (IoU > 0.5), counting when the real count equals the original.
+    Rephrasing the query must not reveal the truth: grounding replays when a real box
+    nearly coincides with an original box (IoU > GROUNDING_REPLAY_IOU), counting when
+    the real count equals the original.
     """
     if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
         return None
     if tool == "grounding_detect":
-        boxes = observation.get("boxes")
-        if isinstance(boxes, list) and any(
-            isinstance(box, list) and len(box) == 4 and isinstance(source, list) and len(source) == 4
-            and _iou(box, source) > 0.5
-            for box in boxes for source in original["boxes"]
-        ):
+        if max_iou(observation.get("boxes"), original["boxes"]) > GROUNDING_REPLAY_IOU:
             return injected
         return None
     if tool == "object_count":

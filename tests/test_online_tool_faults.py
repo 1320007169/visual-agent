@@ -68,10 +68,15 @@ class OnlineToolFaultTest(unittest.TestCase):
         injected = {"boxes": [[140, 140, 240, 240]], "labels": ["cup"], "confidence": [0.9]}
         overlapping = {"boxes": [[500, 500, 600, 600], [105, 105, 205, 205]], "labels": ["mug", "mug"],
                        "confidence": [0.5, 0.8]}
+        # IoU 0.822: the same object under another phrasing.
         self.assertIs(faults.replay_fault("grounding_detect", overlapping, original, injected), injected)
-        # IoU of these boxes is 1/3, below the 0.5 threshold.
+        # IoU 0.667: an overlapping but different object (e.g. a rider on a bike) stays real.
+        neighbour = {"boxes": [[120, 100, 220, 200]], "labels": ["person"], "confidence": [0.8]}
+        self.assertAlmostEqual(faults.max_iou(neighbour["boxes"], original["boxes"]), 2 / 3)
+        self.assertIsNone(faults.replay_fault("grounding_detect", neighbour, original, injected))
         distant = {"boxes": [[150, 100, 250, 200]], "labels": ["plate"], "confidence": [0.8]}
         self.assertIsNone(faults.replay_fault("grounding_detect", distant, original, injected))
+        self.assertEqual(faults.max_iou([[1, 2, 3]], original["boxes"]), 0.0)
         self.assertIsNone(faults.replay_fault("grounding_detect", {"boxes": []}, original, injected))
         self.assertIsNone(faults.replay_fault("grounding_detect", {"status": "error"}, original, injected))
 

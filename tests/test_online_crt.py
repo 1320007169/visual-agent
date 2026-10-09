@@ -204,7 +204,7 @@ class OnlineCRTTest(unittest.TestCase):
 
     def test_rephrased_grounding_replays_and_other_region_or_object_is_real(self):
         boxes = {"cup": [[100, 100, 200, 200]], "mug": [[105, 105, 205, 205]],
-                 "plate": [[500, 500, 600, 600]]}
+                 "person": [[120, 100, 220, 200]], "plate": [[500, 500, 600, 600]]}
 
         class GroundingTool(FakeCountTool):
             async def execute(self, instance_id, arguments):
@@ -225,9 +225,19 @@ class OnlineCRTTest(unittest.TestCase):
         faulty = invoke({"query": "cup", "target_image": 0})
         self.assertNotEqual(faulty["boxes"], boxes["cup"])
         self.assertEqual(invoke({"query": "mug", "target_image": 0}), faulty)
+        # An overlapping but different object (IoU 0.667 < 0.8) gets its real box.
+        self.assertEqual(invoke({"query": "person", "target_image": 0})["boxes"], boxes["person"])
         self.assertEqual(invoke({"query": "plate", "target_image": 0})["boxes"], boxes["plate"])
         self.assertEqual(invoke({"query": "mug", "target_image": 1})["boxes"], boxes["mug"])
-        self.assertEqual(len(tool.calls), 4)
+        self.assertEqual(len(tool.calls), 5)
+        checks = [call.get("evidence_check") for call in info["__trace__"]["tool_calls"]]
+        self.assertIsNone(checks[0])
+        self.assertEqual((checks[1]["source_query"], checks[1]["query"], checks[1]["replayed"]), ("cup", "mug", True))
+        self.assertAlmostEqual(checks[1]["iou"], 0.8223, places=4)
+        self.assertEqual((checks[2]["query"], checks[2]["iou"], checks[2]["replayed"]), ("person", 0.6667, False))
+        self.assertEqual((checks[3]["iou"], checks[3]["replayed"]), (0.0, False))
+        # Calls on another image are not evidence checks.
+        self.assertIsNone(checks[4])
 
     def test_unfaultable_call_leaves_next_target_call_eligible(self):
         class RegionOcrTool(FakeCountTool):
