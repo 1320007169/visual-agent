@@ -584,6 +584,10 @@ class RayPPOTrainer:
 
         self._validate_config()
         self._create_dataloader(train_dataset, val_dataset, collate_fn, train_sampler)
+        if config_path := os.environ.get("VISUAL_AGENT_ONLINE_FAULTS_CONFIG"):
+            from verl.trainer.ppo.online_faults import OnlineFaultController
+
+            self.online_fault_controller = OnlineFaultController(config_path)
 
     def _validate_config(self):
         config = self.config
@@ -778,7 +782,7 @@ class RayPPOTrainer:
         metadata = []
         for index in range(len(batch)):
             row = {"dataset_split": dataset_split}
-            for key in ("source_index", "source_image", "data_source", "question", "reliance_branch"):
+            for key in ("source_index", "source_image", "data_source", "question", "reliance_branch", "online_fault_bucket"):
                 values = batch.non_tensor_batch.get(key)
                 if values is None:
                     continue
@@ -1146,6 +1150,9 @@ class RayPPOTrainer:
         dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
+        if controller := getattr(self, "online_fault_controller", None):
+            with open(os.path.join(local_global_step_folder, "online_faults.json"), "w") as handle:
+                json.dump(controller.state_dict(), handle)
 
         # latest checkpointed iteration tracker (for atomic usage)
         local_latest_checkpointed_iteration = os.path.join(self.config.trainer.default_local_dir, "latest_checkpointed_iteration.txt")
@@ -1227,6 +1234,9 @@ class RayPPOTrainer:
             self.train_dataloader.load_state_dict(dataloader_state_dict)
         else:
             print(f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch")
+        if controller := getattr(self, "online_fault_controller", None):
+            with open(os.path.join(global_step_folder, "online_faults.json")) as handle:
+                controller.load_state_dict(json.load(handle))
 
     def _balance_batch(self, batch: DataProto, metrics, logging_prefix="global_seqlen"):
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
@@ -1366,6 +1376,13 @@ class RayPPOTrainer:
                 metrics = {}
                 timing_raw = {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                controller = getattr(self, "online_fault_controller", None)
+                if controller is not None:
+                    specs = controller.assign(batch)
+                    batch.non_tensor_batch["online_fault"] = np.array(specs, dtype=object)
+                    batch.non_tensor_batch["online_fault_bucket"] = np.array(
+                        [json.loads(spec)["bucket_key"] if spec else "" for spec in specs], dtype=object
+                    )
 
                 # pop those keys for generation
                 batch_keys_to_pop = ["input_ids", "attention_mask", "position_ids"]
@@ -1387,6 +1404,8 @@ class RayPPOTrainer:
                 if "reliance_fault" in batch.non_tensor_batch:
                     # Counterfactual prefix rows replay their fault when the same call is repeated.
                     gen_batch.non_tensor_batch["reliance_fault"] = batch.non_tensor_batch["reliance_fault"]
+                if controller is not None:
+                    gen_batch.non_tensor_batch["online_fault"] = batch.non_tensor_batch["online_fault"]
 
                 print(f' [DEBUG config] config={self.config.actor_rollout_ref.rollout.agent}')
                 if self.config.actor_rollout_ref.rollout.multi_turn.enable and "origin_multi_modal_data" in batch.non_tensor_batch:
@@ -1611,6 +1630,8 @@ class RayPPOTrainer:
 
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+                        if controller is not None:
+                            metrics.update(controller.update(batch))
 
                         if dual_stream_enabled:
                             dual_stream_metrics = _compute_dual_stream_reward_metrics(batch)

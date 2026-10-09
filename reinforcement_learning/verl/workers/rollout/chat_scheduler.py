@@ -39,6 +39,7 @@ from tensordict import TensorDict
 from verl.protocol import DataProto
 from verl.tools.base_tool import initialize_tools_from_config
 from verl.tools import tool_faults
+from verl.tools import online_tool_faults
 from verl.utils import hf_processor, hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.workers.rollout.response_budget import ResponseBudget, retain_trace
@@ -359,9 +360,10 @@ class ToolCompletionCallback(CompletionCallback):
         tool_metrics: Dict[str, Any] = {}
         tool_error: Exception | None = None
         fault = info.get("reliance_fault")
+        online_spec = info.get("online_fault")
         aliases = info.setdefault("image_aliases", {})
         images = info.get("images", [])
-        if fault:
+        if fault or online_spec:
             tool_trace["canonical_arguments"] = tool_faults.normalize_replay_arguments(tool_name, tool_args, images, aliases)
         try:
             if tool is None:
@@ -408,10 +410,26 @@ class ToolCompletionCallback(CompletionCallback):
         tool_trace["returned_image_count"] = len(returned_images)
         if "raw_result" in tool_metrics:
             tool_trace["raw_result"] = tool_metrics["raw_result"]
+        if (online_spec and not fault and not info.get("online_fault_attempted")
+                and tool_name == online_spec["tool"] and not tool_metrics.get("tool_error")):
+            try:
+                original = json.loads(tool_response)
+            except json.JSONDecodeError:
+                original = None
+            if isinstance(original, dict) and original.get("status") not in {"error", "failed"}:
+                info["online_fault_attempted"] = True
+                injected = online_tool_faults.inject_fault(original, online_spec)
+                if injected is not None:
+                    tool_response = json.dumps(injected, ensure_ascii=False)
+                    info["reliance_fault"] = {"tool": tool_name,
+                                              "arguments": tool_trace["canonical_arguments"],
+                                              "observation": tool_response}
+                    tool_trace["injected_fault"] = {"level": online_spec["level"],
+                                                    "original": original, "injected": injected}
         tool_trace["model_observation"] = tool_response
         if returned_images:
-            if fault and not tool_metrics.get("tool_error"):
-                tool_faults.record_image_aliases(tool_name, tool_args, tool_metrics["raw_result"],
+            if (fault or online_spec) and not tool_metrics.get("tool_error"):
+                tool_faults.record_image_aliases(tool_name, tool_args, tool_metrics.get("raw_result", {}),
                                                 images, returned_images, aliases)
             info.setdefault("images", []).extend(returned_images)
 
@@ -853,6 +871,9 @@ class ChatCompletionScheduler:
         n = 1 if batch.meta_info.get("validate", False) else int(batch.meta_info.get("rollout_n", self.config.n))
         tools_enabled = not bool(batch.meta_info.get("disable_tools", False))
         reliance_faults = batch.non_tensor_batch.get("reliance_fault")
+        online_faults = (batch.non_tensor_batch.get("online_fault")
+                         if os.environ.get("VISUAL_AGENT_ONLINE_FAULTS_CONFIG") and not batch.meta_info.get("validate", False)
+                         else None)
         tasks, batch_conversations = [], [None] * len(batch) * n
         image_transport_mode = os.environ.get("VISUAL_AGENT_IMAGE_TRANSPORT", "pil_png")
         encoded_image_cache: Dict[int, List[str]] = {}
@@ -893,6 +914,7 @@ class ChatCompletionScheduler:
             )
             _attach_images_to_messages(batch_conversations[batch_index], model_images)
             fault = reliance_faults[source_index] if reliance_faults is not None else ""
+            online_fault = online_faults[source_index] if online_faults is not None else ""
 
             tasks.append(
                 asyncio.create_task(
@@ -903,6 +925,7 @@ class ChatCompletionScheduler:
                         images=images,
                         tools_enabled=tools_enabled,
                         reliance_fault=json.loads(fault) if fault else None,
+                        online_fault=json.loads(online_fault) if online_fault else None,
                     )
                 )
             )
@@ -935,6 +958,7 @@ class ChatCompletionScheduler:
         images: List[Any] | None = None,
         tools_enabled: bool = True,
         reliance_fault: Dict[str, Any] | None = None,
+        online_fault: Dict[str, Any] | None = None,
     ):
         # Hold one slot for the full trajectory, including all recursive tool
         # turns. This bounds vLLM and visual-tool load while allowing a large
@@ -967,6 +991,7 @@ class ChatCompletionScheduler:
                 "max_tokens_per_turn": sampling_params.get("max_tokens", self.config.response_length),
                 "sampled_turns": [],
                 "reliance_fault": reliance_fault,
+                "online_fault": online_fault,
             }
 
             self.submit_chat_completions(messages=messages, request_id=request_id, info=info)
