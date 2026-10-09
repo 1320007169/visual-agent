@@ -101,11 +101,25 @@ class OnlineToolFaultTest(unittest.TestCase):
 
     def test_count_replay_requires_the_original_count(self):
         original, injected = {"count": 7}, {"count": 9}
-        self.assertEqual(faults.replay_fault("object_count", {"count": 7, "source": "countgd"}, original, injected),
+        boxes = [[i * 20, 100, i * 20 + 10, 110] for i in range(7)]
+        self.assertEqual(faults.replay_fault("object_count", {"count": 7, "source": "countgd"}, original, injected,
+                         original_evidence={"boxes": boxes}, evidence={"boxes": list(reversed(boxes))}),
                          {"count": 9, "source": "countgd"})
         self.assertIsNone(faults.replay_fault("object_count", {"count": 3}, original, injected))
         self.assertIsNone(faults.replay_fault("object_count", {"count": True}, {"count": 1}, injected))
         self.assertIsNone(faults.replay_fault("ocr_read", {"text": "x"}, {"text": "x"}, {"text": "y"}))
+
+    def test_count_replay_requires_matching_instances(self):
+        original, injected = {"count": 2}, {"count": 3}
+        boxes = [[100, 100, 200, 200], [500, 500, 600, 600]]
+        shifted = [[502, 500, 602, 600], [102, 100, 202, 200]]
+        self.assertEqual(faults.replay_fault("object_count", original, original, injected,
+                         original_evidence={"boxes": boxes}, evidence={"boxes": shifted}), injected)
+        for evidence in (None, {"boxes": []}, {"boxes": [[800, 800, 900, 900], boxes[0]]},
+                         {"boxes": [boxes[0], boxes[0]]}):
+            with self.subTest(evidence=evidence):
+                self.assertIsNone(faults.replay_fault("object_count", original, original, injected,
+                                  original_evidence={"boxes": boxes}, evidence=evidence))
 
     def test_grounding_levels_and_single_box_skip(self):
         original = {"boxes": [[100, 100, 200, 200], [500, 500, 600, 600]],

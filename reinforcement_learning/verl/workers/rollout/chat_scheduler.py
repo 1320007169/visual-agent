@@ -420,7 +420,8 @@ class ToolCompletionCallback(CompletionCallback):
             except json.JSONDecodeError:
                 observed = None
             replayed = online_tool_faults.replay_fault(
-                tool_name, observed, online_state["original"], online_state["injected"]
+                tool_name, observed, online_state["original"], online_state["injected"],
+                original_evidence=online_state["evidence"], evidence=tool_metrics.get("raw_result")
             )
             if replayed is not None:
                 tool_response = json.dumps(replayed, ensure_ascii=False)
@@ -453,6 +454,7 @@ class ToolCompletionCallback(CompletionCallback):
                 info["online_fault_state"] = {"tool": tool_name,
                                               "target_image": tool_trace["canonical_arguments"].get("target_image"),
                                               "query": tool_args.get("query"),
+                                              "evidence": tool_metrics.get("raw_result"),
                                               "original": original, "injected": injected}
                 tool_trace["injected_fault"] = {"level": online_spec["level"],
                                                 "original": original, "injected": injected}

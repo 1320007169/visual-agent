@@ -127,7 +127,7 @@ class OnlineFaultController:
             state = self.buckets[key]
             mixed_rate = values["mixed"] / values["qualified"]
             state["mixed_ema"] = self.ema_alpha * state["mixed_ema"] + (1 - self.ema_alpha) * mixed_rate
-            # Accumulate groups since the last level change so that a few groups cannot move the level.
+            # Evaluate fresh evidence windows so old results at a level bound cannot block adaptation.
             pending = state["pending"]
             pending["groups"] += values["qualified"]
             pending["all_correct"] += values["all_correct"]
@@ -139,9 +139,8 @@ class OnlineFaultController:
                 level = min(MAX_LEVEL[state["tool"]], level + 1)
             elif pending["all_correct"] > pending["groups"] / 2:
                 level = max(0, level - 1)
-            if level != state["level"]:
-                state["level"] = level
-                state["pending"] = _empty_pending()
+            state["level"] = level
+            state["pending"] = _empty_pending()
 
         if self.buckets and any(values["qualified"] for values in counts.values()):
             weights = {key: max(0.1, state["mixed_ema"] / self.target_mixed_fraction)

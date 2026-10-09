@@ -201,12 +201,13 @@ def _replay_grounding(observation: dict, original: dict, injected: dict) -> dict
     return replayed
 
 
-def replay_fault(tool: str, observation: Any, original: dict, injected: dict) -> dict | None:
+def replay_fault(tool: str, observation: Any, original: dict, injected: dict, *,
+                 original_evidence: dict | None = None, evidence: dict | None = None) -> dict | None:
     """Return a faulted version of a later call on the same image that yields the same evidence.
 
     Rephrasing the query must not reveal the truth: grounding faults the real boxes that
     nearly coincide with an original box (IoU > GROUNDING_REPLAY_IOU), counting replays
-    when the real count equals the original.
+    when the real count and detected instances match the original.
     """
     if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
         return None
@@ -215,6 +216,15 @@ def replay_fault(tool: str, observation: Any, original: dict, injected: dict) ->
     if tool == "object_count":
         count = observation.get("count")
         if isinstance(count, int) and not isinstance(count, bool) and count == original["count"]:
+            if not isinstance(evidence, dict) or not isinstance(original_evidence, dict):
+                return None
+            boxes, original_boxes = evidence.get("boxes"), original_evidence.get("boxes")
+            if (not isinstance(boxes, list) or not boxes or not isinstance(original_boxes, list)
+                    or len(boxes) != len(original_boxes)):
+                return None
+            matches = [_matched_original(box, original_boxes) for box in boxes]
+            if None in matches or len(set(matches)) != len(original_boxes):
+                return None
             return {**observation, "count": injected["count"]}
         return None
     return None

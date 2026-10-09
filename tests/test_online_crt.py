@@ -181,7 +181,9 @@ class OnlineCRTTest(unittest.TestCase):
         class QueryCountTool(FakeCountTool):
             async def execute(self, instance_id, arguments):
                 self.calls.append(arguments)
-                return json.dumps({"count": {"apples": 7, "red apples": 7, "pears": 3}[arguments["query"]]}), 0.0, {}
+                count = {"apples": 7, "red apples": 7, "pears": 3}[arguments["query"]]
+                boxes = [[i * 20, 100, i * 20 + 10, 110] for i in range(count)]
+                return json.dumps({"count": count}), 0.0, {"raw_result": {"count": count, "boxes": boxes}}
 
         tool = QueryCountTool()
         info = {"images": ["photo", "crop"], "online_fault": {"tool": "object_count", "level": 0,
@@ -266,6 +268,39 @@ class OnlineCRTTest(unittest.TestCase):
         self.assertTrue(info["online_fault_attempted"])
         self.assertIn("injected_fault", info["__trace__"]["tool_calls"][1])
 
+    def test_equal_counts_for_different_objects_do_not_replay(self):
+        class DistinctCountTool(FakeCountTool):
+            async def execute(self, instance_id, arguments):
+                self.calls.append(arguments)
+                offset = 0 if arguments["query"] == "apples" else 500
+                boxes = [[offset + i * 20, 100, offset + i * 20 + 10, 110] for i in range(7)]
+                return '{"count": 7}', 0.0, {"raw_result": {"count": 7, "boxes": boxes}}
+
+        info = {"images": ["photo"], "online_fault": {"tool": "object_count", "level": 0,
+                "seed": 3, "count_truth": "7"}, "__trace__": {"model_calls": [], "tool_calls": []}}
+        callback = SimpleNamespace(tools={"object_count": DistinctCountTool()})
+        call = load_call_tool()
+        for query in ("apples", "pears"):
+            reply = asyncio.run(call(callback, {"name": "object_count", "arguments": {
+                "query": query, "target_image": 0}}, info, xml_mode=True))["content"]
+            if query == "apples":
+                self.assertNotIn('"count": 7', reply)
+            else:
+                self.assertIn('"count": 7', reply)
+                self.assertNotIn("replayed_fault", info["__trace__"]["tool_calls"][-1])
+
+    def test_count_rephrasing_without_instance_evidence_stays_real(self):
+        info = {"images": ["photo"], "online_fault": {"tool": "object_count", "level": 0,
+                "seed": 3, "count_truth": "7"}, "__trace__": {"model_calls": [], "tool_calls": []}}
+        callback = SimpleNamespace(tools={"object_count": FakeCountTool()})
+        call = load_call_tool()
+        first = asyncio.run(call(callback, {"name": "object_count", "arguments": {
+            "query": "apples", "target_image": 0}}, info, xml_mode=True))["content"]
+        second = asyncio.run(call(callback, {"name": "object_count", "arguments": {
+            "query": "red apples", "target_image": 0}}, info, xml_mode=True))["content"]
+        self.assertNotIn('"count": 7', first)
+        self.assertIn('"count": 7', second)
+
     def test_controller_assign_only_valid_specs(self):
         controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
         prompts = FakeBatch(data_source=["visual-agent-fsc147"] * 100 + ["other"],
@@ -343,6 +378,26 @@ class OnlineCRTTest(unittest.TestCase):
             restored.update(FakeBatch(uid=["short"], online_fault=[json.dumps({"bucket_key": key_count})],
                                       online_fault_injected=[True], online_fault_level=[0], acc=[0]), n)
 
+    def test_controller_resets_evidence_windows_at_level_bounds(self):
+        for start_level, old_accuracy, new_accuracy, expected in ((0, 1, 0, 1), (3, 0, 1, 2)):
+            with self.subTest(level=start_level):
+                controller = online_faults.OnlineFaultController(str(ROOT / "configs/online_crt_v1.json"))
+                key, _ = controller._bucket("visual-agent-fsc147", {})
+                controller.buckets[key]["level"] = start_level
+
+                def batch(groups, accuracy):
+                    size = groups * 4
+                    return FakeBatch(uid=[f"g{i // 4}" for i in range(size)],
+                        online_fault=[json.dumps({"bucket_key": key})] * size,
+                        online_fault_injected=[True] * size, online_fault_level=[start_level] * size,
+                        acc=[accuracy] * size)
+
+                controller.update(batch(100, old_accuracy), 4)
+                self.assertEqual(controller.buckets[key]["level"], start_level)
+                self.assertEqual(controller.buckets[key]["pending"]["groups"], 0)
+                controller.update(batch(20, new_accuracy), 4)
+                self.assertEqual(controller.buckets[key]["level"], expected)
+
     def test_launcher_config_for_two_and_eight_nodes(self):
         for nodes, batch_size in (("2", "126"), ("8", "336")):
             result = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
@@ -356,10 +411,10 @@ class OnlineCRTTest(unittest.TestCase):
                 ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
             self.assertEqual(config["TRAIN_BATCH_SIZE"], batch_size)
             self.assertEqual(config["ROLLOUT_N"], "16")
-            self.assertEqual(config["VISUAL_AGENT_ONLINE_FAULTS_CONFIG"],
-                             str(ROOT / "configs/online_crt_v1.json"))
-            self.assertEqual(config["TRAIN_FILES"], str(ROOT.parent / "visual-agent/data"
-                             / "zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004/train.parquet"))
+            self.assertEqual(Path(config["VISUAL_AGENT_ONLINE_FAULTS_CONFIG"]),
+                             ROOT / "configs/online_crt_v1.json")
+            self.assertEqual(Path(config["TRAIN_FILES"]), ROOT.parent / "visual-agent/data"
+                             / "zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004/train.parquet")
         override = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
             "REPO_ROOT": str(ROOT), "BASE": str(ROOT.parent), "NNODES": "2", "MULTITOOL_CONFIG_ONLY": "1",
             "TRAIN_RUN_TOKEN": "override", "MULTITOOL_DATA_DIR": "/data/custom"}, capture_output=True, text=True)
