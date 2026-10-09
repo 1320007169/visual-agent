@@ -224,7 +224,9 @@ class OnlineCRTTest(unittest.TestCase):
 
         faulty = invoke({"query": "cup", "target_image": 0})
         self.assertNotEqual(faulty["boxes"], boxes["cup"])
-        self.assertEqual(invoke({"query": "mug", "target_image": 0}), faulty)
+        # The rephrased call keeps its own label but sees the faulted position.
+        self.assertEqual(invoke({"query": "mug", "target_image": 0}),
+                         {"boxes": faulty["boxes"], "confidence": [0.9], "labels": ["mug"]})
         # An overlapping but different object (IoU 0.667 < 0.8) gets its real box.
         self.assertEqual(invoke({"query": "person", "target_image": 0})["boxes"], boxes["person"])
         self.assertEqual(invoke({"query": "plate", "target_image": 0})["boxes"], boxes["plate"])

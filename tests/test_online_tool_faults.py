@@ -63,13 +63,19 @@ class OnlineToolFaultTest(unittest.TestCase):
                                                       "count_truth": "60"})["count"] for seed in range(20)}
         self.assertEqual(values, {0})
 
-    def test_grounding_replay_requires_overlapping_evidence(self):
+    def test_grounding_replay_faults_only_refound_instances(self):
         original = {"boxes": [[100, 100, 200, 200]], "labels": ["cup"], "confidence": [0.9]}
         injected = {"boxes": [[140, 140, 240, 240]], "labels": ["cup"], "confidence": [0.9]}
-        overlapping = {"boxes": [[500, 500, 600, 600], [105, 105, 205, 205]], "labels": ["mug", "mug"],
-                       "confidence": [0.5, 0.8]}
-        # IoU 0.822: the same object under another phrasing.
-        self.assertIs(faults.replay_fault("grounding_detect", overlapping, original, injected), injected)
+        # IoU 0.822: the same object under another phrasing keeps this call's label and confidence.
+        mug = {"boxes": [[105, 105, 205, 205]], "labels": ["mug"], "confidence": [0.7]}
+        self.assertEqual(faults.replay_fault("grounding_detect", mug, original, injected),
+                         {"boxes": [[140, 140, 240, 240]], "labels": ["mug"], "confidence": [0.7]})
+        # Only the re-found cup moves; the plate stays real.
+        both = {"boxes": [[500, 500, 600, 600], [105, 105, 205, 205]], "labels": ["plate", "cup"],
+                "confidence": [0.6, 0.8], "source": "groundingdino"}
+        self.assertEqual(faults.replay_fault("grounding_detect", both, original, injected),
+                         {"boxes": [[500, 500, 600, 600], [140, 140, 240, 240]], "labels": ["plate", "cup"],
+                          "confidence": [0.6, 0.8], "source": "groundingdino"})
         # IoU 0.667: an overlapping but different object (e.g. a rider on a bike) stays real.
         neighbour = {"boxes": [[120, 100, 220, 200]], "labels": ["person"], "confidence": [0.8]}
         self.assertAlmostEqual(faults.max_iou(neighbour["boxes"], original["boxes"]), 2 / 3)
@@ -79,6 +85,19 @@ class OnlineToolFaultTest(unittest.TestCase):
         self.assertEqual(faults.max_iou([[1, 2, 3]], original["boxes"]), 0.0)
         self.assertIsNone(faults.replay_fault("grounding_detect", {"boxes": []}, original, injected))
         self.assertIsNone(faults.replay_fault("grounding_detect", {"status": "error"}, original, injected))
+
+    def test_grounding_replay_follows_box_indices_and_l2_drops_matches(self):
+        original = {"boxes": [[100, 100, 200, 200], [500, 500, 600, 600]], "labels": ["cup", "plate"],
+                    "confidence": [0.9, 0.8]}
+        # IoU with the original cup is 0.96; L1 swapped the two boxes.
+        real = {"boxes": [[102, 100, 202, 200], [800, 800, 900, 900]], "labels": ["mug", "lamp"],
+                "confidence": [0.7, 0.6]}
+        swapped = {**original, "boxes": [[500, 500, 600, 600], [100, 100, 200, 200]]}
+        self.assertEqual(faults.replay_fault("grounding_detect", real, original, swapped)["boxes"],
+                         [[500, 500, 600, 600], [800, 800, 900, 900]])
+        cleared = {**original, "boxes": [], "labels": [], "confidence": []}
+        self.assertEqual(faults.replay_fault("grounding_detect", real, original, cleared),
+                         {"boxes": [[800, 800, 900, 900]], "labels": ["lamp"], "confidence": [0.6]})
 
     def test_count_replay_requires_the_original_count(self):
         original, injected = {"count": 7}, {"count": 9}

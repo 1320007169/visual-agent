@@ -158,27 +158,60 @@ def _iou(first: list, second: list) -> float:
 GROUNDING_REPLAY_IOU = 0.8
 
 
+def _is_box(value: Any) -> bool:
+    return isinstance(value, list) and len(value) == 4
+
+
 def max_iou(boxes: Any, original_boxes: list) -> float:
     if not isinstance(boxes, list):
         return 0.0
     return max((_iou(box, source) for box in boxes for source in original_boxes
-                if isinstance(box, list) and len(box) == 4 and isinstance(source, list) and len(source) == 4),
-               default=0.0)
+                if _is_box(box) and _is_box(source)), default=0.0)
+
+
+def _matched_original(box: Any, original_boxes: list) -> int | None:
+    """Index of the original box this real box re-finds (IoU > GROUNDING_REPLAY_IOU), if any."""
+    best, match = GROUNDING_REPLAY_IOU, None
+    for index, source in enumerate(original_boxes):
+        if _is_box(box) and _is_box(source) and _iou(box, source) > best:
+            best, match = _iou(box, source), index
+    return match
+
+
+def _replay_grounding(observation: dict, original: dict, injected: dict) -> dict | None:
+    """Fault only the re-found instances; other boxes, labels and confidences stay real."""
+    boxes = observation.get("boxes")
+    if not isinstance(boxes, list):
+        return None
+    matches = [_matched_original(box, original["boxes"]) for box in boxes]
+    if all(match is None for match in matches):
+        return None
+    replayed = dict(observation)
+    if injected["boxes"]:
+        # L0/L1 keep one injected box per original box, so indices correspond.
+        replayed["boxes"] = [box if match is None else injected["boxes"][match]
+                             for box, match in zip(boxes, matches)]
+        return replayed
+    # L2 is a missed detection: drop the re-found instances.
+    keep = [match is None for match in matches]
+    for key in ("boxes", "labels", "confidence"):
+        values = observation.get(key)
+        if isinstance(values, list) and len(values) == len(boxes):
+            replayed[key] = [value for value, kept in zip(values, keep) if kept]
+    return replayed
 
 
 def replay_fault(tool: str, observation: Any, original: dict, injected: dict) -> dict | None:
-    """Return the injected fault when a later call on the same image yields the same evidence.
+    """Return a faulted version of a later call on the same image that yields the same evidence.
 
-    Rephrasing the query must not reveal the truth: grounding replays when a real box
-    nearly coincides with an original box (IoU > GROUNDING_REPLAY_IOU), counting when
-    the real count equals the original.
+    Rephrasing the query must not reveal the truth: grounding faults the real boxes that
+    nearly coincide with an original box (IoU > GROUNDING_REPLAY_IOU), counting replays
+    when the real count equals the original.
     """
     if not isinstance(observation, dict) or observation.get("status") in {"error", "failed"}:
         return None
     if tool == "grounding_detect":
-        if max_iou(observation.get("boxes"), original["boxes"]) > GROUNDING_REPLAY_IOU:
-            return injected
-        return None
+        return _replay_grounding(observation, original, injected)
     if tool == "object_count":
         count = observation.get("count")
         if isinstance(count, int) and not isinstance(count, bool) and count == original["count"]:
