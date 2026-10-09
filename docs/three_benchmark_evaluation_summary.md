@@ -840,17 +840,128 @@ HRBench、MME 等下降；step210 的 OCRBench 和 CV3D 接近旧模型，ChartQ
 - [新 64 卡 step53 预测与评分](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/64gpu_step53/dino_latest/VisualAgent-vllm/T20261006_G/)
 - [16 卡 step210 预测与评分](../outputs/vlmeval/vlocr_64gpu_step53_16gpu_step210_8gpu/vlocr_64gpu_step53_16gpu_step210_20261006T084403560707709_337/16gpu_step210/dino_latest/VisualAgent-vllm/T20261006_G/)
 
+## 新 64 卡 step80 成绩及新旧训练数据对比（2026-10-09 核验）
+
+新 step80 的独立 8 卡十榜评测已完成：退出码 **0**，耗时 **18,842 秒
+（5 小时 14 分 2 秒）**，共 **16,955 条最终预测**。它与新 step53、step69
+来自同一轮 HME / ChartQA / TallyQA 抽半 / FSC3000 训练；旧 step80 来自另一轮
+OCR/chart1600 训练。下表同时保留这两轮的 step80，避免同名 checkpoint 混淆。
+
+### 评测成绩
+
+除 HME 正确数和 FSC147 指标外，分数均为百分制；准确率差值为百分点，
+按未四舍五入的成绩计算。OCRBench 统一采用“最终答案反斜杠后处理 + 官方规则评分”，
+不使用 API judge 复判分数；旧 step80 为 **87.40**，不是原始答案的 85.40。
+
+| 指标 | 旧 64 卡 step80 | 新 64 卡 step53 | 新 64 卡 step69 | 新 64 卡 step80 | 新80 − 旧80 |
+|---|---:|---:|---:|---:|---:|
+| VStarBench | 87.96 | 83.77 | 87.96 | 86.91 | −1.05 |
+| HRBench4K | 83.63 | 80.00 | 81.25 | 80.50 | −3.13 |
+| HRBench8K | 79.13 | 75.13 | 78.00 | 76.25 | −2.88 |
+| OCRBench，后处理后 | 87.40 | 86.80 | 87.70 | **89.00** | **+1.60** |
+| OCRBench 手写公式 / 100 | 65 | 68 | 67 | **68** | +3 题 |
+| MME-RealWorld-Lite | 55.50 | 50.60 | 53.57 | 54.35 | −1.15 |
+| MME-RealWorld-CN | 68.19 | 64.78 | 65.64 | 67.08 | −1.12 |
+| CV-Bench-2D | 81.32 | 80.68 | 82.19 | 81.86 | +0.54 |
+| CV-Bench-3D | 91.08 | 88.00 | 89.25 | 90.00 | −1.08 |
+| ChartQA_TEST | 76.96 | 76.80 | 78.28 | **80.24** | **+3.28** |
+| FSC147 MAE_valid，越低越好 | 17.04 | 15.78 | 15.65 | 15.77 | −1.27 |
+| FSC147 RMSE_valid，越低越好 | 120.12 | 129.28 | 129.11 | 129.49 | +9.37 |
+| FSC147 有效输出 / 1190 | 1188 | 1189 | 1190 | **1190** | +2 条 |
+| FSC147 无效输出 / 1190 | 2 | 1 | 0 | **0** | −2 条 |
+| FSC147 精确正确率 | 4.03 | 4.54 | 4.37 | 4.37 | +0.34 |
+
+新 step80 的 OCRBench 为 **890/1000**，其他 900 题正确 822 题，HME 正确 68 题；
+相比旧 step80，分别增加 13 题和 3 题。ChartQA human / augmented 为
+**76.56 / 83.92**，旧版为 74.56 / 79.36。
+同一新数据训练的 step69→80，OCRBench +1.30、ChartQA +1.96、MME-CN +1.44；
+HR4K −0.75、HR8K −1.75、VStar −1.05。现有成绩显示 OCR、图表继续改善，
+但不能认定新 step80 全面优于旧 step80，或优于新 step69。
+
+旧 step80 有 55 条最终预测残留 `API failed`，新 step80 为 **0**，两组均无空预测。
+新 step80 仍有 34 条回合耗尽输出：CV2D 1、MME-Lite 7、MME-CN 26；
+以上均保留在评分输入中，成绩使用现有评分器的原始计分结果。
+旧版预测包含缓存复用与失败补测，新版为独立十榜运行。FSC147 旧版误差仅覆盖
+1,188 条有效答案，新版覆盖全部 1,190 条；MAE 降低同时 RMSE 升高，
+不能概括为所有计数指标均改善。训练代码、奖励及失败样本也存在差异，
+因此这些分差不能单独归因于数据配比。
+
+### 两版训练数据的数量与配比
+
+比较的是各 checkpoint 实际训练的数据文件；旧 step80 使用 10 月 1 日原版数据，
+不是后来用于 step80 续训的 quality / skip-step83 数据。数量按 Parquet 的 QA 行统计，
+不等于独立图像数；占比分别以各版本训练集总行数为分母。
+
+| 项目 | 旧 step80 数据 | 新 step80 数据 | 数量变化 |
+|---|---:|---:|---:|
+| 训练集 | 33,688 | 33,921 | +233（+0.69%） |
+| 验证集 | 1,312 | 1,312 | 0 |
+| 训练 + 验证 | 35,000 | 35,233 | +233 |
+
+| 训练来源 | 旧数量 | 旧占比 | 新数量 | 新占比 | 数量变化 |
+|---|---:|---:|---:|---:|---:|
+| ZWZ 位置关系 | 18,518 | 54.97% | 14,665 | 43.23% | −3,853 |
+| depth | 4,398 | 13.06% | 4,342 | 12.80% | −56 |
+| DeepEyesV2 | 3,000 | 8.91% | 2,981 | 8.79% | −19 |
+| OCR，含新增 HME100K | 1,440 | 4.27% | 3,258 | 9.60% | +1,818 |
+| Chart，含新增官方 ChartQA train | 1,440 | 4.27% | 3,257 | 9.60% | +1,817 |
+| TallyQA 计数 | 4,892 | 14.52% | 2,418 | 7.13% | −2,474 |
+| FSC147 计数 | 0 | 0.00% | 3,000 | 8.84% | +3,000 |
+| **训练合计** | **33,688** | **100.00%** | **33,921** | **100.00%** | **+233** |
+
+OCR 与 Chart 合计占比由 **8.55% 增至 19.21%**，位置关系下降 **11.74 个百分点**。
+TallyQA 虽抽半，但新增 FSC147 后两类计数合计 **5,418 条（15.97%）**，
+旧版为 4,892 条（14.52%）。各项占比独立四舍五入，展示值之和可能略偏离 100%。
+
+OCR/chart 内部来源也有变化，不能将新增数据都理解为原来源扩容：
+
+| 原始来源 | 旧训练行数 | 新训练行数 |
+|---|---:|---:|
+| TextVQA | 576 | 568 |
+| DocVQA | 576 | 571 |
+| SROIE | 144 | 142 |
+| InfographicsVQA | 144 | 144 |
+| HME100K 手写公式 | 0 | **1,833** |
+| CodeVision RL 图表 | 1,440 | 1,424 |
+| 官方 ChartQA train | 0 | **1,833** |
+
+新增 ChartQA 为 human 495 条、augmented 1,338 条。新增 HME100K、ChartQA、FSC147
+均取官方训练划分；HME/Chart 候选按解码 RGB 像素排除相关验证/评测图像，
+Chart 同时考虑旋转和翻转，该规则不覆盖缩放、裁剪等变体。
+
+新版本的构造过程为：从旧版 33,688 条移除 12 条歧义题，再移除旧调度 step83 的
+336 条，得到 33,340 条；随后从剩余 18,331 条关系题替换 3,666 条（约 20%），
+加入 HME100K / ChartQA 各 1,833 条，总量仍为 33,340；最后从 4,837 条 TallyQA
+随机保留 2,418 条，移除 2,419 条并加入 FSC147 3,000 条，得到 **33,921 条**。
+即 `33,688 − 12 − 336 − 3,666 + 1,833 + 1,833 − 2,419 + 3,000 = 33,921`。
+
+两版验证文件 SHA256 相同，构成均为 HRBench4K 800、depth 84、TallyQA 108、
+OCR 160、CodeVision RL 图表 160；其中没有新增 HME100K 或 FSC147 验证题。
+新数据作为独立实验从 Qwen3-VL-8B-Instruct 开始训练，后续从自身 step53 恢复，
+不接续旧 step80 的模型和数据游标。两版均为 batch336、rollout n16；按完成 80 次更新
+计，训练行采样次数均为 **26,880**，对应 **430,080** 条 rollout，
+但上表全量数据配比不等于前 80 步实际采样配比。
+
+### 结果与数据来源
+
+- [新 step80 checkpoint 清单](../outputs/vlmeval/vlocr_64gpu_step80_8gpu/vlocr_64gpu_step80_20261008T223306340576951_331/checkpoints.tsv)、[退出状态与耗时](../outputs/vlmeval/vlocr_64gpu_step80_8gpu/vlocr_64gpu_step80_20261008T223306340576951_331/status.tsv)、[十榜预测与评分](../outputs/vlmeval/vlocr_64gpu_step80_8gpu/vlocr_64gpu_step80_20261008T223306340576951_331/64gpu_step80/dino_latest/VisualAgent-vllm/T20261008_G/)
+- [新 step69 十榜预测与评分](../outputs/vlmeval/vlocr_64gpu_step69_8gpu/vlocr_64gpu_step69_20261008T105649822634376_345/64gpu_step69/dino_latest/VisualAgent-vllm/T20261008_G/)
+- [旧 step80 十榜产物](../outputs/vlmeval/multitool_vlocr_64gpu_16gpu_latest_8gpu/multitool_vlocr_64gpu_16gpu_latest_20261003T194114860354878_343/64gpu_step80/dino_latest/VisualAgent-vllm/)、[旧 step80 OCRBench 后处理评分](../outputs/vlmeval/ocrbench_answer_backslash_20261005/64gpu_step80_score.json)
+- [旧数据统计](../data/zwz_deepeyesv2_depth_tallyqa5k_ocr_chart_multitool_20261001/summary.json)、[新数据构造统计](../data/zwz_multitool_relation20_hme_chartqa_tallyhalf_fsc3000_20261004/manifest.json)、[HME/ChartQA 替换统计](../data/zwz_multitool_relation20_hme_chartqa_20261004/manifest.json)
+- 实际逐来源数量复核自上述两版 `train.parquet` / `val.parquet` 的 `data_source` 和 `original_source` 列。
+
 ## 当前结论
 
-- 最新 step53 / step210 的结果已补入上表：OCRBench 后处理后为 868 / 873，HME 为
-  68 / 66；旧 step80 为 874 / 65。新权重多数榜未超过旧 step80，step210 的 ChartQA
-  与计数下降明显。step210 的 MME-CN 尚缺评分，其评测退出码为 1。
+- 新 64 卡 step80 十榜已补入上表：OCRBench 后处理后 **89.00**、ChartQA **80.24**，
+  较旧 step80 分别提高 **1.60 / 3.28 个百分点**，HR4K / HR8K 仍低 **3.13 / 2.88**。
+  新旧训练集为 **33,921 / 33,688** 条，主要变化是增加 HME、ChartQA 和 FSC147，
+  减少位置关系与 TallyQA；验证文件相同。step210 的 MME-CN 尚缺评分，其评测退出码为 1。
 
-- OCRBench 最终主表采用固定反斜杠后处理 + 官方评分：Base 直答 873、64 卡 step80
+- OCRBench 最终主表采用固定反斜杠后处理 + 官方评分：Base 直答 873、旧 64 卡 step80
   874、16 卡 step110 / step150 均为 872；HME 分别为 80 / 65 / 66 / 65。原始分数
   和 LLM 复判另列。Base 不触发该后处理，Agent 的其他分项收益抵消了 HME 失分。
   已有轨迹支持 OCR 内容错误与 LaTeX 格式不匹配并存，尚不能断言训练导致视觉退化。
-- VL-OCR 的 64 卡 step80、16 卡 step110 / step150 十榜成绩已补齐，API failed 分别为
+- 旧 VL-OCR 的 64 卡 step80、16 卡 step110 / step150 十榜成绩已补齐，API failed 分别为
   55 / 19 / 19；step150 相比 step110 有升有降，且 FSC147 无效输出增至 88/1190。
 - 上述三份 OCRBench 的规则错题已用 DeepEyesV2 原始模板复判，合并分数分别为
   915 / 909 / 911，原始规则分数仍为 854 / 850 / 850；复判无未决项。
