@@ -185,7 +185,8 @@ def test_configuration_and_preflight_do_not_create_result_or_snapshot_directorie
         assert "EVAL|" not in result.stdout
 
 
-def test_both_checkpoints_reuse_recent_vlocr_evaluation_environment(evaluation):
+@pytest.mark.parametrize("custom_prompt", [False, True])
+def test_both_checkpoints_reuse_recent_vlocr_evaluation_environment(evaluation, custom_prompt):
     env, _ = evaluation
     base = Path(env["BASE"])
     scripts = Path(env["REPO_ROOT"]) / "scripts"
@@ -197,6 +198,8 @@ def test_both_checkpoints_reuse_recent_vlocr_evaluation_environment(evaluation):
         f'VTS_OUTPUT_ROOT="{base}/bridge"\n'
         f'VTS_COUNT_ENV="{base}/conda_envs/vts-count"\n')
     cuda = str(base / "conda_envs/spacetools-rl")
+    prompt = str(base / "experiment.txt") if custom_prompt else str(
+        Path(env["REPO_ROOT"]) / "prompts/visual_agent_rl_system_multitool_vlocr.txt")
     expected = {
         "ENV_DIR": "/opt/huawei/explorer-env/dataset/Common_wl/miniconda3/envs/qwenvl3_xmx_vLLM",
         "CUDA_HOME": cuda,
@@ -219,17 +222,59 @@ def test_both_checkpoints_reuse_recent_vlocr_evaluation_environment(evaluation):
         "MODEL_SERVER_BACKEND": "vllm",
         "SKIP_CONDA_ACTIVATION": "1",
         "VLMEVAL_IMPORT_PREFLIGHT": "1",
+        "VISUAL_AGENT_SYSTEM_PROMPT_FILE": prompt,
     }
     (scripts / "run_visual_agent_eval_qwen3.sh").write_text(
         "#!/usr/bin/env bash\npython3 - <<'PY'\nimport json\nimport os\n"
         f"keys = {list(expected)!r}\n"
         'print("ENV|" + json.dumps({key: os.environ.get(key) for key in keys}))\n'
         "PY\n")
-    result = run_launcher(env, EVAL_PREFLIGHT_ONLY="1", PIPELINE_ROOT=str(pipeline),
+    overrides = {"VISUAL_AGENT_SYSTEM_PROMPT_FILE": prompt} if custom_prompt else {}
+    result = run_launcher(env, **overrides, EVAL_PREFLIGHT_ONLY="1", PIPELINE_ROOT=str(pipeline),
                           LOG_DIR=str(base / "logs"), CUDA_HOME="/wrong/cuda",
                           CC="/wrong/gcc", CXX="/wrong/g++", CUDAHOSTCXX="/wrong/g++")
     assert result.returncode == 0, result.stdout + result.stderr
     rows = [json.loads(line.removeprefix("ENV|")) for line in result.stdout.splitlines()
             if line.startswith("ENV|")]
     assert rows == [expected, expected]
+    assert not Path(env["WORK_ROOT"]).exists()
+
+
+@pytest.mark.parametrize("variant", ["baseline", "evidence"])
+def test_mme_prompt_reaches_evaluation_without_reusing_predictions(evaluation, variant):
+    env, sources = evaluation
+    repo = Path(env["REPO_ROOT"])
+    prompts = repo / "prompts"
+    prompts.mkdir()
+    for name in ("visual_agent_rl_system_multitool_vlocr.txt", "visual_agent_eval_mme_evidence.txt"):
+        shutil.copy2(ROOT / "prompts" / name, prompts / name)
+    shutil.copy2(ROOT / "scripts/run_visual_agent_eval_multitool_vlocr_8gpu.sh", repo / "scripts")
+    pipeline = Path(env["BASE"]) / "pipeline"
+    pipeline.mkdir()
+    (pipeline / ".env").write_text(f'VTS_OUTPUT_ROOT="{pipeline}/bridge"\n')
+    keys = ["VISUAL_AGENT_SYSTEM_PROMPT_FILE", "VLOCR_MODEL_PATH", "EVAL_DATASETS",
+            "VLOCR_REUSE_GROUP_ROOT", "VLOCR_RETRY_FAILED_ONLY", "VLMEVAL_EVAL_ID"]
+    (repo / "scripts/run_visual_agent_eval_qwen3.sh").write_text(
+        "python3 - <<'PY'\nimport json\nimport os\nfrom pathlib import Path\n"
+        f"values = {{key: os.environ.get(key) for key in {keys!r}}}\n"
+        'values["prompt"] = Path(values["VISUAL_AGENT_SYSTEM_PROMPT_FILE"]).read_text()\n'
+        'print("MME|" + json.dumps(values))\nPY\n')
+    overrides = {"MME_PROMPT_VARIANT": variant, "VLOCR_MODEL_PATH": str(sources[0]), "VLOCR_STEP": "70",
+                 "PIPELINE_ROOT": str(pipeline), "LOG_DIR": str(Path(env["BASE"]) / "logs"),
+                 "EVAL_PREFLIGHT_ONLY": "1", "VLOCR_REUSE_GROUP_ROOT": "/old/predictions",
+                 "VLOCR_RETRY_FAILED_ONLY": "1", "VLMEVAL_EVAL_ID": "old_id"}
+    result = subprocess.run(
+        ["bash", str(ROOT / "scripts/run_visual_agent_eval_mme_prompt_8gpu.sh")],
+        env={**env, **overrides}, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    values, = [json.loads(line.removeprefix("MME|")) for line in result.stdout.splitlines()
+               if line.startswith("MME|")]
+    name = "visual_agent_rl_system_multitool_vlocr.txt" if variant == "baseline" else "visual_agent_eval_mme_evidence.txt"
+    assert values["VISUAL_AGENT_SYSTEM_PROMPT_FILE"] == str(prompts / name)
+    assert values["prompt"] == (ROOT / "prompts" / name).read_text()
+    assert values["VLOCR_MODEL_PATH"] == str(sources[0])
+    assert values["EVAL_DATASETS"] == "MME-RealWorld-Lite"
+    assert values["VLOCR_REUSE_GROUP_ROOT"] is None
+    assert values["VLOCR_RETRY_FAILED_ONLY"] is None
+    assert values["VLMEVAL_EVAL_ID"] == env["RUN_ID"]
     assert not Path(env["WORK_ROOT"]).exists()

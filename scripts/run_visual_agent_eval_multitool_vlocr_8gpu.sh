@@ -54,7 +54,7 @@ export VLMEVAL_CHARTQA_RULE_ONLY=1
 FSC147_ANNOTATION_FILE="${FSC147_ANNOTATION_FILE:-$BASE/visual-tools/src/CountGDPlusPlus/data/fscd147/countgd_test_fscd147.json}"
 FSC147_IMAGE_ROOT="${FSC147_IMAGE_ROOT:-$BASE/visual-tools/datasets/fsc147/images_384_VarV2}"
 export VISUAL_TOOL_BACKEND=groundingdino SAM3_REPLICAS=0 GROUNDING_DINO_REPLICAS=1
-export VISUAL_AGENT_SYSTEM_PROMPT_FILE="$REPO_ROOT/prompts/visual_agent_rl_system_multitool_vlocr.txt"
+export VISUAL_AGENT_SYSTEM_PROMPT_FILE="${VISUAL_AGENT_SYSTEM_PROMPT_FILE:-$REPO_ROOT/prompts/visual_agent_rl_system_multitool_vlocr.txt}"
 export VISUAL_AGENT_ALLOWED_TOOL_NAMES=crop_zoom,grounding_detect,depth_measure,object_count,ocr_read
 export VISUAL_AGENT_MAX_TURNS=8 VISUAL_AGENT_MAX_TOKENS=512
 # Native tools render the training tool schemas as the Qwen <tools> block and use the RL
