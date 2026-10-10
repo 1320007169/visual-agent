@@ -481,6 +481,27 @@ class OnlineCRTTest(unittest.TestCase):
         self.assertEqual(Path(config["RL_LOG_DIR"]),
                          ROOT.parent / "logs/visual-agent-zwz-rl" / config["RUN_ID"])
 
+    def test_sixteen_gpu_resume_preserves_source_batch_and_enables_resharding(self):
+        checkpoint = Path(tempfile.mkdtemp(prefix="online-crt-resume16-")) / "global_step_4"
+        checkpoint.mkdir()
+        (checkpoint / "data.pt").write_text("cursor")
+        (checkpoint / "online_faults.json").write_text("{}")
+        launcher = ROOT / "scripts/run_visual_agent_multitool_vlocr_online_crt_resume_step4_2node_16gpu_modelarts.sh"
+        result = subprocess.run(["bash", str(launcher)], env={"PATH": os.environ["PATH"],
+            "REPO_ROOT": str(ROOT), "BASE": str(ROOT.parent), "MULTITOOL_CONFIG_ONLY": "1",
+            "TRAIN_RUN_TOKEN": "resume16-test", "RESUME_FROM_PATH": str(checkpoint),
+            "OUTPUT_DIR": "/platform/output", "LOG_DIR": "/platform/log"}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = dict(line.split("=", 1) for line in result.stdout.splitlines())
+        for key, expected in {"NNODES": "2", "TRAIN_BATCH_SIZE": "336", "PPO_MINI_BATCH_SIZE": "112",
+                              "VAL_BATCH_SIZE": "336", "ROLLOUT_N": "16", "MAX_CONCURRENT_REQUESTS": "112",
+                              "RESUME_MODE": "resume_path", "RESUME_FROM_PATH": str(checkpoint),
+                              "ALLOW_FSDP_WORLD_SIZE_CHANGE": "True", "DATALOADER_NUM_WORKERS": "2",
+                              "SAVE_FREQ": "1", "TEST_FREQ": "40", "VAL_BEFORE_TRAIN": "False"}.items():
+            self.assertEqual(config[key], expected, key)
+        self.assertEqual(Path(config["RL_OUTPUT_DIR"]), ROOT / "saves/visual_agent_zwz_rl/qwen3" / config["RUN_ID"])
+        self.assertEqual(Path(config["COUNT_SERVICE_CONFIG"]).name, "countgd_plusplus_pseudo_eval.yaml")
+
     def test_trainer_checkpoint_writes_and_restores_controller_state(self):
         trainer_path = RL / "trainer/ppo/ray_trainer.py"
         tree = ast.parse(trainer_path.read_text())

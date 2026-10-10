@@ -11,7 +11,8 @@ case "$NNODES" in
     8) batch_size=336; mini_batch_size=112 ;;
     *) echo "error: NNODES must be 2 or 8" >&2; exit 2 ;;
 esac
-export TRAIN_BATCH_SIZE="$batch_size" PPO_MINI_BATCH_SIZE="$mini_batch_size" VAL_BATCH_SIZE="$batch_size"
+export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-$batch_size}"
+export PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-$mini_batch_size}" VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-$TRAIN_BATCH_SIZE}"
 export ROLLOUT_N=16 MAX_CONCURRENT_REQUESTS="$((NNODES * 56))"
 export TRAIN_SHUFFLE=True
 export TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-null}" TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
