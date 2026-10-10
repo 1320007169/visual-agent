@@ -37,6 +37,8 @@ if [[ -n "$RESUME_FROM_PATH" ]]; then
         echo "error: resume checkpoint lacks online fault or dataloader state: $RESUME_FROM_PATH" >&2
         exit 2
     }
+    export RL_OUTPUT_DIR="${RL_OUTPUT_DIR:-$REPO_ROOT/saves/visual_agent_zwz_rl/qwen3/$RUN_ID}"
+    export RL_LOG_DIR="${RL_LOG_DIR:-$BASE/logs/visual-agent-zwz-rl}"
     source "$REPO_ROOT/scripts/prepare_visual_agent_run_paths.sh"
     export RESUME_MODE=resume_path
 fi

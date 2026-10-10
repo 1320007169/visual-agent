@@ -470,12 +470,16 @@ class OnlineCRTTest(unittest.TestCase):
         resumed = subprocess.run(["bash", str(LAUNCHER)], env={"PATH": os.environ["PATH"],
             "REPO_ROOT": str(ROOT), "BASE": str(ROOT.parent), "NNODES": "2",
             "MULTITOOL_CONFIG_ONLY": "1", "TRAIN_RUN_TOKEN": "resume-test",
+            "OUTPUT_DIR": "/platform/output", "LOG_DIR": "/platform/log",
             "RESUME_FROM_PATH": str(checkpoint)}, capture_output=True, text=True)
         self.assertEqual(resumed.returncode, 0, resumed.stderr)
         config = dict(line.split("=", 1) for line in resumed.stdout.splitlines())
         self.assertEqual(config["RESUME_MODE"], "resume_path")
         self.assertEqual(config["RESUME_FROM_PATH"], str(checkpoint))
-        self.assertTrue(config["RL_OUTPUT_DIR"].endswith("_resume-test"))
+        self.assertEqual(Path(config["RL_OUTPUT_DIR"]),
+                         ROOT / "saves/visual_agent_zwz_rl/qwen3" / config["RUN_ID"])
+        self.assertEqual(Path(config["RL_LOG_DIR"]),
+                         ROOT.parent / "logs/visual-agent-zwz-rl" / config["RUN_ID"])
 
     def test_trainer_checkpoint_writes_and_restores_controller_state(self):
         trainer_path = RL / "trainer/ppo/ray_trainer.py"
