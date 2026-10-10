@@ -528,23 +528,24 @@ def compute_score(solution_str: str, ground_truth: str, extra_info=None):
         )
     else:
         correct = rule_match(answer, ground_truth)
+    reward_valid = True
     if not is_relation_task and not failed_answer and not correct:
         question = str((extra_info or {}).get("question", ""))
         correct = (judge_match(question, answer, ground_truth, extra_info=extra_info) if benchmark
                    else judge_match(question, answer, ground_truth))
         if correct is None:
             if benchmark:
-                raise RuntimeError(f"{source} reward judge unresolved after configured attempts")
-            # Keep unresolved samples in GRPO with the ordinary incorrect-answer reward.
+                reward_valid = False
+            # Unresolved benchmark answers are excluded through the existing GRPO mask.
             correct = False
     accuracy_reward = 1.0 if correct else 0.0
     tool_used = 1.0 if "<tool_call>" in solution_str else 0.0
     result = {
-        "score": max(0.0, 0.9 * accuracy_reward + 0.1 * format_reward - query_penalty),
+        "score": max(0.0, 0.9 * accuracy_reward + 0.1 * format_reward - query_penalty) if reward_valid else 0.0,
         "acc": accuracy_reward,
         "format": format_reward,
         "tool_used": tool_used,
-        "reward_valid": 1.0,
+        "reward_valid": float(reward_valid),
     }
     if int(os.environ.get("GROUNDING_QUERY_MAX_WORDS", "0")) > 0:
         result["invalid_grounding_queries"] = float(invalid_queries)

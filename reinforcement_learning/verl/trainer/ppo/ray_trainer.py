@@ -180,7 +180,7 @@ def _resolve_training_steps(steps_per_epoch: int, total_epochs: int, requested_s
     return available_steps if requested_steps is None else min(available_steps, requested_steps)
 
 
-def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="train") -> dict[str, float]:
+def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="train", reward_valid=None) -> dict[str, float]:
     """Keep task accuracy and individual tool usage visible in mixed batches."""
     if len(data_sources) != len(traces) or (accuracies is not None and len(accuracies) != len(traces)):
         raise ValueError("Visual tool metric metadata length mismatch")
@@ -196,7 +196,11 @@ def _compute_visual_tool_metrics(data_sources, traces, accuracies=None, prefix="
             any(call.get("status") == "error" for call in calls) for _, calls in rows
         ) / len(rows)
         if accuracies is not None:
-            metrics[f"{root}/acc_mean"] = sum(float(accuracies[i]) for i, _ in rows) / len(rows)
+            valid_rows = [i for i, _ in rows if reward_valid is None or reward_valid[i]]
+            if valid_rows:
+                metrics[f"{root}/acc_mean"] = sum(float(accuracies[i]) for i in valid_rows) / len(valid_rows)
+            if reward_valid is not None:
+                metrics[f"{root}/reward_valid_fraction"] = len(valid_rows) / len(rows)
         for tool in ("grounding_detect", "crop_zoom", "depth_measure", "object_count", "text_detect", "text_recognize", "chart_parse", "ocr_read"):
             tool_calls = [call for _, calls in rows for call in calls if call.get("tool") == tool]
             metrics[f"{root}/{tool}/trajectory_rate"] = sum(
@@ -1001,6 +1005,8 @@ class RayPPOTrainer:
             assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
 
         data_sources = np.concatenate(data_source_lst, axis=0)
+        reward_valid = np.asarray(reward_extra_infos_dict.get("reward_valid", [True] * len(data_sources)), dtype=bool)
+        all_rewards_valid = bool(reward_valid.all())
 
         # Text alone is not a stable sample identity: visual benchmarks can ask
         # the same question about different images. Group repeated validation
@@ -1010,8 +1016,17 @@ class RayPPOTrainer:
             f"source_index:{metadata['source_index']}" if "source_index" in metadata else sample_input
             for sample_input, metadata in zip(sample_inputs, sample_source_metadata, strict=True)
         ]
+        metric_dict = {"val-aux/reward_valid_fraction": float(reward_valid.mean())}
+        # Keep full traces above; unresolved answers must not affect validation scores or best-checkpoint selection.
+        if not all_rewards_valid:
+            valid_indices = np.flatnonzero(reward_valid)
+            data_sources = data_sources[valid_indices]
+            sample_group_keys = [sample_group_keys[i] for i in valid_indices]
+            sample_rollout_traces = [sample_rollout_traces[i] for i in valid_indices]
+            reward_extra_infos_dict = {
+                key: [values[i] for i in valid_indices] for key, values in reward_extra_infos_dict.items() if len(values)
+            }
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_group_keys, reward_extra_infos_dict)
-        metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
             for var_name, metric2val in var2metric2val.items():
@@ -1028,7 +1043,7 @@ class RayPPOTrainer:
         metric_dict.update(_compute_visual_tool_metrics(
             data_sources, sample_rollout_traces, accuracies, prefix="val",
         ))
-        if accuracies is not None:
+        if accuracies is not None and all_rewards_valid:
             macro_mean = _visual_accuracy_macro_mean(data_sources, accuracies)
             if macro_mean is not None:
                 metric_dict["val-core/visual-agent/acc/macro_mean"] = macro_mean
@@ -1756,6 +1771,7 @@ class RayPPOTrainer:
                     metrics.update(_compute_visual_tool_metrics(
                         batch.non_tensor_batch.get("data_source", ["unknown"] * len(batch)),
                         rollout_traces, batch.non_tensor_batch.get("acc"),
+                        reward_valid=batch.non_tensor_batch.get("reward_valid"),
                     ))
                     valid_traces = [trace for trace in rollout_traces if isinstance(trace, dict)]
                     if valid_traces:

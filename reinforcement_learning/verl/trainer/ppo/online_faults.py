@@ -95,6 +95,7 @@ class OnlineFaultController:
 
     def update(self, batch, rollout_n: int) -> dict[str, float]:
         rows = batch.non_tensor_batch
+        reward_valid = rows.get("reward_valid", [True] * len(batch))
         groups = defaultdict(list)
         for index, uid in enumerate(rows["uid"]):
             groups[str(uid)].append(index)
@@ -113,6 +114,8 @@ class OnlineFaultController:
             values["coverage"].append(coverage)
             values["levels"].extend(int(rows["online_fault_level"][index]) for index in injected)
             values["injected"] += bool(injected)
+            if any(not reward_valid[index] for index in injected):
+                continue
             if len(injected) < MIN_FAULTED_ROLLOUTS:
                 continue
             values["qualified"] += 1

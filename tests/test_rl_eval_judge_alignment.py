@@ -87,8 +87,10 @@ class EvalJudgeAlignmentTest(unittest.TestCase):
         with patch.dict(os.environ, {"LLM_AS_A_JUDGE_BACKUP_BASE": "", "LLM_AS_A_JUDGE_PRIMARY_RETRIES": "1"}), patch.object(
             reward, "_evaluation_judge_template", return_value="Verify.\n"
         ), patch.object(reward, "_judge_client_and_model", return_value=(client, "judge")):
-            with self.assertRaisesRegex(RuntimeError, "unresolved"):
-                reward.compute_score("<answer>unmatched</answer>", "reference", {"data_source": "visual-agent-ocr"})
+            result = reward.compute_score("<answer>unmatched</answer>", "reference", {"data_source": "visual-agent-ocr"})
+            self.assertEqual(result["reward_valid"], 0.0)
+            self.assertEqual(result["score"], 0.0)
+            self.assertIn("acc", result)
 
     def test_failure_messages_are_not_sent_to_judge(self):
         with patch.object(reward, "judge_match", side_effect=AssertionError("judge called")):

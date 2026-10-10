@@ -96,8 +96,9 @@ class VisualAgentThymeRewardTest(unittest.TestCase):
                     judge.return_value = verdict
                     benchmark = source in {"visual-agent-ocr", "visual-agent-chartqa"}
                     if benchmark and verdict is None:
-                        with self.assertRaisesRegex(RuntimeError, "unresolved"):
-                            reward.compute_score("<answer>A</answer>", "B", extra)
+                        result = reward.compute_score("<answer>A</answer>", "B", extra)
+                        self.assertEqual(result["reward_valid"], 0.0)
+                        self.assertEqual(result["score"], 0.0)
                         continue
                     result = reward.compute_score("<answer>A</answer>", "B", extra)
                     self.assertEqual(result["acc"], expected)

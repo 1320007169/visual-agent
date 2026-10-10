@@ -117,16 +117,8 @@ def compute_reward(data: DataProto, reward_fn):
     Returns:
         Tuple of reward tensor and extra info dictionary.
     """
-    try:
-        reward_result = reward_fn(data, return_dict=True)
-        reward_tensor = reward_result["reward_tensor"]
-        reward_extra_infos_dict = reward_result["reward_extra_info"]
-    except Exception as e:
-        print(f"Error in reward_fn: {e}")
-        reward_tensor = reward_fn(data)
-        reward_extra_infos_dict = {}
-
-    return reward_tensor, reward_extra_infos_dict
+    reward_result = reward_fn(data, return_dict=True)
+    return reward_result["reward_tensor"], reward_result.get("reward_extra_info", {})
 
 
 @ray.remote(num_cpus=1)
